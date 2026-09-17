@@ -149,7 +149,19 @@ export const DEFAULT_REDLIGHT_TUNABLES: RedLightTunables = {
   exitRatio: 0.55,
   quietMult: 2.4,
   quietCeiling: 1.9,
-  graceSec: 0.4,
+  // 0.4 -> 0.55.
+  //
+  // The 400ms figure came from testing ONE red transition in isolation. Over a
+  // full round with 10+ transitions you only have to be slow once, and a
+  // measured reaction sweep put the real survive/eliminate cliff at 400-500ms,
+  // not the 500-600ms the docs claimed. A simple visual reaction is ~250ms
+  // before you add "recognise the light changed" and "stop a moving body" — in
+  // a loud hall, plenty of first-timers land past 500ms.
+  //
+  // Widening this only affects stopping in time. It does NOT make creeping
+  // easier, because progress is measured as motion ABOVE the elimination
+  // threshold, so anything quiet enough to survive is too quiet to gain ground.
+  graceSec: 0.55,
   breachSec: 0.12,
   driveSpan: 1.5,
   advanceRate: 6,

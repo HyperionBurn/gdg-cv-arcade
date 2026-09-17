@@ -387,7 +387,20 @@ export class FruitNinjaGame extends GameBase {
     const { v } = fc;
     const chain = fruit.length;
 
-    const combo = (this.combo[slot] ?? 0) + 1;
+    // COMBO COUNTS MULTI-CUTS, NOT SLICES.
+    //
+    // It used to increment on every slice, and with a 700ms window that is
+    // trivially easy to keep alive by mashing. Measured over full rounds:
+    // narrow-fast spam scored 225 against 390 for deliberate wide slicing —
+    // and at the combo cap a single fruit was worth 55 against 75 for a
+    // 2-chain, so mindless mashing earned ~75% of what the "impressive move"
+    // earned. The thing the game is supposed to reward was barely rewarded.
+    //
+    // Now only a genuine chain (2+ fruit in one swipe) raises the combo. A
+    // single slice still REFRESHES the window, so a good run is not punished
+    // for the occasional lone fruit — it just does not climb.
+    const prevCombo = this.combo[slot] ?? 0;
+    const combo = chain >= 2 ? prevCombo + 1 : prevCombo;
     this.combo[slot] = combo;
     this.lastSliceAt[slot] = fc.now;
     this.sliced[slot] = (this.sliced[slot] ?? 0) + chain;

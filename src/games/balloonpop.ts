@@ -158,8 +158,23 @@ export class BalloonPopGame extends GameBase {
       b.x += b.vx * dt + Math.sin(b.phase) * v.width * 0.02 * dt;
       b.squash = Math.max(0, b.squash - dt * 4);
 
-      // Drifting off the top is not a failure — nothing is. It just leaves.
-      if (b.y + b.r < -v.height * 0.05) this.balloons.splice(i, 1);
+      if (b.y + b.r < -v.height * 0.05) {
+        // A balloon that was LIVE and escaped unpopped breaks the streak.
+        //
+        // Without this there is no code path that resets it, so "14 STREAK" on
+        // the HUD was really "14 pops so far" wearing a streak's clothes — the
+        // number could never go down, which makes it meaningless as tension.
+        //
+        // Deliberately only counts balloons that were armed (above the player's
+        // shoulder line). One that drifts past while still grey was never
+        // poppable, so missing it is not a miss, and this game's whole promise
+        // is that there is no fail state. Losing a streak is not failing — it
+        // is the only thing that makes keeping one worth anything.
+        if (b.y + b.r < (this.armLine[b.slot] ?? 0)) {
+          this.streak[b.slot] = 0;
+        }
+        this.balloons.splice(i, 1);
+      }
     }
 
     this.resolvePops(fc, blades);

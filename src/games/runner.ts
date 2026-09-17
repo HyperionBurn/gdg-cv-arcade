@@ -131,7 +131,6 @@ const NEAR_TIME_WINDOW = 0.22; // seconds of margin that still counts as close
 const NEAR_LATERAL_WINDOW = 0.9; // metres of gap that still counts as close
 const NEAR_MIN_CLOSENESS = 0.16;
 const NEAR_MAX_BONUS = 12; // metres
-const NEAR_MULT_PER_STREAK = 0.12;
 
 /**
  * What a collision says. PLAN.md: "failure should be funny, never punishing" —
@@ -572,9 +571,23 @@ export class RunnerGame extends GameBase {
     const closeness = row.closeness;
     if (closeness < NEAR_MIN_CLOSENESS) return; // cleared it, but with room
 
+    // NEAR-MISS PAYS A FLAT BONUS, NOT A STREAK-MULTIPLIED ONE.
+    //
+    // It used to multiply by the same streak that already rewards clean play,
+    // reaching ~29m per near-miss at the cap — against obstacle gaps of only
+    // 17-42m. So one late clear was worth almost a whole gap of running.
+    //
+    // And the risk was fake: the generator GUARANTEES every obstacle is
+    // clearable with margin, so a player good enough never to miss loses
+    // nothing by always cutting it late. Measured: a bot with a 0.35s lead
+    // scored 644 against 598 for a 1.0s lead, while taking the same hits.
+    // "Cut it fine" should be a trade, not free money on top of a bonus you
+    // are already being paid.
+    //
+    // Flat, and capped well below a gap, so it flavours the run instead of
+    // dominating the score.
     this.nearMisses++;
-    const mult = this.nearMultiplier();
-    const gained = NEAR_MAX_BONUS * closeness * mult;
+    const gained = NEAR_MAX_BONUS * closeness;
     this.bonus += gained;
 
     const { v } = fc;
@@ -603,10 +616,6 @@ export class RunnerGame extends GameBase {
   private momentum(): number {
     const boost = Math.min(STREAK_CAP, this.streak) * MOMENTUM_PER_STREAK;
     return Math.max(MOMENTUM_FLOOR, Math.min(MOMENTUM_MAX, 1 + boost - this.penalty));
-  }
-
-  private nearMultiplier(): number {
-    return 1 + Math.min(STREAK_CAP, this.streak) * NEAR_MULT_PER_STREAK;
   }
 
   private onHit(fc: FrameContext, row: TrackRow, kind: ObstacleKind): void {

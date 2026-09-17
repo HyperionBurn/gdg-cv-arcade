@@ -175,7 +175,21 @@ const MATCH_FLOOR = Math.cos(MATCH_TOLERANCE_DEG * DEG);
  * Tuned against the simulator. Re-tune on real bodies at the Sept 22 playtest
  * (PLAN.md §8), where it should be expected to want to go LOWER, not higher.
  */
-export const PASS_THRESHOLD = 0.72;
+/**
+ * 0.72 -> 0.66.
+ *
+ * 0.72 left only 0.069 of headroom over the worst confusable pose pair
+ * (GOALPOST/FLEX at 0.651) — the tightest safety margin of any constant here,
+ * and tuned entirely against a noiseless simulator. Real MediaPipe jitter pulls
+ * live scores DOWN, so the error that actually happens at a stall is a correct
+ * pose being rejected, not a wrong one being accepted.
+ *
+ * A player who hit the pose and was told they missed will not try again. A
+ * player who scraped through on a sloppy one has a nice time. The asymmetry is
+ * not close, so this errs generous — and it is live-tunable if the Sept 22
+ * playtest shows walls opening for nothing.
+ */
+export const PASS_THRESHOLD = 0.66;
 
 /**
  * Live pass threshold.
