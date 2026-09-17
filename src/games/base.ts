@@ -843,7 +843,22 @@ export abstract class GameBase implements Screen {
   /* ---------------- HUD ---------------- */
 
   protected slotRect(v: FrameContext['v'], slot: number): SlotRect {
-    if (this.playerCount < 2) return { x: 0, y: 0, width: v.width, height: v.height, centerX: v.width / 2 };
+    if (this.playerCount < 2) {
+      return { x: 0, y: 0, width: v.width, height: v.height, centerX: v.width / 2 };
+    }
+
+    // Party games share one screen — there are no per-player columns to carve,
+    // so every slot gets the full width and the game draws its own lanes.
+    //
+    // Previously this hardcoded two halves and returned the RIGHT half for every
+    // slot >= 1. Invisible today only because Red Light's primaryStat ignores
+    // the slot and redraws an identical string on top of itself six times; the
+    // moment a 3+ player game drew anything slot-specific it would have stacked
+    // unreadable garbage in one spot.
+    if (this.config.partyMode) {
+      return { x: 0, y: 0, width: v.width, height: v.height, centerX: v.width / 2 };
+    }
+
     const half = v.width / 2;
     const x = slot === 0 ? 0 : half;
     return { x, y: 0, width: half, height: v.height, centerX: x + half / 2 };
@@ -880,7 +895,9 @@ export abstract class GameBase implements Screen {
       weight: 700,
           });
 
-    for (let slot = 0; slot < this.playerCount; slot++) {
+    // Party games have one shared HUD, not one per player.
+    const hudSlots = this.config.partyMode ? 1 : this.playerCount;
+    for (let slot = 0; slot < hudSlots; slot++) {
       const rect = this.slotRect(v, slot);
       const color = this.playerCount > 1 ? PLAYER_COLORS[slot]! : this.config.color;
 

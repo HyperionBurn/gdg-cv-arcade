@@ -80,6 +80,7 @@ import {
   TRACK,
   WEIGHT,
 } from '../shell/theme';
+import { GAME_COLORS } from '../meta/games';
 import { leaderboard } from '../meta/leaderboard';
 import type { FrameContext } from '../shell/screen';
 
@@ -210,7 +211,7 @@ export class PoseMatchGame extends GameBase {
       visionMode: 'pose',
       maxPlayers: 2,
       roundSeconds: 60,
-      color: COLORS.blue,
+      color: GAME_COLORS.posematch,
       supportsVersus: true,
     });
   }

@@ -82,6 +82,7 @@ import {
   WEIGHT,
   idlePulse,
 } from '../shell/theme';
+import { GAME_COLORS } from '../meta/games';
 import type { FrameContext } from '../shell/screen';
 
 /**
@@ -241,7 +242,7 @@ export class RedLightGame extends GameBase {
       visionMode: 'pose',
       maxPlayers: LANES,
       roundSeconds: 45,
-      color: COLORS.green,
+      color: GAME_COLORS.redlight,
       // Not a split-screen duel. Six people share one screen and one set of
       // lanes, so the base's versus layout would be actively wrong here.
       supportsVersus: false,
@@ -695,14 +696,30 @@ export class RedLightGame extends GameBase {
     this.juice.hitStop(90);
     this.juice.chromatic(0.8);
     BURST.splat(this.particles, x, y, COLORS.red, 1.6);
+    // Taunt sits INSIDE its own lane, not 0.55 lane-heights above it.
+    //
+    // At 1-2 players the lanes are tall and a fixed fraction looked fine. At 5-6
+    // — which is this game's headline and the case a crowd actually produces —
+    // the lanes compress and every taunt landed on the track of the lane above.
+    // Verified with a simulated six-player mass elimination: all six overlapped.
+    //
+    // Clamped so it can never cross the lane boundary, whatever the count.
+    // SIZE scales with the lane too, not just position.
+    //
+    // Clamping the vertical offset alone was not enough: at six lanes the taunt
+    // was still set at 4.2vh, which is taller than a lane, so it overflowed into
+    // its neighbours no matter where it was anchored. Verified with a six-player
+    // mass elimination — all six overlapped even after the position clamp.
+    const tauntSize = Math.min(vh(fc.v, 4.2), g.h * 0.62);
+    const tauntLift = Math.max(0, Math.min(g.h * 0.55, g.h * 0.5 - tauntSize * 0.5));
     this.popups.spawn(
       TAUNTS[Math.floor(Math.random() * TAUNTS.length)] ?? 'OUT!',
       x,
-      y - g.h * 0.55,
+      y - tauntLift,
       // `redBright` only ever existed to make the brand hex work as neon on
       // black. There is no neon; it is the flat brand red and nothing else.
       COLORS.red,
-      vh(fc.v, 4.2),
+      tauntSize,
       1.3
     );
   }

@@ -72,6 +72,7 @@ import {
   WEIGHT,
   idlePulse,
 } from '../shell/theme';
+import { GAME_COLORS } from '../meta/games';
 import { leaderboard } from '../meta/leaderboard';
 import type { FrameContext } from '../shell/screen';
 import {
@@ -187,7 +188,7 @@ export class RunnerGame extends GameBase {
       visionMode: 'pose',
       maxPlayers: 1,
       roundSeconds: 60,
-      color: COLORS.blue,
+      color: GAME_COLORS.runner,
       supportsVersus: false,
       // 3D camera: a camera-space ghost skeleton would straddle the track.
       // The ghost still races through the score line.

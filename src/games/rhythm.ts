@@ -94,6 +94,7 @@ import {
   GRID_STEP,
   EASE,
 } from '../shell/theme';
+import { GAME_COLORS } from '../meta/games';
 import type { FrameContext } from '../shell/screen';
 
 /* ------------------------------------------------------------------ */
@@ -406,7 +407,7 @@ export class RhythmGame extends GameBase {
       roundSeconds: 60,
       // Yellow is the brand's "action" colour and the game's chrome colour.
       // It never appears in the playfield, which is reserved for blue and red.
-      color: COLORS.yellow,
+      color: GAME_COLORS.rhythm,
       supportsVersus: true,
     });
   }

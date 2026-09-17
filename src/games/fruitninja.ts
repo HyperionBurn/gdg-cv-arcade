@@ -43,6 +43,7 @@ import {
 } from '../engine/draw';
 import type { Viewport } from '../engine/draw';
 import { COLORS, FONTS, SHADOW, STROKE, TRACK, WEIGHT } from '../shell/theme';
+import { GAME_COLORS } from '../meta/games';
 import type { FrameContext } from '../shell/screen';
 
 type BodyKind = 'fruit' | 'bomb';
@@ -116,7 +117,7 @@ export class FruitNinjaGame extends GameBase {
       visionMode: 'pose',
       maxPlayers: 2,
       roundSeconds: 45,
-      color: COLORS.green,
+      color: GAME_COLORS.fruitninja,
       supportsVersus: true,
     });
   }

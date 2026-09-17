@@ -43,6 +43,7 @@ import {
 } from '../engine/draw';
 import type { Viewport } from '../engine/draw';
 import { COLORS, PLAYER_COLORS, FONTS, SHADOW, STROKE, TRACK, WEIGHT } from '../shell/theme';
+import { GAME_COLORS } from '../meta/games';
 import type { FrameContext } from '../shell/screen';
 
 interface Balloon {
@@ -111,7 +112,7 @@ export class BalloonPopGame extends GameBase {
       visionMode: 'pose',
       maxPlayers: 2,
       roundSeconds: 30,
-      color: COLORS.blue,
+      color: GAME_COLORS.balloonpop,
       supportsVersus: true,
     });
   }

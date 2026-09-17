@@ -142,8 +142,8 @@ Red Light 0.98ms · Pose Match 0.49ms · Fruit Ninja 3.52ms per frame.
 | **Red Light, Green Light** | playable, up to 6, with lobby |
 | **Pose Match** | playable 1P/2P, 12 poses |
 | **Runner** | playable, 3D, **conditional — see go/no-go below** |
-| Rhythm Punch | not started |
-| Tournament bracket, ghosts, highlight clips, operator console | not started |
+| **Rhythm Punch** | playable 1P/2P, generated beat maps |
+| Tournament bracket, ghosts, highlight clips, operator console | done |
 | Photobooth | deferred |
 
 ### Verified in the simulator

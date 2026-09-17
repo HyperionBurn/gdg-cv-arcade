@@ -36,6 +36,7 @@
 import { camera, type CameraDevice } from '../core/camera';
 import { vision } from '../core/vision';
 import { PoseTracker } from '../core/tracker';
+import { isSimEnabled } from '../core/simulator';
 import {
   RepCounter,
   VerticalGestures,
@@ -92,7 +93,13 @@ export class RigCheckScreen implements Screen {
     this.panel.className = 'rig-panel';
     root.appendChild(this.panel);
 
-    await vision.start({ mode: 'pose', numPoses: 2, poseModel: 'lite' });
+    // Guarded like every other vision consumer. Without this the screen hangs
+    // on <STARTING CAMERA> forever under ?sim=1, where there is no camera to
+    // start — which made the Sept 18 camera-test tool the one screen nobody
+    // could exercise in development.
+    if (!isSimEnabled()) {
+      await vision.start({ mode: 'pose', numPoses: 2, poseModel: 'lite' });
+    }
 
     this.devices = await camera.listDevices();
     this.renderPanel();
@@ -300,7 +307,10 @@ export class RigCheckScreen implements Screen {
       return;
     }
 
-    if (cam.status !== 'live') {
+    // In sim mode there is no camera to go live, but the synthetic skeleton and
+    // every gesture readout still work — which is the whole point of being able
+    // to develop this screen without hardware.
+    if (cam.status !== 'live' && !isSimEnabled()) {
       drawText(ctx, '<STARTING CAMERA>', v.width / 2, v.height / 2, {
         size: vh(v, 4),
         color: COLORS.ink,

@@ -68,6 +68,7 @@ import {
   WEIGHT,
   dur,
   factionColor,
+  textColor,
   ramp,
   idlePulse,
   prefersReducedMotion,
@@ -763,7 +764,9 @@ export class AttractScreen implements Screen {
 
     drawText(ctx, tile.title, cx, y + vh(v, 10.6), {
       size: fitText(ctx, tile.title, w - pad * 2, vh(v, TYPE.heading)),
-      color: tile.color,
+      // Same rule: the Runner tile is yellow, so its rail heading was
+        // invisible once per cycle.
+        color: textColor(tile.color),
       weight: WEIGHT.black,
       shadow: vh(v, SHADOW.base),
       letterSpacing: TRACK.h1,
@@ -885,7 +888,9 @@ export class AttractScreen implements Screen {
       // being first and from carrying the hard shadow.
       drawTabularNumber(ctx, part, cursor, rowY, {
         size,
-        color: scored ? entry.color : COLORS.muted,
+        // THE YELLOW RULE: a faction colour can be flat yellow, which is
+      // ~1.7:1 on paper and simply gone at 3m. textColor() falls back to ink.
+      color: scored ? textColor(entry.color) : COLORS.muted,
         font: FONTS.body,
         weight: WEIGHT.black,
         align: 'left',

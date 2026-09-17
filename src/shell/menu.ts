@@ -54,6 +54,7 @@ import {
   idlePulse,
   ramp,
 } from './theme';
+import { GAME_COLORS } from '../meta/games';
 import { DWELL, HoverCursor, type HoverTarget } from './hover';
 import { router } from './router';
 import type { FrameContext, Screen } from './screen';
@@ -87,49 +88,49 @@ export const MENU_TILES: readonly MenuTile[] = [
     id: 'sixtyseven',
     title: '67 SPEED DUEL',
     blurb: 'PUMP BOTH ARMS AS FAST AS YOU CAN',
-    color: COLORS.blue,
+    color: GAME_COLORS.sixtyseven,
     enabled: true,
   },
   {
     id: 'fruitninja',
     title: 'FRUIT NINJA',
     blurb: 'SWIPE YOUR HANDS TO SLICE',
-    color: COLORS.red,
+    color: GAME_COLORS.fruitninja,
     enabled: true,
   },
   {
     id: 'redlight',
     title: 'RED LIGHT',
     blurb: 'MOVE ON GREEN, FREEZE ON RED',
-    color: COLORS.green,
+    color: GAME_COLORS.redlight,
     enabled: true,
   },
   {
     id: 'runner',
     title: 'NEON RUNNER',
     blurb: 'STEP, JUMP AND DUCK DOWN THE TRACK',
-    color: COLORS.yellow,
+    color: GAME_COLORS.runner,
     enabled: true,
   },
   {
     id: 'posematch',
     title: 'HOLE IN THE WALL',
     blurb: 'MATCH THE SHAPE BEFORE IT HITS YOU',
-    color: COLORS.blueBright,
+    color: GAME_COLORS.posematch,
     enabled: true,
   },
   {
     id: 'rhythm',
     title: 'RHYTHM PUNCH',
     blurb: 'PUNCH THE TARGETS ON THE BEAT',
-    color: COLORS.redBright,
+    color: GAME_COLORS.rhythm,
     enabled: true,
   },
   {
     id: 'balloonpop',
     title: 'BALLOON POP',
     blurb: 'POP THE BALLOONS WITH YOUR HANDS',
-    color: COLORS.greenBright,
+    color: GAME_COLORS.balloonpop,
     enabled: true,
   },
 ];
