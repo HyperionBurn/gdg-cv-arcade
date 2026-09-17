@@ -1,0 +1,927 @@
+/* Kiosk chrome. Everything player-facing is drawn on the canvas; this file
+   only handles the page shell and the diagnostic panels. */
+
+/*
+ * Archivo, and only Archivo.
+ *
+ * gdg-resources/design/DESIGN.md: "Archivo exclusively (fallbacks: Helvetica
+ * Neue, Arial)... No other typefaces." Weights map to the brand's type roles:
+ * 900 Black for display/headings/numbers, 800 ExtraBold for H2, 700 Bold for
+ * pill labels, 500 Medium for body.
+ */
+@font-face {
+  font-family: 'Archivo';
+  src: url('/fonts/Archivo-Black.woff2') format('woff2');
+  font-weight: 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Archivo';
+  src: url('/fonts/Archivo-ExtraBold.woff2') format('woff2');
+  font-weight: 800;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Archivo';
+  src: url('/fonts/Archivo-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Archivo';
+  src: url('/fonts/Archivo-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-display: swap;
+}
+
+:root {
+  /* Exact tokens from gdg-resources/kit/css/tokens.css. */
+  --paper: #ffffff;
+  --ink: #111111;
+  --grid-line: #ececec;
+  --muted: #bdbdbd;
+  --yellow: #fbbc04; /* action, 1st place */
+  --blue: #4285f4;   /* info, focus, 2nd place */
+  --green: #34a853;  /* success */
+  --red: #ea4335;    /* error, 3rd place */
+
+  /* Hard shadow. DESIGN.md: "Shadows are hard and point straight down." */
+  --shadow: 0 5px 0 var(--ink);
+  --shadow-hover: 0 7px 0 var(--ink);
+  --stroke: 3px;
+  --stroke-thin: 2px;
+  --radius-pill: 999px;
+  --radius-card: 28px;
+  --radius-inner: 18px;
+
+  /* Aliases so existing rules keep resolving during the conversion. */
+  --bg: var(--paper);
+  --bg-raised: var(--paper);
+  --text: var(--ink);
+  --text-dim: #555555;
+  --text-faint: var(--muted);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  /* Nobody touches this screen. Stops accidental text selection and the
+     iOS-style callout if anyone does. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+}
+
+#stage {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+#overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+#overlay > * {
+  pointer-events: auto;
+}
+
+/* Hidden by default — this is a kiosk. Shown only on the diagnostic screens
+   and when the operator console is open. */
+body.kiosk {
+  cursor: none;
+}
+
+/* ---------------------------------------------------------------- */
+/* Rig check panel                                                   */
+/* ---------------------------------------------------------------- */
+
+.rig-panel {
+  /* The last dark surface in the app. A translucent blurred dark panel is
+     three brand violations at once (see-through, blurred, and dark on paper),
+     and it sat beside a white canvas looking like a different product. */
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 300px;
+  padding: 16px;
+  background: var(--paper);
+  border: var(--stroke) solid var(--ink);
+  border-radius: var(--radius-inner);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+
+.rig-panel strong {
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 15px;
+  letter-spacing: 0.06em;
+}
+
+.rig-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.rig-row label {
+  flex: 0 0 90px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.rig-row select,
+.rig-row button {
+  flex: 1;
+  padding: 7px 10px;
+  background: var(--paper);
+  color: var(--ink);
+  border: var(--stroke-thin) solid var(--ink);
+  border-radius: var(--radius-pill);
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.rig-row select:hover,
+.rig-row button:hover {
+  background: var(--yellow);
+}
+
+.rig-row select:focus-visible,
+.rig-row button:focus-visible {
+  outline: var(--stroke) solid var(--blue);
+  outline-offset: 4px;
+}
+
+.rig-panel hr {
+  border: none;
+  border-top: var(--stroke-thin) solid var(--grid-line);
+  margin: 12px 0;
+}
+
+.rig-stat {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.rig-stat span {
+  color: var(--muted);
+}
+
+.rig-stat b {
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.rig-note {
+  color: #555555;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.rig-note b {
+  /* Green on paper is 2.8:1 — below the floor. Ink on a green surface instead. */
+  background: var(--green);
+  color: var(--paper);
+  padding: 1px 5px;
+  border-radius: var(--radius-pill);
+  font-weight: 800;
+}
+
+/* ---------------------------------------------------------------- */
+/* Boot / fatal states                                               */
+/* ---------------------------------------------------------------- */
+
+.boot {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  text-align: center;
+  padding: 40px;
+}
+
+.boot h1 {
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 40px;
+  letter-spacing: 0.02em;
+}
+
+.boot p {
+  color: var(--text-dim);
+  max-width: 540px;
+  line-height: 1.6;
+}
+
+.boot button {
+  padding: 14px 32px;
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  background: var(--yellow);
+  border: var(--stroke) solid var(--ink);
+  border-radius: var(--radius-pill);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+
+.boot button:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-hover);
+}
+
+.boot .err {
+  color: var(--red);
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+
+/* ---------------------------------------------------------------- */
+/* Operator console (shell/operator.ts)                              */
+/*                                                                   */
+/* Read at arm's length by one stressed marshal with a queue          */
+/* watching, not from 3m by a player — so this is the one surface in  */
+/* the app sized in px rather than vh. Big targets, high contrast,    */
+/* and everything that matters during a failure stays visible without */
+/* switching tabs.                                                   */
+/* ---------------------------------------------------------------- */
+
+.op-root {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  /* Kiosk mode hides the cursor on <body>; the operator needs it back. */
+  cursor: default;
+}
+
+.op-root[hidden] {
+  display: none;
+}
+
+body.op-open {
+  cursor: default;
+}
+
+.op-scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(4, 6, 10, 0.72);
+  backdrop-filter: blur(3px);
+}
+
+.op-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(1180px, 96vw);
+  margin: 2vh auto;
+  max-height: 96vh;
+  background: var(--bg-raised);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 14px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+
+/* ---- header ---- */
+
+.op-head-wrap {
+  flex: 0 0 auto;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.op-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 12px 16px;
+}
+
+.op-brand {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+}
+
+.op-brand-main {
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--yellow);
+}
+
+.op-brand-sub {
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--text-faint);
+}
+
+.op-live {
+  flex: 1 1 260px;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.op-chip {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 9px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.op-chip-k {
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  color: var(--text-faint);
+}
+
+.op-chip-v {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.op-chip-good .op-chip-v {
+  color: var(--green);
+}
+
+.op-chip-warn .op-chip-v {
+  color: var(--yellow);
+}
+
+.op-chip-bad {
+  border-color: rgba(234, 67, 53, 0.55);
+  background: rgba(234, 67, 53, 0.12);
+}
+
+.op-chip-bad .op-chip-v {
+  color: var(--red);
+}
+
+.op-head-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 10px;
+}
+
+.op-panicbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 16px;
+  background: rgba(234, 67, 53, 0.18);
+  border-top: 1px solid rgba(234, 67, 53, 0.5);
+  color: var(--red);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.op-panicbar[hidden] {
+  display: none;
+}
+
+/* ---- buttons ---- */
+
+.op-btn {
+  padding: 11px 18px;
+  min-height: 44px;
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.op-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+  border-color: var(--blue);
+}
+
+.op-btn-primary {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #0b0e14;
+}
+
+.op-btn-panic {
+  background: var(--red);
+  border-color: var(--red);
+  color: #ffffff;
+  font-size: 15px;
+  padding: 11px 28px;
+}
+
+.op-btn-panic:hover {
+  filter: brightness(1.15);
+  background: var(--red);
+  border-color: #ffffff;
+}
+
+.op-btn-recover {
+  background: var(--green);
+  border-color: var(--green);
+  color: #0b0e14;
+}
+
+.op-btn-danger {
+  border-color: rgba(234, 67, 53, 0.55);
+  color: var(--red);
+}
+
+.op-btn.op-armed,
+.op-mini.op-armed {
+  background: var(--red);
+  border-color: #ffffff;
+  color: #ffffff;
+  animation: op-pulse 0.7s ease-in-out infinite alternate;
+}
+
+@keyframes op-pulse {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.62;
+  }
+}
+
+.op-mini {
+  padding: 5px 10px;
+  min-height: 28px;
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.op-mini:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.op-mini-danger {
+  color: var(--red);
+  border-color: rgba(234, 67, 53, 0.4);
+}
+
+/* ---- tabs ---- */
+
+.op-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.op-tab {
+  flex: 1 1 0;
+  padding: 16px 12px;
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--text-faint);
+  background: transparent;
+  border: none;
+  border-bottom: 3px solid transparent;
+  cursor: pointer;
+}
+
+.op-tab:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.op-tab-on {
+  color: var(--text);
+  border-bottom-color: var(--blue);
+  background: rgba(66, 133, 244, 0.12);
+}
+
+/* ---- body ---- */
+
+.op-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 18px;
+}
+
+.op-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.op-panebar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.op-hint {
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.55;
+  max-width: 80ch;
+}
+
+.op-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.op-row-danger {
+  padding-top: 12px;
+  border-top: 1px solid rgba(234, 67, 53, 0.3);
+}
+
+.op-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.op-group-title {
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--yellow);
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.op-empty {
+  color: var(--text-faint);
+  font-size: 13px;
+  padding: 12px 0;
+}
+
+/* ---- tunable rows ---- */
+
+.op-tune {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-left: 3px solid transparent;
+}
+
+.op-tune.op-changed {
+  border-left-color: var(--yellow);
+  background: rgba(251, 188, 4, 0.07);
+}
+
+.op-tune-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.op-tune-label {
+  flex: 1 1 auto;
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.op-tune-val {
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--blue);
+}
+
+.op-changed .op-tune-val {
+  color: var(--yellow);
+}
+
+.op-slider {
+  display: block;
+  width: 100%;
+  height: 30px;
+  cursor: pointer;
+  accent-color: var(--blue);
+}
+
+.op-changed .op-slider {
+  accent-color: var(--yellow);
+}
+
+.op-tune-scale {
+  display: flex;
+  justify-content: space-between;
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  color: var(--text-faint);
+  margin-bottom: 6px;
+}
+
+.op-tune-key {
+  color: rgba(154, 164, 178, 0.55);
+}
+
+.op-tune-desc {
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+  max-width: 88ch;
+}
+
+.op-tune-desc.op-inferred {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+/* ---- key/value blocks ---- */
+
+.op-kv {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.op-kv-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 14px;
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
+}
+
+.op-kv-row:nth-child(odd) {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.op-kv-row span {
+  color: var(--text-faint);
+  letter-spacing: 0.06em;
+}
+
+.op-kv-row b {
+  color: var(--text);
+  font-weight: 500;
+  text-align: right;
+}
+
+.op-select {
+  flex: 1 1 260px;
+  min-height: 44px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+/* ---- leaderboard moderation ---- */
+
+.op-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.op-pick {
+  padding: 10px 14px;
+  min-height: 42px;
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.op-pick:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.13);
+}
+
+.op-pick-on {
+  color: #0b0e14;
+  background: var(--blue);
+  border-color: var(--blue);
+}
+
+.op-board {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.op-entry {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 8px 14px;
+}
+
+.op-entry:nth-child(odd) {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.op-entry-rank {
+  flex: 0 0 44px;
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.op-entry-initials {
+  flex: 0 0 60px;
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.op-entry-score {
+  flex: 0 0 90px;
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-size: 16px;
+  color: var(--blue);
+}
+
+.op-entry-faction {
+  flex: 1 1 auto;
+  font-size: 11.5px;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+.op-entry-time {
+  flex: 0 0 auto;
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* ---- analytics ---- */
+
+.op-hero {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+
+.op-hero-n {
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 52px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--green);
+}
+
+.op-hero-l {
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  color: var(--text-faint);
+}
+
+.op-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.op-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.op-bar-l {
+  flex: 0 1 170px;
+  min-width: 90px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.op-bar-track {
+  flex: 1 1 auto;
+  height: 16px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.op-bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--blue);
+}
+
+.op-bar-fill-alt {
+  background: var(--green);
+}
+
+.op-bar-n {
+  flex: 0 0 60px;
+  text-align: right;
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+
+/* ---- footer ---- */
+
+.op-foot {
+  flex: 0 0 auto;
+  padding: 10px 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: var(--text-faint);
+  letter-spacing: 0.04em;
+}

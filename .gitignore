@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+.vite/
+
+# Fetched at setup time, not source.
+#
+# `npm run setup` reproduces all three (scripts/fetch-models.mjs and
+# scripts/fetch-fonts.mjs). Together they are ~55MB of binaries that would
+# otherwise be committed, and they change only when the pinned versions do.
+#
+# THEY ARE STILL REQUIRED AT RUNTIME. PLAN.md §1: zero network calls at the
+# stall, because venue wifi will fail — so everything is served from disk.
+# A fresh clone MUST run `npm run setup` before the app will start.
+public/models/
+public/wasm/
+public/fonts/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Local overrides
+.env
+.env.local
