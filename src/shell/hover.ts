@@ -91,6 +91,41 @@ const HAND_SWAP_MARGIN = 0.18;
 const WRIST_MIN_VISIBILITY = 0.35;
 
 /**
+ * THE RAISED-HAND GATE.
+ *
+ * Wrist height relative to the shoulder line, in torso heights, that counts as
+ * "pointing". Positive is BELOW the shoulder (screen y grows downward).
+ *
+ * Without this, a person standing with their arms at their sides still produced
+ * a live, dwell-eligible cursor: the reach box mapped all the way down to
+ * `REACH_DOWN` (1.05 torsos below the shoulder), which IS hip height, which is
+ * exactly where a relaxed arm hangs. Measured on the menu with a body making no
+ * gesture at all — dwell climbed 0.25 -> 0.53 -> 0.81 and LAUNCHED A GAME in
+ * under two seconds.
+ *
+ * That is the worst possible failure at a stall: the person it happens to is by
+ * definition the one hesitating because they have not understood the interface
+ * yet, and the machine responds by shoving them into a 60-second round in front
+ * of their friends for no visible reason.
+ *
+ * Hysteresis so a wrist hovering near the boundary cannot flicker the cursor
+ * in and out.
+ */
+const RAISE_GATE_ENTER = 0.35;
+const RAISE_GATE_EXIT = 0.6;
+
+/**
+ * Dwell is ignored for this long after the cursor is (re)acquired.
+ *
+ * The One Euro filter and the body-scale estimate both need a moment to settle,
+ * and during that settle the cursor visibly sweeps across the screen from
+ * wherever it was. Measured: it crossed two unrelated tiles and accumulated up
+ * to 0.36 progress on one of them before arriving at the intended target. A
+ * sweep is not an intention, so it must not be able to select anything.
+ */
+const SETTLE_GRACE_SEC = 0.45;
+
+/**
  * Hysteresis on target containment, in vh. You must be INSIDE a target to
  * acquire it, but only inside this padded rect to keep it. A bare rect test
  * cancels the dwell on a single noisy frame at the boundary.
@@ -169,6 +204,12 @@ export class HoverCursor {
   private fy = new OneEuro({ ...FILTER_PRESETS.handPrecise });
 
   private side: 'left' | 'right' = 'right';
+  /** True while a wrist is raised past the gate. Hysteretic. */
+  private raised = false;
+  /** fc.time when the cursor last became live, for the settle grace. */
+  private acquiredAt = -Infinity;
+  /** Set when something teleported the cursor; update() restamps the grace. */
+  private needsResettle = false;
   private hoveredId: string | null = null;
   private progress = 0;
 
@@ -240,6 +281,15 @@ export class HoverCursor {
       return this.state;
     }
 
+    // Transition from absent to present starts the settle grace.
+    if (!this.state.present || this.needsResettle) {
+      this.needsResettle = false;
+      this.acquiredAt = fc.time;
+      this.progress = 0;
+      this.hoveredId = null;
+      this.graceId = null;
+    }
+
     const x = point.x * fc.v.width;
     const y = point.y * fc.v.height;
     const pad = vh(fc.v, EXIT_PAD_VH);
@@ -286,8 +336,12 @@ export class HoverCursor {
       }
     }
 
+    // A cursor that has just appeared is still settling — the filter sweeps in
+    // from wherever it was, and a sweep is not an intention.
+    const settling = fc.time - this.acquiredAt < SETTLE_GRACE_SEC;
+
     const locked = !!hovered && hovered.enabled === false;
-    const canFill = !!hovered && !locked && this.latchedId !== hovered.id;
+    const canFill = !!hovered && !locked && !settling && this.latchedId !== hovered.id;
 
     let committed: string | null = null;
 
@@ -388,6 +442,12 @@ export class HoverCursor {
     const reachUp = tunables.get('hover.reachUp', REACH_UP);
     const reachDown = tunables.get('hover.reachDown', REACH_DOWN);
 
+    // THE RAISED-HAND GATE. An arm hanging at rest sits ~1.0 torso below the
+    // shoulder, which the reach box would otherwise map to a perfectly live
+    // cursor near the bottom of the screen. Require a deliberate raise.
+    this.raised = this.raised ? dy < RAISE_GATE_EXIT : dy < RAISE_GATE_ENTER;
+    if (!this.raised) return null;
+
     const rawX = 0.5 - dx / (2 * reachX);
     const rawY = (dy + reachUp) / (reachUp + reachDown);
 
@@ -402,6 +462,9 @@ export class HoverCursor {
   /** Swapping hands teleports the cursor, so cancel anything in flight. */
   private swapTo(side: 'left' | 'right'): void {
     this.side = side;
+    // A swap teleports the cursor across the screen; treat it as a fresh
+    // acquisition so the sweep cannot select anything on its way.
+    this.needsResettle = true;
     this.fx.reset();
     this.fy.reset();
     this.progress = 0;

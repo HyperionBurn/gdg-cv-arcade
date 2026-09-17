@@ -93,7 +93,7 @@ export const MENU_TILES: readonly MenuTile[] = [
   {
     id: 'fruitninja',
     title: 'FRUIT NINJA',
-    blurb: 'YOUR HANDS ARE THE BLADES',
+    blurb: 'SWIPE YOUR HANDS TO SLICE',
     color: COLORS.red,
     enabled: true,
   },
