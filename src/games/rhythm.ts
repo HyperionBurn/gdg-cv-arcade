@@ -704,6 +704,8 @@ export class RhythmGame extends GameBase {
     const wasArmed = rt.armed[slot] ?? true;
     let stillOutside = true;
     let landed = false;
+    /** Did we actually SEE the correct fist this frame? See below. */
+    let sawHand = false;
 
     for (const blade of blades) {
       if (this.playerCount > 1 && blade.slot !== slot) continue;
@@ -737,11 +739,24 @@ export class RhythmGame extends GameBase {
         continue;
       }
 
+      sawHand = true;
       if (Math.hypot(blade.x - target.x, blade.y - target.y) <= radius * 1.25) stillOutside = false;
       if (inWindow && swept <= radius && (wasArmed || blade.active)) landed = true;
     }
 
-    rt.armed[slot] = stillOutside;
+    // ONLY RE-ARM FROM A HAND WE ACTUALLY SAW.
+    //
+    // `blades` contains visible blades only, so a wrist that drops below the
+    // visibility threshold simply is not in the list — the loop never runs,
+    // `stillOutside` keeps its initial `true`, and the note re-arms. A parked
+    // fist that flickers therefore looks exactly like a fist that left the
+    // ring and came back, which is precisely what the anti-passive gate exists
+    // to detect.
+    //
+    // MEASURED with realistic dropouts: a player holding both fists still on
+    // the targets scored 140 points without moving. The gate was not merely
+    // weakened, it was inverted — dropouts were doing the punching.
+    if (sawHand) rt.armed[slot] = stillOutside;
 
     if (landed) {
       rt.status[slot] = 'hit';
