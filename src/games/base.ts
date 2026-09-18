@@ -435,6 +435,13 @@ export abstract class GameBase implements Screen {
       audio.play('record');
     } else {
       this.juice.impact(0.6, this.config.color);
+      // The non-record branch played nothing. That is roughly six rounds in
+      // seven landing on a silent screen, for the whole results window, right
+      // where the "N OFF THE BOARD" retry hook is supposed to land. Pitched off
+      // how well they placed, so a #2 sounds better than a #9 — and `land` is
+      // already the app's "that is settled" sound.
+      const placed = best?.rank.rank ?? null;
+      audio.play('land', placed === null ? 0.82 : 1.15 - Math.min(0.3, (placed - 1) * 0.035));
     }
   }
 

@@ -721,6 +721,11 @@ export class RhythmGame extends GameBase {
         // first mistake every new player makes.
         if (inWindow && swept <= radius && fc.time - (rt.wrongAt[slot] ?? -99) > 0.6) {
           rt.wrongAt[slot] = fc.time;
+          // Every other feedback moment in this file plays something. This one
+          // — the first mistake every new player makes, and the one the colour
+          // coding exists to prevent — was silent. Low and short: a nudge, not
+          // a buzzer, because the note is still live and still winnable.
+          audio.play('whiff', 0.8);
           this.popups.spawn(
             hand === 'left' ? '<LEFT!>' : '<RIGHT!>',
             target.x,

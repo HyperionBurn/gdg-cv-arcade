@@ -168,6 +168,8 @@ export class InitialsScreen implements Screen {
   private elapsed = 0;
   private awayTime = 0;
   private doneTime = 0;
+  /** Last whole second the auto-submit countdown sounded on. */
+  private lastDeadlineTick = -1;
   private result: RankResult | null = null;
   private submitted = false;
   private lastFrameId = -1;
@@ -879,6 +881,32 @@ export class InitialsScreen implements Screen {
       });
     }
 
+    // AGAINST YOUR OWN PREVIOUS RUN.
+    //
+    // `submit()` has always computed `personalBest` — the best score already on
+    // this board under these initials, measured before this entry is added —
+    // and nothing in the app ever read it. It costs nothing, it is the only
+    // number here that belongs to this player rather than to the room, and
+    // PLAN.md frames day two as "more competitive against day one", which is
+    // precisely a returning player typing the same three letters.
+    //
+    // Only appears for someone who has played this game under these initials
+    // before, so it is silent for the majority who have not.
+    if (r.personalBest !== null) {
+      const beat = this.score > r.personalBest;
+      const line = beat ? `BEAT YOUR ${r.personalBest}` : `YOUR BEST ${r.personalBest}`;
+      drawTabularNumber(ctx, line, v.width / 2, vh(v, 73.5), {
+        size: vh(v, TYPE.label),
+        color: COLORS.ink,
+        font: FONTS.body,
+        weight: WEIGHT.black,
+        letterSpacing: TRACK.number,
+        // Green hard shadow only when they actually beat it — the brand's way
+        // of colouring a moment without putting colour into the letterforms.
+        ...(beat ? { shadow: vh(v, SHADOW.base), shadowColor: COLORS.green } : {}),
+      });
+    }
+
     if (this.faction) {
       const line = `+${this.score.toLocaleString('en-US')} FOR ${this.faction}`;
       const size = Math.min(
@@ -887,11 +915,15 @@ export class InitialsScreen implements Screen {
       );
       const w = measureTabularNumber(ctx, line, size, WEIGHT.black, FONTS.body) + vh(v, SPACE.xl);
       const h = vh(v, 6.4);
-      stickerPill(ctx, v, (v.width - w) / 2, vh(v, 78) - h / 2, w, h, {
+      // 82, not 78: the personal-best line above needs clearance, and the
+      // deadline countdown does not start until 100 - SAFE - 5, so there is
+      // room. Verified on screen — at 78 the pill's top edge cut through
+      // "BEAT YOUR 180".
+      stickerPill(ctx, v, (v.width - w) / 2, vh(v, 82) - h / 2, w, h, {
         fill: COLORS.green,
         shadow: vh(v, SHADOW.base),
       });
-      drawTabularNumber(ctx, line, v.width / 2, vh(v, 78), {
+      drawTabularNumber(ctx, line, v.width / 2, vh(v, 82), {
         size,
         color: COLORS.ink,
         font: FONTS.body,
@@ -913,6 +945,15 @@ export class InitialsScreen implements Screen {
 
     const t = remaining / COUNTDOWN_VISIBLE_SEC;
     const urgent = remaining < 4;
+
+    // Tick the last few seconds, like the round countdown does. A red bar
+    // silently draining is the one warning in the app that asked a player to be
+    // watching the exact corner of the screen it happens to be in.
+    const secs = Math.ceil(remaining);
+    if (urgent && secs !== this.lastDeadlineTick) {
+      this.lastDeadlineTick = secs;
+      if (secs > 0) audio.play('tick', 1 + (4 - secs) * 0.12);
+    }
     const w = v.width * 0.4;
 
     progressBar(ctx, (v.width - w) / 2, vh(v, 100 - SAFE - 1.6), w, vh(v, 1.4), t, urgent ? COLORS.red : COLORS.blue);
