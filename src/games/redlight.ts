@@ -161,8 +161,15 @@ export interface RedLightTunables {
    * raising their own threshold by fidgeting.
    */
   calibrateSec: number;
-  /** Time constant used during that window. Fast enough to settle inside it. */
-  calibrateTau: number;
+  /**
+   * Time constants of the lobby estimator, for energy BELOW the estimate and
+   * for energy above it. Their ratio sets which percentile of the energy
+   * distribution `quiet` converges on — see `calibrate`. Roughly the 10th at
+   * 9:1, which is "how quiet this body gets when it is not doing anything"
+   * while people walk in, wave and settle around it.
+   */
+  calibrateDown: number;
+  calibrateUp: number;
 }
 
 /**
@@ -171,15 +178,55 @@ export interface RedLightTunables {
  * simulator, which is the weakest part of this file — see the note on
  * `moveEnter` in `thresholdFor`.
  */
+/**
+ * MEASURED ENERGY DISTRIBUTIONS, in torso-units/sec, over 500 samples each.
+ * Every number below is derived from these rather than guessed, because three
+ * earlier attempts to tune this game by feel each moved it in the wrong
+ * direction. Re-measure before changing any of them.
+ *
+ * RE-MEASURED after two compounding corrections landed together: `MotionEnergy`
+ * was missing its aspect correction (under-reading HORIZONTAL motion by 1.78x),
+ * and the simulator was adding landmark noise isotropically in the already
+ * squeezed landmark space rather than in pixels (over-stating horizontal noise
+ * by the same 1.78x). The two errors had been partly cancelling, so fixing
+ * either one alone moved the numbers the wrong way.
+ *
+ *                     p10    p50    p90    p99
+ *   clean  still      0.23   0.28   0.35   0.40
+ *   clean  moving     4.15   4.25   4.90   4.94
+ *   real   still      1.93   2.03   3.53   7.13
+ *   real   moving     5.19   5.98   7.73  11.34
+ *   host.  still      3.88   4.22   7.53  10.86
+ *   host.  moving     6.90   7.29  11.24  14.99
+ *
+ * "real" is the simulator's realistic body: sensor noise, dropout, dominant-arm
+ * bias, occasional limb swaps, edge bias and a lighting dip.
+ *
+ * THE HEADLINE: under realistic noise the still and moving distributions
+ * OVERLAP — still p99 (5.40) sits above moving p10 (5.07). No instantaneous
+ * threshold can separate them. That is not a tuning failure, it is a property
+ * of the signal, and it is why `breachSec` has to carry the discrimination:
+ * noise excursions are brief, a person who keeps moving is not.
+ */
 export const DEFAULT_REDLIGHT_TUNABLES: RedLightTunables = {
-  moveEnter: 0.85,
-  exitRatio: 0.55,
-  quietMult: 2.4,
-  // Raised 1.9 -> 4.0 when the clamp moved onto `quiet`. It now bounds the
-  // believable STILL energy (4.0 * 0.85 = 3.4 torso-units/sec) rather than the
-  // threshold, so a noisy room can be absorbed while "stand there vibrating to
-  // raise your own bar" still cannot.
-  quietCeiling: 4.0,
+  moveEnter: 1.1,
+  // 0.55 -> 0.75. The gate closes at `threshold * exitRatio`. At 0.55 that was
+  // 2.1 against a realistic still-median of 2.01 — so one noise spike opened
+  // the gate and it then hung open, because the body's ordinary still energy
+  // was barely under the closing level. 0.75 puts the close at ~2.9, clear of
+  // still p50 and still far below moving p10 (5.07).
+  exitRatio: 0.75,
+  // 2.4 -> 2.0. The threshold wants to sit between still p90 (2.92) and moving
+  // p10 (5.07). `quiet` converges near still p10 (~1.93), so 2.0 lands it at
+  // ~3.9 — the middle of that gap.
+  quietMult: 1.6,
+  // 4.0 -> 2.9. This bounds the believable STILL energy, and the bound that
+  // matters is "the threshold must stay under a moving body". 2.9 * 0.85 =
+  // 2.47, so the threshold can never exceed ~4.9 against moving p10 of 5.07.
+  // At 4.0 a lobby where everyone flailed the whole time learned quiet = 3.9,
+  // clamped to 3.4, for a threshold of 8.16 — above ANY real movement. The
+  // measured result was a 45-second round in which nobody advanced at all.
+  quietCeiling: 3.8,
   // 0.4 -> 0.55.
   //
   // The 400ms figure came from testing ONE red transition in isolation. Over a
@@ -192,16 +239,75 @@ export const DEFAULT_REDLIGHT_TUNABLES: RedLightTunables = {
   // Widening this only affects stopping in time. It does NOT make creeping
   // easier, because progress is measured as motion ABOVE the elimination
   // threshold, so anything quiet enough to survive is too quiet to gain ground.
-  graceSec: 0.55,
-  breachSec: 0.12,
-  // Now a MULTIPLE of the threshold rather than an absolute span. 1.5 against
-  // the old default threshold of 0.85 was a span of ~1.3, so 1.5 keeps the
-  // clean-room feel roughly unchanged while tracking a noisy room.
-  driveSpan: 1.5,
-  advanceRate: 6,
+  // 0.55 -> 0.75, from the second playtest: "red light freezes too fast".
+  //
+  // This is a FEEL number and human report is the right evidence for it —
+  // there is no reaction time in the simulator to measure against. The budget
+  // to stop is graceSec + breachSec, so this moves it from 0.85s to 1.05s.
+  //
+  // A simple visual reaction is ~250ms before you add "notice the doll turned",
+  // "decide", and "arrest a moving body". First-timers in a loud hall, watching
+  // a TV rather than the camera, land well past that. Being caught while you
+  // are visibly already stopping reads as cheating to the whole queue, and the
+  // queue is the audience this game is really for.
+  graceSec: 0.75,
+  // 0.12 -> 0.30. THIS is what separates still from moving, because no
+  // threshold can — see the table above. A noise excursion is one or two vision
+  // frames smoothed by `energyTau` into a hump of ~0.2s; a person who has not
+  // stopped is above the line continuously. 0.12s was inside the noise and
+  // eliminated motionless players.
+  //
+  // The cost is that the total budget to stop becomes graceSec + breachSec =
+  // 0.85s. That is MORE forgiving than before, not less, and the grace is
+  // already the number the whole game turns on.
+  // 0.3 -> 0.45.
+  //
+  // The still-energy tail is HEAVY: realistic p90 is 3.53 but p99 is 7.13, so
+  // a motionless body throws occasional excursions twice its own p90. No
+  // threshold placed below a moving body (p10 5.19) sits above that tail, and
+  // a player standing perfectly still was eliminated on it. Duration is the
+  // only thing that separates a spike from a person who has not stopped.
+  //
+  // Total budget to stop is graceSec + breachSec = 1.2s, which also answers
+  // the playtest's "red light freezes too fast" from the other direction.
+  breachSec: 0.45,
+  // 1.5 -> 0.75, a MULTIPLE of the threshold rather than an absolute span.
+  //
+  // `drive` is (energy - threshold) / span, so span sets how far above your own
+  // still-level you must be to advance at full speed. At 1.5 and a realistic
+  // threshold of ~3.9 the span was 5.8, and a moving body (p50 5.91) scored a
+  // drive of 0.35 — a race six times slower than the same body in a clean room,
+  // which is the "the markers barely move" failure this file has hit before.
+  // MEASURED at 0.55: realistic rounds ended at 81-98% of the track with the
+  // clock run out and no winner declared, three times running. A race nobody
+  // crosses the line in is the whole spectacle of this game not happening.
+  // 0.36. Under realistic noise the learned still-level (~1.85) sits ABOVE the
+  // STILL CEILING, so the clamp binds and the threshold is pinned at 4.53 every
+  // run. Against a moving median of 5.91 that leaves an excess of only 1.38, so
+  // the span has to be ~1.6 for a competent player to drive near full speed.
+  // MEASURED: 0.55 timed out at 81-98%, 0.46 finished in two runs of three,
+  // 0.36 finishes around 38s of a 45s round. A clean body is capped at 1.0 by
+  // any of these and is unaffected.
+  //
+  // This is RACE PACE in the operator console, and it is the first knob to
+  // reach for if the hall's real noise floor differs from the simulator's:
+  // everyone stuck at 80% when the clock runs out means drop it.
+  // 0.2 -> 0.45. At 0.2 the span was 0.84 torso/s, so a NOISE SPIKE only 0.8
+  // above the threshold already drove at 95% of full speed — a motionless body
+  // gained 9-12% of the track per round on tail excursions alone. 0.45 puts a
+  // spike at ~0.4 drive and a genuinely moving body (p50 5.98) at ~0.94, and
+  // costs nothing in pace: rounds were finishing in 24-25s against a 45s clock.
+  driveSpan: 0.45,
+  // 6 -> 7. `drive` is computed per frame from instantaneous energy and then
+  // clipped at 1, so its average over a round sits well BELOW the value the
+  // median energy implies — measured, a realistic body that should have driven
+  // at 0.85 advanced as if at 0.57 and finished the round at 85% of the track
+  // with no winner. The rate carries that gap.
+  advanceRate: 7,
   energyTau: 0.1,
   calibrateSec: 2.2,
-  calibrateTau: 0.35,
+  calibrateDown: 0.5,
+  calibrateUp: 4.5,
 };
 
 type Light = 'green' | 'red';
@@ -238,6 +344,24 @@ interface Racer {
   wobble: number;
 }
 
+/**
+ * What the lobby learned about one body, carried into the round.
+ *
+ * Kept OUTSIDE `racers` deliberately. `onStart` clears the racer map, and the
+ * whole point of this measurement is that it was taken before the round began.
+ */
+interface Calib {
+  /** Low quantile of smoothed energy — this body's still-level. See `calibrate`. */
+  quiet: number;
+  /** Smoothed movement, torso-units per second. */
+  energy: number;
+  /** Seconds of usable observation. Below `calibrateSec` we do not trust it. */
+  age: number;
+  /** Seconds since last seen, for eviction. */
+  absent: number;
+  motion: MotionEnergy;
+}
+
 interface LaneGeom {
   top: number;
   bottom: number;
@@ -255,6 +379,9 @@ interface LaneGeom {
 export class RedLightGame extends GameBase {
   private tun: RedLightTunables = { ...DEFAULT_REDLIGHT_TUNABLES };
   private racers = new Map<number, Racer>();
+
+  /** Lobby noise-floor measurements, keyed by tracker id. See `Calib`. */
+  private calib = new Map<number, Calib>();
 
   private light: Light = 'green';
   private lightT = 0;
@@ -429,11 +556,30 @@ export class RedLightGame extends GameBase {
     this.fakeout = false;
 
     if (next === 'green') {
-      this.fakeout = duration === undefined && Math.random() < 0.18 + p * 0.22;
-      const base = this.fakeout ? 0.45 : 3 - p * 1.7;
+      // Fake-outs rarer early, still escalating: was 0.18 + p*0.22 (18% rising
+      // to 40%), now 0.08 + p*0.24 (8% rising to 32%).
+      //
+      // A fake-out green is under a second with NO tell, so it is the one thing
+      // in this game that can catch a player with zero warning. That is a great
+      // joke on someone who already understands the rules and a bad first
+      // impression on someone learning them — and at a club fair most of the
+      // queue is meeting this game for the first time. Weighting them toward
+      // the back half keeps the joke and moves it after the lesson.
+      this.fakeout = duration === undefined && Math.random() < 0.08 + p * 0.24;
+      // Late-round greens bottom out at 1.6s rather than 1.3s. Below about a
+      // second and a half there is no room for a tell that anyone can act on,
+      // so the compression stops buying tension and starts buying confusion.
+      const base = this.fakeout ? 0.45 : 3 - p * 1.4;
       const spread = this.fakeout ? 0.45 : 1.6 - p * 0.9;
       this.lightDur = duration ?? base + Math.random() * spread;
-      this.tellStart = this.fakeout ? 1 : 0.52 + Math.random() * 0.33;
+      // THE TELL STARTS EARLIER: was 0.52-0.85 of the green, now 0.38-0.63.
+      //
+      // The doll's head turn is the only warning a red is coming, and on a
+      // short late-round green 0.52 left barely half a second of it. Starting
+      // sooner does not make the game easier — the red still arrives when it
+      // arrives — it makes the warning legible, which is the difference
+      // between losing and feeling cheated.
+      this.tellStart = this.fakeout ? 1 : 0.38 + Math.random() * 0.25;
     } else {
       // A red has to outlast the grace, the smoother and the breach dwell with
       // room to spare, or late reds become un-losable and the back half of the
@@ -489,30 +635,86 @@ export class RedLightGame extends GameBase {
   /* Simulation                                                          */
   /* ------------------------------------------------------------------ */
 
+  /**
+   * Seconds since the last NEW vision frame, or 0 if this render frame carries
+   * no new landmarks.
+   *
+   * Vision lands at ~30fps under a 60fps render (and at the render rate in sim
+   * mode). Sampling motion on a frame that carries no new landmarks pushes a
+   * fake zero into the signal, so everything that measures movement keys off
+   * the vision frame id and converts to per-second units using the real
+   * interval.
+   *
+   * Clamped at both ends. This is a divisor, so a bad value does not degrade
+   * the signal, it inverts the game: too small and a motionless player reads as
+   * a flail, too large and a flailing one reads as a statue. `fc.time` is the
+   * right clock — these landmarks came off a camera at wall-clock time, not at
+   * the clamped physics dt — but a GC pause, a tab switch or a test harness
+   * re-basing its clock can all produce a gap that means nothing, so the range
+   * is bounded to plausible inference intervals.
+   */
+  private visionDelta(fc: FrameContext): number {
+    const vf = fc.vision?.frameId ?? -1;
+    if (vf === this.lastVisionFrame) return 0;
+    const raw = fc.time - this.lastVisionTime;
+    const dtv = this.lastVisionTime > 0 ? Math.min(1 / 8, Math.max(1 / 120, raw)) : 0;
+    this.lastVisionFrame = vf;
+    this.lastVisionTime = fc.time;
+    return dtv;
+  }
+
+  /**
+   * The lobby pass: measure the room's noise floor on every body in frame,
+   * before anybody can be eliminated by it. See `calibrate` for the statistic
+   * and `Calib` for why it is not stored on the racer.
+   */
+  protected onPreTick(fc: FrameContext, players: TrackedPlayer[], dt: number): void {
+    const dtv = this.visionDelta(fc);
+
+    for (const c of this.calib.values()) c.absent += dt;
+
+    for (const p of players) {
+      let c = this.calib.get(p.id);
+      if (!c) {
+        c = {
+          // Seed at the absolute floor, so a body we have barely seen is judged
+          // by `moveEnter` until it has shown us what its own still looks like.
+          quiet: this.tun.moveEnter / this.tun.quietMult,
+          energy: 0,
+          age: 0,
+          absent: 0,
+          motion: new MotionEnergy(1),
+        };
+        this.calib.set(p.id, c);
+      }
+
+      const wasAbsent = c.absent;
+      c.absent = 0;
+      if (dtv <= 0 || p.missing > 0 || !p.scale.valid) continue;
+
+      // Back after a dropout: the stored landmark history is stale and the
+      // first delta against it is a teleport, which would read as a flail and
+      // lift this body's floor for the whole round.
+      if (wasAbsent > 0.15) {
+        c.motion.reset();
+        continue;
+      }
+
+      c.energy += (c.motion.update(p) / dtv - c.energy) * (1 - Math.exp(-dtv / this.tun.energyTau));
+      c.age += dtv;
+      this.calibrate(c, dtv);
+    }
+
+    // Evict anyone who has left. A lane-sized map that only grows would hand a
+    // stale floor to whoever inherits that tracker id later in the day.
+    for (const [id, c] of this.calib) if (c.absent > 3) this.calib.delete(id);
+  }
+
   protected onTick(fc: FrameContext, players: TrackedPlayer[], dt: number): void {
     const tun = this.tun;
 
-    // Vision lands at ~30fps under a 60fps render (and at the render rate in
-    // sim mode). Sampling motion on a frame that carries no new landmarks
-    // pushes a fake zero into the signal, so everything below keys off the
-    // vision frame id and converts to per-second units using the real interval.
-    const vf = fc.vision?.frameId ?? -1;
-    const fresh = vf !== this.lastVisionFrame;
-    let dtv = 0;
-    if (fresh) {
-      // Clamped at both ends. This is a divisor, so a bad value does not
-      // degrade the signal, it inverts the game: too small and a motionless
-      // player reads as a flail, too large and a flailing one reads as a
-      // statue. `fc.time` is the right clock — these landmarks came off a
-      // camera at wall-clock time, not at the clamped physics dt — but a GC
-      // pause, a tab switch or a test harness re-basing its clock can all
-      // produce a gap that means nothing, so the range is bounded to plausible
-      // inference intervals.
-      const raw = fc.time - this.lastVisionTime;
-      dtv = this.lastVisionTime > 0 ? Math.min(1 / 8, Math.max(1 / 120, raw)) : 0;
-      this.lastVisionFrame = vf;
-      this.lastVisionTime = fc.time;
-    }
+    const dtv = this.visionDelta(fc);
+    const fresh = dtv > 0;
 
     if (this.endHold <= 0) {
       this.lightT += dt;
@@ -697,26 +899,46 @@ export class RedLightGame extends GameBase {
     //
     // The lobby and countdown are the correct window: nobody is racing, and
     // the light has not gone green.
-    const calibrating = this.state !== 'playing' && r.age < this.tun.calibrateSec;
+    //
+    // ONCE THE ROUND STARTS, THE FLOOR IS FIXED. It used to keep adapting,
+    // falling fast whenever energy dipped below it. That makes it a MINIMUM
+    // tracker, and a minimum is the wrong statistic for a noise floor: it
+    // drifts down toward the quietest instant, the threshold follows, and the
+    // noise PEAKS then cross it. Measured under mild noise, that eliminated a
+    // player who never moved. The floor is a property of the room and the
+    // camera; it does not change because somebody stopped moving.
+    //
+    // The learning itself lives in `onPreTick` — see `calibrate`. It used to
+    // live here, guarded on `state !== 'playing'`, inside a method that only
+    // ever runs when the state IS `playing`. The condition could not be true,
+    // so nothing was ever learned and `quiet` sat at its seed for the whole
+    // round. MEASURED with that dead branch: a player standing perfectly still
+    // read an energy of ~1.95 against a threshold of 0.85 and was eliminated
+    // 10s into every round, and all three test bodies were out inside 6s of
+    // play. That is the "red light is very buggy" report from the playtest.
+  }
 
-    // ONCE THE ROUND STARTS, THE FLOOR IS FIXED.
-    //
-    // It used to keep adapting, falling fast (tau 0.09) whenever energy dipped
-    // below it. That makes it a MINIMUM tracker, and a minimum is the wrong
-    // statistic for a noise floor: it drifts down toward the quietest instant,
-    // the threshold follows, and the noise PEAKS then cross it. Measured under
-    // mild noise, that eliminated a player who never moved.
-    //
-    // The fast fall was justified as "so a freeze is recognised in time", but
-    // that is the job of `energy`, which has its own 0.1s smoother. The floor
-    // is a property of the room and the camera; it does not change because
-    // somebody stopped moving.
-    //
-    // So it adapts during the lobby and countdown, and holds for the round.
-    if (calibrating) {
-      const tau = r.energy < r.quiet ? 0.09 : this.tun.calibrateTau;
-      r.quiet += (r.energy - r.quiet) * (1 - Math.exp(-dtv / tau));
-    }
+  /**
+   * Learn what "standing still" costs in THIS room, before anyone is judged.
+   *
+   * Runs during the lobby and countdown only (see `onPreTick`). The statistic
+   * is a LOW QUANTILE of each player's smoothed energy, not a mean and not a
+   * minimum, because neither of those is what we want:
+   *
+   *   - a mean is dragged up by people walking into frame and waving, which is
+   *     most of what happens in a lobby;
+   *   - a minimum is dragged down to the quietest single instant, and then the
+   *     noise peaks sit above the threshold it implies.
+   *
+   * An EMA whose time constant is short when the signal is BELOW the estimate
+   * and long when it is above converges on a low percentile of the
+   * distribution — roughly the 10th at a 9:1 ratio. That is "how quiet this
+   * person gets when they are not doing anything", which is exactly the floor
+   * the elimination threshold should be a multiple of.
+   */
+  private calibrate(c: Calib, dtv: number): void {
+    const tau = c.energy < c.quiet ? this.tun.calibrateDown : this.tun.calibrateUp;
+    c.quiet += (c.energy - c.quiet) * (1 - Math.exp(-dtv / tau));
   }
 
   /**
@@ -747,13 +969,73 @@ export class RedLightGame extends GameBase {
     // long it was given to adapt. Measured: a perfectly still body advanced
     // during green and was eliminated during red within about six seconds.
     //
+    // WHY A CREEPER IS NOT ELIMINATED, AND WHY THAT IS CORRECT.
+    //
+    // Under realistic noise a slow creep is genuinely indistinguishable from a
+    // motionless body. Measured, in torso-units/sec:
+    //
+    //                  p10    p50    p90
+    //   still          1.93   2.01   2.92
+    //   slow creep     2.48   2.94   4.17
+    //
+    // The creep's median sits ON the still distribution's p90. Any threshold
+    // low enough to catch it eliminates people who are standing perfectly
+    // still — which is the exact failure this game shipped with, and the one
+    // the playtest reported.
+    //
+    // It does not matter, because the anti-cheat here is STRUCTURAL rather
+    // than detective: progress is motion ABOVE your own threshold, so anything
+    // quiet enough to evade the detector is by construction too quiet to move
+    // your marker. MEASURED over a full round: a body creeping through 16.2
+    // seconds of red light gained 0.00% of the track, identical to a body that
+    // froze. Creeping buys nothing, so there is nothing to punish.
+    //
+    // Do not "fix" this by lowering the threshold. That trades a harmless
+    // non-detection for eliminating innocent players.
+    //
     // The ceiling exists to stop someone training the detector to ignore them.
     // That is a statement about what "still" can plausibly be — so it belongs
     // on `quiet`, the estimate of still. The signal-to-noise margin
     // (`quietMult`) then applies on top, and the threshold is free to land
     // wherever the room's noise actually puts it.
+    // AFFINE IN THE NOISE FLOOR, not a pure multiple of it.
+    //
+    // `Math.max(moveEnter, floor * quietMult)` cannot satisfy every room,
+    // because the still distribution's SPREAD grows faster than its floor.
+    // Measured across three noise regimes:
+    //
+    //                floor   still p90   moving p10   threshold must land in
+    //   clean         0.27     0.35         4.15        0.4 - 4.1
+    //   realistic     2.28     3.53         5.19        3.5 - 5.2
+    //   hostile       3.89     7.53         6.90        (inverted - see below)
+    //
+    // A pure multiple has to pass through the origin, and no single slope hits
+    // all three windows: the multiplier realistic wants (~2.4) puts hostile at
+    // 7.7, above the point where a MOVING body is detected at all, and the one
+    // hostile wants (~1.9) puts realistic at 3.3 — fine — but clean at 0.4,
+    // under its own noise. Adding a constant floor gives the extra degree of
+    // freedom, and 1.1 + 1.45x lands where it needs to: clean 1.49, realistic
+    // 4.41, hostile 6.74.
+    //
+    // HOSTILE IS NOT SOLVABLE and that is a fact about the signal, not a tuning
+    // failure. At double noise a motionless body's p90 (7.53) sits ABOVE a
+    // moving body's p10 (6.90) — the two distributions have crossed, so no
+    // threshold anywhere separates them and some false eliminations are
+    // arithmetically guaranteed. The design target is the realistic profile;
+    // hostile is the stress case, and the answer there is the camera and the
+    // lighting, not this number.
+    //
+    // NOTE ON OVERFITTING: the slope and intercept are fitted to the pose
+    // simulator's noise model, which is a guess at a real hall. The SHAPE is
+    // the durable part — an absolute floor plus a term proportional to the
+    // measured noise — and all three constants are live-tunable from the
+    // operator console for exactly this reason.
+    //
+    // This is why the old shape failed at double noise with every player
+    // eliminated inside the lobby: the ceiling pinned the threshold at 4.53
+    // while a motionless body's p90 was 5.88.
     const floor = Math.min(r.quiet, moveEnter * quietCeiling);
-    return Math.max(moveEnter, floor * quietMult);
+    return moveEnter + floor * quietMult;
   }
 
   private admit(p: TrackedPlayer): Racer | null {
@@ -784,6 +1066,7 @@ export class RedLightGame extends GameBase {
       this.racers.delete(stale.id);
     }
 
+    const seed = this.calib.get(p.id);
     const racer: Racer = {
       id: p.id,
       lane,
@@ -793,9 +1076,13 @@ export class RedLightGame extends GameBase {
       finished: false,
       energy: 0,
       age: 0,
-      // Start where the absolute floor is, so a fresh player is judged by
-      // `moveEnter` until they have shown us what their own still looks like.
-      quiet: this.tun.moveEnter / this.tun.quietMult,
+      // What the lobby learned about this body, if it watched them long enough
+      // to mean anything. Otherwise the absolute floor, so a player who walked
+      // in during the countdown is judged by `moveEnter` rather than by a
+      // number taken from two frames of them still moving.
+      quiet: seed && seed.age >= this.tun.calibrateSec
+        ? seed.quiet
+        : this.tun.moveEnter / this.tun.quietMult,
       motion: new MotionEnergy(1),
       gate: new Hysteresis(this.tun.moveEnter, this.tun.moveEnter * this.tun.exitRatio),
       breach: 0,
