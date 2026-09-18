@@ -490,12 +490,14 @@ tunables.registerAll([
     min: 0.5,
     max: 2.5,
     step: 0.05,
-    default: 1.15,
+    default: 1.0,
     unit: 'torso heights',
     description:
-      'How far above the shoulder line counts as the top of the screen. Too ' +
-      'small and the top row of tiles is unreachable; too large and the top ' +
-      'of the screen needs an overhead stretch.',
+      'How far above the shoulder line counts as the top of the screen. 1.15 ' +
+      'is the ANATOMICAL LIMIT of a straight overhead reach, so anything near ' +
+      'it makes the top of the screen cost a locked-out stretch and every ' +
+      'normal reach land short — reported as "the pointer stays a little ' +
+      'below my hand". Too small and the cursor pins to the top edge.',
   },
   {
     key: 'hover.reachDown',
@@ -504,26 +506,46 @@ tunables.registerAll([
     min: 0.5,
     max: 2.5,
     step: 0.05,
-    default: 1.05,
+    default: 0.6,
     unit: 'torso heights',
     description:
       'How far below the shoulder line counts as the bottom of the screen. ' +
-      'Raise this and arms at rest park the cursor on a live tile, which ' +
-      'self-selects a game nobody asked for.',
+      'KEEP THIS AT OR BELOW THE RAISE GATE (0.6): the cursor switches off ' +
+      'when the hand drops past that, so mapping the screen bottom to a ' +
+      'larger offset makes the lower part of the display unreachable. Raise ' +
+      'it and arms at rest also start parking the cursor on a live tile.',
   },
   {
-    key: 'hover.dwellDeliberate',
-    label: 'DWELL TO SELECT',
+    key: 'hover.dwellScale',
+    label: 'DWELL SPEED',
     group: 'HAND CURSOR',
-    min: 0.4,
-    max: 2.5,
+    min: 0.5,
+    max: 2,
     step: 0.05,
-    default: 1.2,
-    unit: 's',
+    default: 1,
+    unit: 'x',
     description:
-      'How long a hand must rest on a menu tile to commit. Drop it when the ' +
-      'queue is long. Below about 0.6s people select things by accident while ' +
-      'reaching across the board, and a wrong pick costs a whole turn.',
+      'Multiplies every dwell: 1.2s on menu tiles, 0.9s on factions, 0.7s on ' +
+      'the letter grid. Drop it when the queue is long. Below about 0.5x ' +
+      'people select things by accident while reaching across the board, and ' +
+      'a wrong pick costs a whole turn.',
+  },
+
+  {
+    key: 'vision.poseModel',
+    label: 'POSE MODEL',
+    group: 'VISION',
+    min: 0,
+    max: 2,
+    step: 1,
+    default: 1,
+    description:
+      '0 lite, 1 full, 2 heavy. Landmark steadiness against inference cost, ' +
+      'and it cannot be evaluated anywhere but the real rig. Every gesture ' +
+      'threshold is divided by a body scale computed FROM these landmarks, so ' +
+      'a jittery model makes every game feel wonky at once. Drop to lite only ' +
+      'if the frame budget readout says you must; try heavy if tracking is ' +
+      'still unsteady on full. Takes effect on the NEXT game launch.',
   },
 
   /* ---- games/redlight.ts: the detector most likely to break ---- */
@@ -532,16 +554,17 @@ tunables.registerAll([
     label: 'MOVE THRESHOLD',
     group: 'RED LIGHT',
     min: 0.15,
-    max: 3,
+    max: 6,
     step: 0.05,
-    default: 0.85,
+    default: 1.1,
     unit: 'torso/s',
     description:
-      'Mean landmark speed that counts as moving during a red light. ' +
-      'MediaPipe noise at 3m under hall lighting is unknown and this is tuned ' +
-      'against a noiseless simulator. TOO LOW AND EVERYONE IS OUT IN TWO ' +
-      'SECONDS, which is unrecoverable at a stall — raise this first if the ' +
-      'lobby empties the instant the light turns.',
+      'The FLOOR of the move threshold, in an empty-quiet room. The real ' +
+      'threshold is this plus STILL MARGIN times the noise the lobby measured, ' +
+      'so this sets where a silent room lands and the other two track a noisy ' +
+      'one. TOO LOW AND EVERYONE IS OUT IN TWO SECONDS, which is unrecoverable ' +
+      'at a stall — raise this first if the lobby empties the instant the ' +
+      'light turns.',
   },
   {
     key: 'redlight.exitRatio',
@@ -550,9 +573,11 @@ tunables.registerAll([
     min: 0.2,
     max: 0.95,
     step: 0.05,
-    default: 0.55,
+    default: 0.75,
     description:
       'Where the gate closes again, as a fraction of the move threshold. ' +
+      'At 0.55 the gate closed only below 2.1 torso/s, and an ordinary still ' +
+      'body measures 2.0 — so one noise spike opened it and it hung open. ' +
       'Push it near 1 and the gate chatters at the boundary 30 times a second ' +
       'and eliminations become random.',
   },
@@ -563,26 +588,76 @@ tunables.registerAll([
     min: 0,
     max: 1.5,
     step: 0.05,
-    default: 0.55,
+    default: 0.75,
     unit: 's',
     description:
       'Nothing is judged for this long after the light turns red. THE feel ' +
-      'knob. Raise it if people are being caught while they are visibly ' +
-      'already stopping — that reads as cheating to the whole queue.',
+      'knob, raised from 0.55 after testers reported the game "freezes too ' +
+      'fast". Raise it further if people are being caught while they are ' +
+      'visibly already stopping — that reads as cheating to the whole queue.',
   },
   {
     key: 'redlight.breachSec',
     label: 'MOVE MUST PERSIST',
     group: 'RED LIGHT',
     min: 0,
-    max: 0.6,
+    max: 0.9,
     step: 0.01,
-    default: 0.12,
+    default: 0.45,
     unit: 's',
     description:
-      'How long movement has to hold before it counts. Raise it if the ' +
-      'detector is flickering people out on single noisy frames under bad ' +
+      'How long movement has to hold before it counts. THIS is what separates ' +
+      'still from moving — under real sensor noise the two energy ranges ' +
+      'OVERLAP, so no threshold alone can, and only duration tells them ' +
+      'apart. Raise it if the detector is flickering people out under bad ' +
       'lighting. Too high and the game stops catching real movement.',
+  },
+
+  {
+    key: 'redlight.quietMult',
+    label: 'STILL MARGIN',
+    group: 'RED LIGHT',
+    min: 1.2,
+    max: 4,
+    step: 0.1,
+    default: 1.6,
+    unit: 'x',
+    description:
+      'Signal-to-noise margin over the still-level the lobby measured. The ' +
+      'threshold wants to sit between a still body (p90 ~2.9 torso/s) and a ' +
+      'moving one (p10 ~5.1). Too low and motionless people are eliminated; ' +
+      'too high and nobody advances and the race never happens.',
+  },
+  {
+    key: 'redlight.quietCeiling',
+    label: 'STILL CEILING',
+    group: 'RED LIGHT',
+    min: 1,
+    max: 5,
+    step: 0.05,
+    default: 3.8,
+    unit: 'x move',
+    description:
+      'Caps what the lobby is allowed to believe "standing still" looks like, ' +
+      'as a multiple of MOVE THRESHOLD. It stops someone training the ' +
+      'detector to ignore them by fidgeting through the lobby. RAISE THIS if ' +
+      'the hall is noisy enough that still players are still being eliminated ' +
+      'after MOVE THRESHOLD and STILL MARGIN are already up.',
+  },
+  {
+    key: 'redlight.driveSpan',
+    label: 'RACE PACE',
+    group: 'RED LIGHT',
+    min: 0.2,
+    max: 3,
+    step: 0.02,
+    default: 0.45,
+    unit: 'x threshold',
+    description:
+      'How far above your own still-level you must be to advance at full ' +
+      'speed. LOWER IS FASTER. Raise it if people cross the line in ten ' +
+      'seconds; drop it if the round times out with everyone stuck at 80% ' +
+      'and no winner, which reads as a broken game to the whole queue.',
   },
 
   /* ---- games/poses.ts ---- */
@@ -711,6 +786,37 @@ tunables.registerAll([
       'floor marking where the nearest onlooker can stand, until watchers stop ' +
       'being given lanes in Red Light. Too high and a short player at the back ' +
       'of the play zone stops existing.',
+  },
+  {
+    key: 'tracker.minUnit',
+    label: 'NO FURTHER THAN THE TAPE',
+    group: 'TRACKER',
+    min: 0.05,
+    max: 0.3,
+    step: 0.005,
+    default: 0.085,
+    unit: 'torso heights',
+    description:
+      'Smallest body that still counts as near enough to play, measured on ' +
+      'TORSO HEIGHT so it does not change when somebody turns or drops their ' +
+      'arms. This is the back line of the play area — raise it together with ' +
+      'MIN BODY SIZE to pull that line closer, and set both by standing on ' +
+      'the tape yourself and watching the debug overlay.',
+  },
+  {
+    key: 'tracker.admitSpeedTorsos',
+    label: 'STOP TO JOIN',
+    group: 'TRACKER',
+    min: 0.4,
+    max: 2,
+    step: 0.05,
+    default: 0.9,
+    unit: 'torso/s',
+    description:
+      'How still somebody has to go before they count as a player instead of ' +
+      'someone walking past. Lower is stricter. Too low and a visitor has to ' +
+      'stand unnaturally still to join; too high and the queue shuffling past ' +
+      'behind the tape starts joining the game.',
   },
   {
     key: 'tracker.minRelativeSize',

@@ -8,8 +8,9 @@
 
 import { camera } from './core/camera';
 import { vision } from './core/vision';
+import { setCameraAspect } from './core/tracker';
 import { audio } from './engine/audio';
-import { simulator, isSimEnabled } from './core/simulator';
+import { simulator, isSimEnabled, SIM_ASPECT } from './core/simulator';
 import type { VisionFrame } from './core/types';
 import { resizeCanvas, viewportOf } from './engine/draw';
 import type { FrameContext } from './shell/screen';
@@ -93,8 +94,21 @@ function step(now: number, dt: number): void {
   const v = viewportOf(canvas);
   const time = (now - startTime) / 1000;
 
+  // Publish the real camera aspect ONCE, here, for every tracker in the app.
+  // Landmark space is anisotropic and each tracker needs this to measure a body
+  // correctly; leaving it to the owners meant four of the five never did it.
+  // See `setCameraAspect`.
+  {
+    const cam = camera.getState();
+    if (cam.width > 0 && cam.height > 0) setCameraAspect(cam.width / cam.height);
+  }
+
   // In sim mode the simulator stands in for camera + MediaPipe entirely.
   if (SIM) {
+    // Including the aspect: the simulator squeezes x by its own SIM_ASPECT, so
+    // a tracker measuring its bodies has to undo exactly that number, not
+    // whatever camera happens to be plugged in.
+    setCameraAspect(SIM_ASPECT);
     latestVision = simulator.step(time, dt);
     // Stamp with the SAME clock the frame is delivered on.
     //
@@ -317,6 +331,20 @@ if (import.meta.env.DEV) {
       const host = (window as unknown as { __arcade: never }).__arcade;
       const report = await runSmoke(host as never, only);
       console.log(formatSmoke(report));
+      return report;
+    },
+
+    /**
+     * End-to-end sweep of the WHOLE turn, not just the game: attract, menu
+     * dwell, play, initials, and back out. See src/dev/turn.ts for why this is
+     * separate from `smoke` — the bug that made every tile unselectable passed
+     * a fully green smoke run.
+     */
+    async turn(only?: string[]) {
+      const { runTurn, formatTurn } = await import('./dev/turn');
+      const host = (window as unknown as { __arcade: never }).__arcade;
+      const report = await runTurn(host as never, only);
+      console.log(formatTurn(report));
       return report;
     },
 

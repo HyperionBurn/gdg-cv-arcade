@@ -123,5 +123,17 @@ export interface VisionConfig {
   mode: VisionMode;
   numPoses: number;
   numHands: number;
-  poseModel: 'lite' | 'full';
+  /**
+   * Which pose landmarker to run.
+   *
+   * lite  — fastest, lowest landmark accuracy. Fine for presence detection.
+   * full  — noticeably steadier landmarks for roughly 2x the inference cost.
+   * heavy — steadiest, and the slowest by a wide margin.
+   *
+   * Accuracy here is not cosmetic: every gesture threshold in the app is
+   * divided by `scale.unit`, which is computed FROM these landmarks, so a
+   * jittery model moves every threshold in every game at once. That is what
+   * "tracking is a bit wonky" sounds like from the other side.
+   */
+  poseModel: 'lite' | 'full' | 'heavy';
 }

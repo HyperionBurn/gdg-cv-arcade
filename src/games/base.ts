@@ -14,7 +14,7 @@
  * onRender, and a score per slot.
  */
 
-import { PoseTracker, type TrackedPlayer } from '../core/tracker';
+import { PoseTracker, DEFAULT_TRACKER_OPTIONS, type TrackedPlayer } from '../core/tracker';
 import type { FilterPreset } from '../core/filter';
 import { vision } from '../core/vision';
 import { camera } from '../core/camera';
@@ -256,6 +256,25 @@ const GHOST_H = 270;
  */
 const VISION_STALE_MS = 1500;
 
+/**
+ * Which pose model the GAMES run. Attract stays on `lite` — it only has to
+ * notice that somebody is there.
+ *
+ * A number rather than a string because the operator console is numeric, and
+ * being able to A/B this on the actual rig in the actual hall is worth more
+ * than a tidy type: landmark steadiness is the one thing that cannot be
+ * evaluated in `?sim=1` at all, because MediaPipe never runs there.
+ *
+ * 0 = lite, 1 = full, 2 = heavy. Defaults to `full`: every gesture threshold is
+ * divided by `scale.unit`, which is computed from these landmarks, so model
+ * jitter moves every threshold in every game simultaneously — which is exactly
+ * what the playtest reported as "tracking is a bit wonky".
+ */
+function poseModelChoice(): 'lite' | 'full' | 'heavy' {
+  const n = Math.round(tunables.get('vision.poseModel', 1));
+  return n <= 0 ? 'lite' : n >= 2 ? 'heavy' : 'full';
+}
+
 const RESULTS_ABANDONED_SEC = 2.6;
 const RESULTS_EMPTY_GRACE_SEC = 0.9;
 
@@ -371,6 +390,22 @@ export abstract class GameBase implements Screen {
   /** Final score for a slot. */
   protected abstract scoreFor(slot: number): number;
 
+  /**
+   * Optional: run every frame BEFORE the round starts — during `gathering` and
+   * `countdown`, with whoever is currently in frame.
+   *
+   * `onTick` only runs while the state is `playing`, which means a game cannot
+   * measure anything about the room or the players until it is already scoring
+   * them. Red Light needs exactly that: its elimination threshold is a multiple
+   * of the camera's noise floor, and the floor has to be learned from bodies
+   * that are standing in their lanes rather than racing. Without this hook its
+   * calibration branch was unreachable — it was guarded on
+   * `state !== 'playing'` inside a method that only runs when the state IS
+   * `playing`, so the floor stayed at its seed value and a motionless player
+   * was eliminated in ten seconds under ordinary sensor noise.
+   */
+  protected onPreTick?(fc: FrameContext, players: TrackedPlayer[], dt: number): void;
+
   /** Optional: draw behind everything (backdrops, camera feed). */
   protected onRenderBackground?(fc: FrameContext): void;
   /** Optional: extra HUD per slot. */
@@ -388,11 +423,25 @@ export abstract class GameBase implements Screen {
   async mount(): Promise<void> {
     // In sim mode the simulator feeds poses directly; starting MediaPipe would
     // just spin up a worker with no camera behind it.
+    // `maxPlayers`, NOT the number of people actually in frame.
+    //
+    // Narrowing this to the real count at `enter('countdown')` — so a solo
+    // player picking Red Light runs numPoses 1 instead of 6 — was proposed as a
+    // 13-30ms/frame inference saving, and DECLINED. Changing `numPoses` tears
+    // down and rebuilds the pose landmarker: a 492-575ms dead window plus a
+    // 354-418ms first inference, nearly a full second blind. Spending that
+    // inside a 3-second countdown risks the opening of the round, which is the
+    // part every player is watching, to buy latency nobody has measured on this
+    // hardware. The saving is also unmeasurable in `?sim=1`, where MediaPipe
+    // never runs at all — so it cannot be validated before the day.
+    //
+    // Revisit only with a real camera and a real number.
     if (!isSimEnabled()) {
       await vision.start({
         mode: this.config.visionMode,
         numPoses: this.config.maxPlayers,
         numHands: this.config.maxPlayers * 2,
+        poseModel: poseModelChoice(),
       });
     }
     this.tracker.setOptions({ maxPlayers: this.config.maxPlayers });
@@ -554,12 +603,14 @@ export abstract class GameBase implements Screen {
       case 'gathering':
         ctx.save();
         ctx.globalAlpha = enterT;
+        this.onPreTick?.(fc, this.players, dt);
         this.tickGathering(fc);
         ctx.restore();
         break;
       case 'countdown':
         ctx.save();
         ctx.globalAlpha = enterT;
+        this.onPreTick?.(fc, this.players, dt);
         this.tickCountdown(fc);
         ctx.restore();
         break;
@@ -657,6 +708,14 @@ export abstract class GameBase implements Screen {
       // than guessing it here. See the notes on both keys.
       minArea: tunables.get('tracker.minArea', 0.02),
       minRelativeSize: tunables.get('tracker.minRelativeSize', 0.5),
+      // The back line of the play area, and how still somebody has to go before
+      // they count as a player rather than a passer-by. Both are things you can
+      // only really set once you can see the room.
+      minUnit: tunables.get('tracker.minUnit', DEFAULT_TRACKER_OPTIONS.minUnit),
+      admitSpeedTorsos: tunables.get(
+        'tracker.admitSpeedTorsos',
+        DEFAULT_TRACKER_OPTIONS.admitSpeedTorsos
+      ),
     });
     this.players = this.tracker.update(fc.vision.poses, fc.time);
   }

@@ -166,8 +166,7 @@ async function createFileset(): ReturnType<typeof FilesetResolver.forVisionTasks
 
 async function createPose(): Promise<void> {
   const fileset = await createFileset();
-  const modelFile =
-    config.poseModel === 'full' ? 'pose_landmarker_full.task' : 'pose_landmarker_lite.task';
+  const modelFile = `pose_landmarker_${config.poseModel}.task`;
 
   try {
     poseLandmarker = await PoseLandmarker.createFromOptions(fileset, {

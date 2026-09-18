@@ -22,12 +22,17 @@ const MODELS = [
   {
     name: 'pose_landmarker_lite.task',
     url: `${BASE}/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task`,
-    note: 'default — fastest, best for 6-player Red Light',
+    note: 'fastest, lowest accuracy — presence detection only',
   },
   {
     name: 'pose_landmarker_full.task',
     url: `${BASE}/pose_landmarker/pose_landmarker_full/float16/1/pose_landmarker_full.task`,
-    note: 'accuracy option — A/B at playtest',
+    note: 'DEFAULT for games — steadier landmarks, ~2x lite cost',
+  },
+  {
+    name: 'pose_landmarker_heavy.task',
+    url: `${BASE}/pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task`,
+    note: 'steadiest landmarks, slowest — A/B against full on the real rig',
   },
   {
     name: 'hand_landmarker.task',
