@@ -54,6 +54,7 @@ function people(poses: RawPose[], maxPlayers = 6): number {
   return selectCandidates(poses, {
     maxPlayers,
     minArea: 0.02,
+    minUnit: 0.085,
     minConfidence: 0.45,
     dedupeTorsos: 0.55,
     minRelativeSize: 0.5,
