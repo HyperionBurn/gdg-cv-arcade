@@ -395,7 +395,20 @@ export class VerticalGestures {
     this._jumped = false;
     this._crouched = false;
 
-    const lm = player.landmarks;
+    // RAW, like RepCounter and MotionEnergy. A jump is a fast transient and
+    // One Euro is built to remove exactly that.
+    //
+    // MEASURED against the real `body` preset at 30Hz: a 0.36s half-sine jump
+    // of 0.18 units crosses a half-peak gate at 66.7ms raw and 166.7ms
+    // filtered. A hundred milliseconds, on a game whose jump window is
+    // documented as 0.37-0.45s — it is very likely the whole of the Runner's
+    // "0.100s detection latency", which matches to within a millisecond.
+    //
+    // Safe because the machinery that makes raw safe is already here:
+    // hysteresis on both edges, a `Baseline` for the reference, and a
+    // cooldown. ARCHITECTURE.md's own rule says fast transients must read raw;
+    // this class simply never did.
+    const lm = player.raw;
     const unit = player.scale.unit;
     if (unit <= 0) return;
 
@@ -489,7 +502,9 @@ export class LaneDetector {
   /** @param mirrored display is mirrored, so invert so stepping right goes right */
   update(player: TrackedPlayer, mirrored = true): number {
     this._changed = 0;
-    const lm = player.landmarks;
+    // RAW, for the same reason as VerticalGestures. MEASURED: a 0.6-unit lane
+    // step over 0.6s crosses the gate at 566.7ms raw and 700ms filtered.
+    const lm = player.raw;
     const unit = player.scale.unit;
     if (unit <= 0) return this.lane;
 

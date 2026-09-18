@@ -209,14 +209,29 @@ export class BalloonPopGame extends GameBase {
     }
   }
 
-  /** Tracks each player's shoulder line in screen space. */
+  /**
+   * Tracks each player's shoulder line in screen space.
+   *
+   * INDEXED BY THE PLAYER'S OWN SLOT, not by `0..playerCount`.
+   *
+   * It used to loop `slot < this.playerCount`, so a solo round only ever wrote
+   * `armLine[0]`. But the tracker re-sorts slots by screen position every
+   * frame while `playerCount` stays frozen for the round — so the moment a
+   * bystander stands to the player's left, the PLAYER becomes slot 1, and
+   * `armLine[1]` is still its initial 0.
+   *
+   * The hit test then reads `b.y > (armLine[1] ?? 0)`, and `?? 0` cannot save
+   * it because 0 is not nullish. Every balloon on screen is below y=0, so
+   * every one is skipped: NOTHING IS POPPABLE. Worse, the draw path uses
+   * `|| fallback` instead, so the balloons keep rendering as armed — the
+   * player is swiping at bright, live-looking balloons that cannot be hit.
+   *
+   * At a club fair a friend leaning into frame is a certainty.
+   */
   private updateArmLines(players: readonly TrackedPlayer[], screenH: number): void {
-    for (let slot = 0; slot < this.playerCount; slot++) {
-      const p = players.find((pl) => (this.playerCount > 1 ? pl.slot === slot : true));
-      if (!p || !this.proj) {
-        if (this.armLine[slot] === 0) this.armLine[slot] = screenH * ARM_FALLBACK;
-        continue;
-      }
+    for (const p of players) {
+      const slot = Math.max(0, Math.min(this.armLine.length - 1, p.slot));
+      if (!this.proj) continue;
       const ls = p.landmarks[POSE.LEFT_SHOULDER];
       const rs = p.landmarks[POSE.RIGHT_SHOULDER];
       if (!ls || !rs) continue;
@@ -229,6 +244,12 @@ export class BalloonPopGame extends GameBase {
       const cur = this.armLine[slot] || target;
       this.armLine[slot] = cur + (target - cur) * 0.15;
     }
+
+    // Any slot nobody occupies keeps the fallback rather than 0, so a stale or
+    // unwritten entry can never read as "the line is at the top of the screen".
+    for (let i = 0; i < this.armLine.length; i++) {
+      if (!this.armLine[i]) this.armLine[i] = screenH * ARM_FALLBACK;
+    }
   }
 
   private resolvePops(fc: FrameContext, blades: Blade[]): void {
@@ -237,7 +258,11 @@ export class BalloonPopGame extends GameBase {
         const b = this.balloons[i]!;
         if (this.playerCount > 1 && b.slot !== blade.slot) continue;
         // Still below the player's shoulder line — see ARM_OFFSET_TORSOS.
-        if (b.y > (this.armLine[blade.slot] ?? 0)) continue;
+        // `||`, not `??`, and the SAME fallback the draw uses: an armLine of 0
+        // is not a line at the top of the screen, it is an unwritten entry, and
+        // the two paths disagreeing is what made balloons look armed while
+        // being unhittable.
+        if (b.y > (this.armLine[blade.slot] || fc.v.height * ARM_FALLBACK)) continue;
 
         // Generous hit radius. This game is about inclusion, not precision, and
         // a near miss that reads as a hit is far better here than the reverse.

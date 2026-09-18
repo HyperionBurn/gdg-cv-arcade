@@ -341,6 +341,8 @@ export abstract class GameBase implements Screen {
   private ghostPending = false;
   /** stateTime at which the results panel first drew. -1 until it has. */
   private panelStart = -1;
+  /** Did THIS round produce the clip currently held? See tickResults. */
+  private capturedThisRound = false;
   private frameBudgetStrikes = 0;
   /**
    * The best previous solo run, replayed alongside the live player.
@@ -424,6 +426,7 @@ export abstract class GameBase implements Screen {
       this.gatherLastJoin = 0;
     }
     if (state === 'playing') {
+      this.capturedThisRound = false;
       // roundScale lets a marshal shorten every round when the queue backs up.
       this.roundTotal = this.config.roundSeconds * tunables.get('game.roundScale', 1);
       this.timeLeft = this.roundTotal;
@@ -481,7 +484,7 @@ export abstract class GameBase implements Screen {
     else ghosts.cancel();
 
     if (best && best.score > 0) {
-      highlights.captureIfWorthy(this.config.gameId, best.score, {
+      this.capturedThisRound = highlights.captureIfWorthy(this.config.gameId, best.score, {
         color: this.config.color,
       });
     }
@@ -940,9 +943,26 @@ export abstract class GameBase implements Screen {
     ctx.globalAlpha = 1;
     ctx.restore();
 
+    // ONLY THIS GAME'S OWN, FRESHLY CAPTURED CLIP.
+    //
+    // `hasClip()` alone was the entire gate: no freshness check and no game
+    // check, while `discard()` had zero call sites anywhere in the tree and
+    // `stop()` only clears the playing flag. So the first clip captured on the
+    // day — boards start empty on the 24th, so that happens within a few plays
+    // — was replayed on EVERY later results screen that did not itself
+    // capture. A Fruit Ninja run stamped "285" over a Red Light player's
+    // results.
+    //
+    // Not a cosmetic mix-up either: a default clip is 8s and RESULTS_SEC is 7,
+    // so it covers the whole window, and `showedReplay` suppresses the score,
+    // the rank and the near-miss line — the retry hook PLAN.md §4 is built on.
+    const meta = highlights.clipMeta();
+    const ownFreshClip =
+      !!meta && meta.gameId === this.config.gameId && this.capturedThisRound;
+
     const replaying =
       highlights.isPlaying ||
-      (this.stateTime < 0.2 && highlights.hasClip() && highlights.play(fc.now, 1));
+      (this.stateTime < 0.2 && ownFreshClip && highlights.play(fc.now, 1));
     const showedReplay = replaying && highlights.render(fc);
 
     if (!showedReplay) {

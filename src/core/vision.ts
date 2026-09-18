@@ -42,6 +42,24 @@ const IN_FLIGHT_TIMEOUT_MS = 2000;
 
 const TARGET_INFERENCE_FPS = 30;
 
+/**
+ * Slack on the pump's rate gate, as a fraction of the target interval.
+ *
+ * WITHOUT IT THE PUMP ALIASES. The gate is `now - last < 1000/30` checked from
+ * a 60Hz rAF, and two rAF ticks are 33.3333... against an interval of
+ * 33.3333... — the comparison sits exactly on the boundary and is decided by
+ * float noise. When it loses, the frame waits for a third tick.
+ *
+ * Simulated against an exact 60Hz clock: at target 30 the pump actually runs
+ * at 20.6Hz, with a 50ms gap 93 times against 33.3ms nine times. The app asks
+ * for 30 inferences a second and gets 20.
+ *
+ * A 10% slack makes the gate pass on the second tick every time: 30.0Hz, every
+ * gap 33.3ms. Expressed as a fraction rather than by nudging the constant to
+ * 32, so it stays correct on a 120Hz panel too.
+ */
+const PUMP_GATE_SLACK = 0.9;
+
 class VisionPipeline {
   private worker: Worker | null = null;
   private listeners = new Set<FrameListener>();
@@ -246,7 +264,7 @@ class VisionPipeline {
       this.rafHandle = requestAnimationFrame(pump);
 
       const now = performance.now();
-      if (now - this.lastPumpTime < interval) return;
+      if (now - this.lastPumpTime < interval * PUMP_GATE_SLACK) return;
 
       if (!camera.isLive() || !this.worker) return;
       const video = camera.getVideo();
