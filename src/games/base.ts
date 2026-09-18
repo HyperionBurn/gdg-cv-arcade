@@ -23,8 +23,8 @@ import { Projection } from '../engine/projection';
 import { Juice, RollingNumber, PopupLayer } from '../engine/juice';
 import { ParticleSystem, BURST } from '../engine/particles';
 import { audio } from '../engine/audio';
-import { clearFrame, drawText, vh, progressBar, roundRect } from '../engine/draw';
-import { COLORS, PLAYER_COLORS, FONTS, EASE, SHADOW } from '../shell/theme';
+import { clearFrame, drawText, vh, progressBar, roundRect, graphPaper } from '../engine/draw';
+import { COLORS, PLAYER_COLORS, FONTS, EASE, SHADOW, STROKE } from '../shell/theme';
 import { leaderboard, type GameId, type RankResult } from '../meta/leaderboard';
 import { tunables } from '../meta/tunables';
 import { ghosts, drawGhost, type GhostPlayback } from '../meta/ghosts';
@@ -75,7 +75,99 @@ export interface GameConfig {
    * Defaults to true.
    */
   ghostSilhouette?: boolean;
+  /**
+   * Put the HUD on a solid paper shelf with a hard ink rule, and shrink it to
+   * fit above that rule.
+   *
+   * FOR GAMES WHOSE PLAYFIELD OWNS THE WHOLE SCREEN. Pose Match is the case
+   * that forced it: the wall is a full-opacity ink plane that scales from
+   * `WALL_SPAN * S_FAR` to wider than the viewport, and by the halfway point of
+   * its approach its top edge has left the screen — so for most of every wall's
+   * life the ink plane is behind the entire HUD band. Blue score on ink is
+   * 2.3:1; muted grey label on ink is worse.
+   *
+   * The three fixes that DON'T work, so nobody retries them:
+   *  - Cap the wall's growth below `hudBottom()`. The hole is 42% of the plane
+   *    and centred at 0.58H, so at impact its TOP edge is at 0.20H — above the
+   *    default 0.30H band. Capping the plane cuts the silhouette the player is
+   *    supposed to copy, which is the entire game.
+   *  - Move the HUD sideways. At impact the plane is 1.8x the viewport width.
+   *    There is no horizontal clear space.
+   *  - Fade the HUD while a wall is close. It would be faded for most of the
+   *    round, which is just deleting the HUD with extra steps.
+   *
+   * A shelf is the arcade answer: the playfield slides UNDER a header, which
+   * reads as depth rather than as a collision, and the header is paper, so
+   * every HUD colour is back on its designed background.
+   *
+   * WHY THE BAND IS 15.8vh AND NOT MORE. A shelf occludes whatever is behind
+   * it, and in Pose Match that is the PLAYER — the thing they are checking
+   * their own shape against. Measured against the simulator's 3m framing, a
+   * standing head tops out around 22vh and fully raised fingertips around
+   * 21.6vh; several poses on the roster put the arms straight up. 15.8 keeps
+   * ~6vh of clearance over that, which is the margin a taller player or one
+   * standing closer to the camera eats into. It also clears the hole's top edge
+   * at impact (20.2vh) with room to spare.
+   */
+  hudShelf?: boolean;
 }
+
+/**
+ * Vertical HUD layout, in vh. Two presets: the default, and the compact one
+ * used with `hudShelf`. Every number the HUD positions itself with lives here
+ * so that `hudBottom()` cannot drift out of agreement with what is drawn.
+ */
+interface HudMetrics {
+  barY: number;
+  barH: number;
+  clockY: number;
+  clockSize: number;
+  statY: number;
+  statSize: number;
+  labelY: number;
+  labelSize: number;
+  chaseY: number;
+  /** Multiplier on the chase line's several context-dependent sizes. */
+  chaseScale: number;
+  /**
+   * Lay the clock, the score and the chase line out as ONE ROW — clock flush
+   * left, score centred in the slot, chase flush right — instead of stacking
+   * them down the middle.
+   *
+   * A shelf is short by definition, and stacking five elements into 19.8vh
+   * costs the score 40% of its height and pushes the label to 1.5vh, which
+   * TYPE.micro reserves for operator text nobody has to read. The stacked
+   * layout only ever used the centre column; going wide buys back the vertical
+   * space for free, and the score ends up at 9vh — within 2vh of the full HUD's
+   * 11 — instead of 6.8.
+   */
+  inlineRow?: boolean;
+  /** `hudBottom()`. Must clear the lowest thing above, with margin. */
+  bottom: number;
+}
+
+const HUD_FULL: HudMetrics = {
+  barY: 3, barH: 1.1,
+  clockY: 7.5, clockSize: 3.6,
+  statY: 16, statSize: 11,
+  labelY: 23, labelSize: 1.9,
+  chaseY: 26, chaseScale: 1,
+  bottom: 30,
+};
+
+/**
+ * Compact, and laid out across the band rather than down it. The score gives
+ * up 2vh; the label and the chase line keep their full size.
+ */
+const HUD_SHELF: HudMetrics = {
+  barY: 2.0, barH: 0.85,
+  clockY: 8.6, clockSize: 3.0,
+  statY: 8.6, statSize: 8.2,
+  labelY: 14.3, labelSize: 1.9,
+  chaseY: 8.6, chaseScale: 0.85,
+  inlineRow: true,
+  bottom: 15.8,
+};
 
 /** Frames a player must be absent before we end their round. */
 const PLAYER_LOST_GRACE_SEC = 2.5;
@@ -870,30 +962,64 @@ export abstract class GameBase implements Screen {
    * chase line (26) — so 30 clears it with a margin.
    */
   protected hudBottom(v: FrameContext['v']): number {
-    return vh(v, 30);
+    return vh(v, this.hudMetrics().bottom);
+  }
+
+  private hudMetrics(): HudMetrics {
+    return this.config.hudShelf ? HUD_SHELF : HUD_FULL;
   }
 
   private drawHud(fc: FrameContext): void {
     const { ctx, v } = fc;
+    const m = this.hudMetrics();
     // Keep rising popups out of the HUD. One assignment per frame here beats
     // every game remembering the arithmetic at every spawn site.
     this.popups.floorY = this.hudBottom(v);
 
+    // The shelf, if this game asked for one. Paper plate, then the same grid
+    // the background uses clipped into it — so the band reads as the SAME
+    // surface as the rest of the screen with the playfield passing behind it,
+    // not as a grey box someone dropped on top. Hard ink rule, no blur: the
+    // edge is what sells "in front".
+    if (this.config.hudShelf) {
+      const y = vh(v, m.bottom);
+      ctx.save();
+      ctx.shadowBlur = 0;
+      ctx.beginPath();
+      ctx.rect(0, 0, v.width, y);
+      ctx.clip();
+      graphPaper(ctx, v);
+      ctx.restore();
+
+      ctx.save();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = COLORS.ink;
+      ctx.fillRect(0, y, v.width, Math.max(2, vh(v, STROKE.thick)));
+      ctx.restore();
+    }
+
     // Timer across the very top — visible from anywhere in the queue.
     const t = this.timeLeft / this.config.roundSeconds;
-    const barH = vh(v, 1.1);
+    const barH = vh(v, m.barH);
     const urgent = this.timeLeft <= 5;
     progressBar(
-      ctx, vh(v, 3), vh(v, 3), v.width - vh(v, 6), barH,
+      ctx, vh(v, 3), vh(v, m.barY), v.width - vh(v, 6), barH,
       t, urgent ? COLORS.red : this.config.color, urgent ? 22 : 12
     );
 
-    drawText(ctx, this.timeLeft.toFixed(1), v.width / 2, vh(v, 7.5), {
-      size: vh(v, 3.6),
-      color: urgent ? COLORS.red : COLORS.muted,
-      font: FONTS.mono,
-      weight: 700,
-          });
+    drawText(
+      ctx,
+      this.timeLeft.toFixed(1),
+      m.inlineRow ? vh(v, 3) : v.width / 2,
+      vh(v, m.clockY),
+      {
+        size: vh(v, m.clockSize),
+        color: urgent ? COLORS.red : COLORS.muted,
+        font: FONTS.mono,
+        weight: 700,
+        align: m.inlineRow ? 'left' : 'center',
+      }
+    );
 
     // Party games have one shared HUD, not one per player.
     const hudSlots = this.config.partyMode ? 1 : this.playerCount;
@@ -901,13 +1027,13 @@ export abstract class GameBase implements Screen {
       const rect = this.slotRect(v, slot);
       const color = this.playerCount > 1 ? PLAYER_COLORS[slot]! : this.config.color;
 
-      drawText(ctx, this.primaryStat(slot), rect.centerX, vh(v, 16), {
-        size: vh(v, 11),
+      drawText(ctx, this.primaryStat(slot), rect.centerX, vh(v, m.statY), {
+        size: vh(v, m.statSize),
         color,
         shadow: vh(v, SHADOW.base),
               });
-      drawText(ctx, this.primaryLabel(), rect.centerX, vh(v, 23), {
-        size: vh(v, 1.9),
+      drawText(ctx, this.primaryLabel(), rect.centerX, vh(v, m.labelY), {
+        size: vh(v, m.labelSize),
         color: COLORS.muted,
         font: FONTS.body,
         weight: 600,
@@ -924,7 +1050,7 @@ export abstract class GameBase implements Screen {
       ctx.lineWidth = 2;
       ctx.setLineDash([12, 10]);
       ctx.beginPath();
-      ctx.moveTo(v.width / 2, vh(v, 10));
+      ctx.moveTo(v.width / 2, vh(v, this.config.hudShelf ? m.bottom : 10));
       ctx.lineTo(v.width / 2, v.height);
       ctx.stroke();
       ctx.restore();
@@ -943,6 +1069,11 @@ export abstract class GameBase implements Screen {
    */
   private drawChaseLine(fc: FrameContext, slot: number, rect: SlotRect): void {
     const { ctx, v } = fc;
+    const m = this.hudMetrics();
+    const chase = (size: number): number => vh(v, size * m.chaseScale);
+    // Flush to the slot's right edge in a row layout, centred otherwise.
+    const chaseX = m.inlineRow ? rect.x + rect.width - vh(v, 3) : rect.centerX;
+    const chaseAlign = m.inlineRow ? ('right' as const) : ('center' as const);
     const score = this.scoreFor(slot);
 
     if (this.config.partyMode) return;
@@ -953,8 +1084,9 @@ export abstract class GameBase implements Screen {
       const other = this.scoreFor(slot === 0 ? 1 : 0);
       const diff = score - other;
       if (diff === 0) return;
-      drawText(ctx, diff > 0 ? `LEADING BY ${diff}` : `DOWN BY ${-diff}`, rect.centerX, vh(v, 26), {
-        size: vh(v, 2.2),
+      drawText(ctx, diff > 0 ? `LEADING BY ${diff}` : `DOWN BY ${-diff}`, chaseX, vh(v, m.chaseY), {
+        size: chase(2.2),
+        align: chaseAlign,
         color: diff > 0 ? COLORS.green : COLORS.red,
         font: FONTS.body,
         weight: 700,
@@ -972,10 +1104,11 @@ export abstract class GameBase implements Screen {
       drawText(
         ctx,
         ahead ? `${diff} AHEAD OF BEST` : `${-diff} BEHIND BEST`,
-        rect.centerX,
-        vh(v, 26),
+        chaseX,
+        vh(v, m.chaseY),
         {
-          size: vh(v, 2.3),
+          size: chase(2.3),
+          align: chaseAlign,
           color: ahead ? COLORS.green : COLORS.red,
           font: FONTS.body,
           weight: 700,
@@ -989,8 +1122,9 @@ export abstract class GameBase implements Screen {
 
     if (preview.isRecord && score > 0) {
       const pulse = 0.7 + Math.sin(fc.time * 8) * 0.3;
-      drawText(ctx, '<RECORD PACE>', rect.centerX, vh(v, 26), {
-        size: vh(v, 2.4),
+      drawText(ctx, '<RECORD PACE>', chaseX, vh(v, m.chaseY), {
+        size: chase(2.4),
+        align: chaseAlign,
         color: COLORS.ink,
         shadow: vh(v, SHADOW.base),
         shadowColor: COLORS.yellow,
@@ -1007,10 +1141,11 @@ export abstract class GameBase implements Screen {
     drawText(
       ctx,
       `${preview.pointsToNext} TO #${preview.nextRank}`,
-      rect.centerX,
-      vh(v, 26),
+      chaseX,
+      vh(v, m.chaseY),
       {
-        size: vh(v, close ? 2.6 : 2.2),
+        size: chase(close ? 2.6 : 2.2),
+        align: chaseAlign,
         color: close ? COLORS.ink : COLORS.muted,
         font: FONTS.body,
         weight: 700,

@@ -62,6 +62,7 @@ import {
   drawText,
   drawTabularNumber,
   measureTabularNumber,
+  measureText,
   graphPaper,
   stickerPill,
   roundRect,
@@ -121,6 +122,20 @@ const WALL_SPAN = 1.8;
 const HOLE_FRACTION = 0.42;
 /** Extra thickness on the hole rim, in torso units. */
 const RIM_GROW = 0.09;
+
+/**
+ * Top of the footer shelf, as a fraction of height.
+ *
+ * The match meter, the pass line, the percent pill, the word and the round
+ * average all live below this. Every one of them was drawn bare over a
+ * playfield that is a full-opacity ink plane for most of each wall's approach —
+ * ink text and an ink-outlined pill on ink. Same fix as the header: give them a
+ * paper surface and let the wall pass behind it.
+ *
+ * 0.845 clears the highest thing in the group (the percent pill's top edge at
+ * 0.8635) by 1.85vh.
+ */
+const FOOTER_TOP = 0.845;
 
 const SHATTER_COLORS = [COLORS.blue, COLORS.red, COLORS.yellow, COLORS.green] as const;
 
@@ -213,6 +228,10 @@ export class PoseMatchGame extends GameBase {
       roundSeconds: 60,
       color: GAME_COLORS.posematch,
       supportsVersus: true,
+      // The wall is an opaque ink plane the width of the screen. Without a
+      // shelf the whole HUD spends most of every wall's approach unreadable on
+      // top of it. See GameConfig.hudShelf for what else was tried.
+      hudShelf: true,
     });
   }
 
@@ -551,9 +570,38 @@ export class PoseMatchGame extends GameBase {
       }
     }
 
+    this.drawFooterShelf(fc);
+
     for (let slot = 0; slot < this.playerCount; slot++) {
       this.drawSlotOverlay(fc, slot);
     }
+  }
+
+  /**
+   * Paper band under the meter row, with a hard ink rule on top.
+   *
+   * Drawn once for the whole viewport rather than per slot, so the two-player
+   * split does not produce two shelves with a seam between them. Mirrors the
+   * header `hudShelf` in `base.ts`; together they frame the playfield, which is
+   * the arcade convention and reads as depth rather than as overlap.
+   */
+  private drawFooterShelf(fc: FrameContext): void {
+    const { ctx, v } = fc;
+    const y = v.height * FOOTER_TOP;
+
+    ctx.save();
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.rect(0, y, v.width, v.height - y);
+    ctx.clip();
+    graphPaper(ctx, v);
+    ctx.restore();
+
+    ctx.save();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = COLORS.ink;
+    ctx.fillRect(0, y - Math.max(2, vh(v, STROKE.thick)), v.width, Math.max(2, vh(v, STROKE.thick)));
+    ctx.restore();
   }
 
   private ensureBuffer(v: Viewport): CanvasRenderingContext2D | null {
@@ -702,15 +750,46 @@ export class PoseMatchGame extends GameBase {
     const wall = state.wall;
 
     // Name. Half the comedy is the caption on what you are being asked to do.
+    //
+    // ON A STICKER, NOT BARE. This used to be ink text with an ink drop shadow
+    // drawn straight onto the playfield, which is correct on paper and
+    // invisible the moment the wall's ink plane is behind it — and the plane is
+    // behind it for most of every wall's approach. The hole is punched through
+    // the plane and slides horizontally, so the caption did not vanish
+    // cleanly: it flickered in and out as the hole passed under it, which is
+    // worse than either state. A paper pill reads on both surfaces, which is
+    // the whole reason this brand's components are stickers.
     if (wall) {
       const pop = 1 + EASE.out(state.flash) * 0.25;
+      const size = vh(v, this.playerCount > 1 ? 2.8 : 3.4);
+      const cleared = wall.resolved === 'clear';
+
+      // AT THE TOP OF THE PLAYFIELD, NOT ITS MIDDLE. This used to sit at 34vh,
+      // which as bare text was fine and as an opaque pill is not: 34vh is the
+      // player's own chest. Tucked under the header rule the pill overlaps only
+      // the crown of the head, and `matchAngles` scores arms, legs and torso —
+      // head position is not part of any pose on the roster, so nothing the
+      // player needs to see is behind it.
       ctx.save();
-      ctx.translate(rect.centerX, vh(v, 34));
+      ctx.translate(rect.centerX, vh(v, 19.4));
       ctx.scale(pop, pop);
-      drawText(ctx, wall.pose.name, 0, 0, {
-        size: vh(v, this.playerCount > 1 ? 3.4 : 4.4),
-        color: wall.resolved === 'clear' ? COLORS.green : COLORS.ink,
+
+      ctx.save();
+      ctx.letterSpacing = '0.08em';
+      const textW = measureText(ctx, wall.pose.name, size, WEIGHT.black, FONTS.display);
+      ctx.restore();
+
+      const pillH = size * 1.75;
+      const pillW = textW + size * 1.3;
+      stickerPill(ctx, v, -pillW / 2, -pillH / 2, pillW, pillH, {
+        fill: cleared ? COLORS.green : COLORS.paper,
+        outline: COLORS.ink,
+        outlineWidth: vh(v, STROKE.base),
         shadow: vh(v, SHADOW.base),
+      });
+      drawText(ctx, wall.pose.name, 0, 0, {
+        size,
+        color: COLORS.ink,
         letterSpacing: '0.08em',
       });
       ctx.restore();
@@ -723,7 +802,10 @@ export class PoseMatchGame extends GameBase {
     const barW = Math.min(rect.width * 0.5, vh(v, 42));
     const barH = vh(v, 1.9);
     const barX = rect.centerX - barW / 2;
-    const barY = v.height * 0.88;
+    // Pushed down from 0.88 to make room for the impact chip, which used to sit
+    // at 0.818 — straddling the footer rule, half on paper and half on the ink
+    // wall, which is the one place a sticker looks broken rather than layered.
+    const barY = v.height * 0.905;
 
     // `progressBar` is already the brand component: grid-coloured track, flat
     // fill, ink outline. The glow argument is ignored; passing 0 makes that
@@ -818,8 +900,8 @@ export class PoseMatchGame extends GameBase {
       const left = wall.z * wall.travel;
       const urgent = left < 1;
       const chipW = vh(v, 12);
-      const chipH = vh(v, 3.6);
-      const chipY = barY - vh(v, 6.2);
+      const chipH = vh(v, 3.4);
+      const chipY = v.height * FOOTER_TOP + vh(v, 1);
       stickerPill(ctx, v, rect.centerX - chipW / 2, chipY, chipW, chipH, {
         fill: urgent ? COLORS.red : COLORS.paper,
         outline: COLORS.ink,
