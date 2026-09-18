@@ -173,6 +173,19 @@ export class AttractScreen implements Screen {
 
   async mount(): Promise<void> {
     audio.init();
+    // AMBIENT BED. This is the screen PLAN.md says runs most of the time, and
+    // measured over six simulated seconds with nobody in frame it made exactly
+    // zero audio calls — silence, from the one surface whose entire job is to
+    // pull someone over from across a loud hall. PLAN.md §5's own brief is
+    // "weight the mix low — bass thumps carry through crowd noise", and the
+    // adaptive arpeggiator that does it already exists; it was simply never
+    // started here.
+    //
+    // Slow (96bpm against a round's 126) and held at low intensity, so it reads
+    // as the stall having a pulse rather than as a game already in progress —
+    // and so that starting a round is still an audible gear change.
+    audio.startMusic(96);
+    audio.setMusicIntensity(0.22);
     if (!isSimEnabled()) {
       // Four poses: the point is to light up a whole group walking past, not
       // just the one person nearest the camera.
@@ -182,6 +195,9 @@ export class AttractScreen implements Screen {
 
   unmount(): void {
     this.motion.clear();
+    // The menu and every game start their own music; leaving this running
+    // would layer two arpeggiators at different tempos.
+    audio.stopMusic();
   }
 
   /**

@@ -24,7 +24,18 @@ import { Juice, RollingNumber, PopupLayer } from '../engine/juice';
 import { ParticleSystem, BURST } from '../engine/particles';
 import { audio } from '../engine/audio';
 import { clearFrame, drawText, vh, progressBar, roundRect, graphPaper } from '../engine/draw';
-import { COLORS, PLAYER_COLORS, FONTS, EASE, SHADOW, STROKE, textColor } from '../shell/theme';
+import {
+  COLORS,
+  PLAYER_COLORS,
+  FONTS,
+  EASE,
+  SHADOW,
+  STROKE,
+  textColor,
+  dur,
+  ramp,
+  idlePulse,
+} from '../shell/theme';
 import { leaderboard, type GameId, type RankResult } from '../meta/leaderboard';
 import { tunables } from '../meta/tunables';
 import { ghosts, drawGhost, type GhostPlayback } from '../meta/ghosts';
@@ -209,6 +220,29 @@ const RESULTS_SEC = 7;
  */
 const RESULTS_ABANDONED_SEC = 2.6;
 const RESULTS_EMPTY_GRACE_SEC = 0.9;
+
+/**
+ * Entrance fade on the pre-play lifecycle screens.
+ *
+ * `enter()` is a pure assignment — `state = x; stateTime = 0` — so
+ * waiting -> gathering -> countdown were hard cuts, frame-stepped and
+ * confirmed: one `tick(1)` apart, a full lobby composition is replaced by a
+ * completely different one with no intermediate frame. That fires on every
+ * turn, for every game, for every stranger, and it is the highest-frequency
+ * motion gap in the app.
+ *
+ * A fade and not a `wipe()`. The shell's screen-level wipes are right for
+ * screen-level navigation, but four 0.22s wipes inside a single turn would add
+ * most of a second of dead time to a handover we have just spent effort
+ * shortening — and these are not different screens, they are the same screen
+ * changing its mind. countdown -> playing is deliberately excluded: `enter`
+ * already fires `juice.flash` there, which is a louder and better marker than
+ * a fade.
+ *
+ * Via `ramp`, so it is already 1 on frame one under reduced motion rather than
+ * a very fast 0.
+ */
+const STATE_ENTER_SEC = 0.2;
 
 export abstract class GameBase implements Screen {
   readonly id: string;
@@ -411,15 +445,28 @@ export abstract class GameBase implements Screen {
 
     this.juice.pushTransform(ctx, v);
 
+    // The pre-play screens fade in; see STATE_ENTER_SEC. Set on the context
+    // around the whole tick rather than threaded through every draw call.
+    const enterT = ramp(this.stateTime, STATE_ENTER_SEC);
+
     switch (this.state) {
       case 'waiting':
+        ctx.save();
+        ctx.globalAlpha = enterT;
         this.tickWaiting(fc);
+        ctx.restore();
         break;
       case 'gathering':
+        ctx.save();
+        ctx.globalAlpha = enterT;
         this.tickGathering(fc);
+        ctx.restore();
         break;
       case 'countdown':
+        ctx.save();
+        ctx.globalAlpha = enterT;
         this.tickCountdown(fc);
+        ctx.restore();
         break;
       case 'playing':
         this.drawGhostPose(fc);
@@ -523,7 +570,7 @@ export abstract class GameBase implements Screen {
     this.idleTime += fc.dt;
     if (this.idleTime > tunables.get('game.idleTimeoutSec', IDLE_TIMEOUT_SEC)) this.onExit?.('attract');
 
-    const pulse = 0.6 + Math.sin(fc.time * 2.4) * 0.4;
+    const pulse = 0.6 + idlePulse(fc.time, 2.4, 1) * 0.4;
     drawText(ctx, this.config.title, v.width / 2, v.height * 0.4, {
       size: vh(v, 9),
       color: this.config.color,
@@ -587,7 +634,7 @@ export abstract class GameBase implements Screen {
     }
 
     const remain = Math.max(0, deadline - elapsed);
-    const pulse = 0.65 + Math.sin(fc.time * 3) * 0.35;
+    const pulse = 0.65 + idlePulse(fc.time, 3, 1) * 0.35;
 
     drawText(ctx, String(present), v.width / 2, v.height * 0.33, {
       size: vh(v, 16),
@@ -659,7 +706,10 @@ export abstract class GameBase implements Screen {
     // spent most of its life at 12vh instead of the 20vh it asks for, and the
     // motion read as a retreat rather than a landing.
     const frac = 1 - ((remaining - 0.2) % 1);
-    const scale = 1 + 0.4 * (1 - EASE.out(Math.min(1, frac * 3)));
+    // `dur` collapses the pop to zero under reduced motion, which leaves the
+    // digit at a steady full size — exactly what that setting asks for.
+    const popSec = dur(0.333);
+    const scale = 1 + 0.4 * (1 - EASE.out(popSec <= 0 ? 1 : Math.min(1, frac / popSec)));
 
     ctx.save();
     ctx.translate(v.width / 2, v.height * 0.45);
@@ -764,7 +814,7 @@ export abstract class GameBase implements Screen {
       (this.stateTime < 0.2 && highlights.hasClip() && highlights.play(fc.now, 1));
     const showedReplay = replaying && highlights.render(fc);
 
-    const t = Math.min(1, this.stateTime / 0.5);
+    const t = ramp(this.stateTime, 0.5);
     const versus = this.playerCount === 2 && !this.config.partyMode;
 
     ctx.save();
@@ -838,7 +888,7 @@ export abstract class GameBase implements Screen {
     const r = this.results[0];
     if (!r) return;
 
-    const pop = EASE.back(Math.min(1, this.stateTime / 0.6));
+    const pop = EASE.back(ramp(this.stateTime, 0.6));
 
     drawText(ctx, this.primaryLabel(), v.width / 2, v.height * 0.26, {
       size: vh(v, 2.6),
@@ -871,7 +921,7 @@ export abstract class GameBase implements Screen {
     if (!a || !b) return;
 
     const winner = a.score === b.score ? -1 : a.score > b.score ? 0 : 1;
-    const pop = EASE.back(Math.min(1, this.stateTime / 0.6));
+    const pop = EASE.back(ramp(this.stateTime, 0.6));
 
     for (let slot = 0; slot < 2; slot++) {
       const res = slot === 0 ? a : b;
@@ -945,7 +995,7 @@ export abstract class GameBase implements Screen {
     if (rank.isFirst) {
       // Nobody has played this game yet. "NEW RECORD" would be a lie, and
       // "#1 of 1" is joyless — being first is its own thing worth celebrating.
-      const pulse = 0.75 + Math.sin(fc.time * 7) * 0.25;
+      const pulse = 0.75 + idlePulse(fc.time, 7, 1) * 0.25;
       drawText(ctx, '<FIRST ON THE BOARD>', v.width / 2, y, {
         size: vh(v, 4.6),
         color: COLORS.ink,
@@ -958,7 +1008,7 @@ export abstract class GameBase implements Screen {
     }
 
     if (rank.isRecord) {
-      const pulse = 0.75 + Math.sin(fc.time * 7) * 0.25;
+      const pulse = 0.75 + idlePulse(fc.time, 7, 1) * 0.25;
       // THE YELLOW RULE: yellow is a surface, never text on paper (1.7:1).
       // Ink letterforms with a yellow hard shadow keep the action colour
       // present without asking anyone to read #FBBC04 from 3m.
@@ -1281,7 +1331,7 @@ export abstract class GameBase implements Screen {
     const preview = leaderboard.previewRank(this.config.gameId, score);
 
     if (preview.isRecord && score > 0) {
-      const pulse = 0.7 + Math.sin(fc.time * 8) * 0.3;
+      const pulse = 0.7 + idlePulse(fc.time, 8, 1) * 0.3;
       drawText(ctx, '<RECORD PACE>', chaseX, vh(v, m.chaseY), {
         size: chase(2.4),
         align: chaseAlign,

@@ -824,8 +824,14 @@ export class RhythmGame extends GameBase {
     // investment." Capped so it stays a cue rather than a whistle.
     audio.play('punch', 0.85 + Math.min(0.9, s.combo * 0.022) + (grade === 'perfect' ? 0.2 : 0));
 
-    this.juice.shake(grade === 'perfect' ? 0.15 : 0.07);
-    if (grade === 'perfect') this.juice.hitStop(28);
+    // THREE GRADES, THREE WEIGHTS. This was a single on/off step — `perfect`
+    // got 0.15 and hitstop, and `great` (65 pts) felt identical to `good` (35).
+    // The pitch already carries the distinction; the hands did not, and the
+    // hands are what a player at 3m in a loud hall is actually reading.
+    const HEFT: Record<typeof grade, number> = { perfect: 1, great: 0.62, good: 0.34 };
+    const heft = HEFT[grade];
+    this.juice.shake(0.05 + 0.1 * heft);
+    if (grade !== 'good') this.juice.hitStop(Math.round(28 * heft));
 
     // Sparks fire OUTWARD from the target, away from the vanishing point — the
     // note came at you and you stopped it dead.

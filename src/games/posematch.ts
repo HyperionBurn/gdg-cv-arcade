@@ -404,8 +404,17 @@ export class PoseMatchGame extends GameBase {
       this.scores[slot]?.set(state.cleared);
 
       this.shatter(fc, rect, x, y);
-      this.juice.shake(0.28);
-      this.juice.hitStop(55);
+      // Weight the impact by HOW WELL they hit it. This was flat, so a 66%
+      // scrape-through landed with exactly the same force as a 99% clean match
+      // — even though the percentage is already on screen and already drives
+      // the pitch. `best` runs from PASS_THRESHOLD to 1, so normalise across
+      // that range rather than 0..1, where everything would bunch up at the top.
+      const quality = Math.min(
+        1,
+        Math.max(0, (wall.best - PASS_THRESHOLD) / Math.max(0.01, 1 - PASS_THRESHOLD))
+      );
+      this.juice.shake(0.18 + 0.16 * quality);
+      this.juice.hitStop(Math.round(38 + 30 * quality));
       // Pitch climbs with the streak — PLAN.md §5 calls this the highest-value
       // audio investment, and it is the only "you're on a run" cue that
       // survives a loud hall.

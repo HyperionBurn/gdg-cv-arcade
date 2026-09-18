@@ -801,6 +801,14 @@ export class RedLightGame extends GameBase {
       this.nextBeat -= dt;
       if (this.nextBeat <= 0) {
         audio.play('heartbeat', 0.9 + phaseT * 0.5);
+        // A VISUAL TWIN, because the hall is loud and the speakers may be off.
+        // This beat carries no information by design — it exists to make
+        // standing still feel like it costs something — but a feel-cue that
+        // only exists in audio does not reach a player who cannot hear it, and
+        // this game's whole tension is the wait. Tiny on purpose: it must read
+        // as a pulse under the feet, never as the screen shaking at you, and it
+        // must not be confused with an elimination.
+        this.juice.shake(0.03 + phaseT * 0.035);
         this.nextBeat = 0.62 - phaseT * 0.26;
       }
     }

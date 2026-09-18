@@ -126,6 +126,13 @@ const RAISE_GATE_EXIT = 0.6;
 const SETTLE_GRACE_SEC = 0.45;
 
 /**
+ * Ticks sounded across a dwell fill, before `select` lands as the last and
+ * highest note. Three is enough to read as "it is counting" without turning a
+ * 1.2s hold into a machine-gun.
+ */
+const DWELL_TICKS = 3;
+
+/**
  * Hysteresis on target containment, in vh. You must be INSIDE a target to
  * acquire it, but only inside this padded rect to keep it. A bare rect test
  * cancels the dwell on a single noisy frame at the boundary.
@@ -218,6 +225,21 @@ export class HoverCursor {
    * until it leaves. Otherwise holding still on a tile re-selects it forever.
    */
   private latchedId: string | null = null;
+
+  /**
+   * How many dwell ticks have already sounded for the current fill.
+   *
+   * The dwell ring fills silently for its whole 1.2s and then fires `select` —
+   * so the one control every player uses on every turn (pick a game, then three
+   * letters, maybe a faction) gave no audible sign it was working until it was
+   * already done. The round countdown, which is the same "counting down to a
+   * commit" idea, ticks every second. Rising pitch is PLAN.md §5's own
+   * highest-value audio pattern and is already the language used for combos.
+   *
+   * Quiet reinforcement only: the ring still carries the whole message with the
+   * speakers off, which is the rule for every cue in this app.
+   */
+  private dwellTicks = 0;
 
   private graceId: string | null = null;
   private graceAt = -1;
@@ -324,6 +346,7 @@ export class HoverCursor {
       } else {
         this.progress = 0;
       }
+      this.dwellTicks = Math.floor(this.progress * (DWELL_TICKS + 1));
 
       if (this.latchedId && this.latchedId !== hoveredId) this.latchedId = null;
 
@@ -348,8 +371,19 @@ export class HoverCursor {
     if (canFill && hovered) {
       const dwell = hovered.dwell ?? this.dwellTime;
       this.progress += fc.dt / Math.max(0.05, dwell);
+
+      // Three ticks across the fill, climbing in pitch, then `select` lands on
+      // top as the fourth and highest. Counted rather than timed so it behaves
+      // the same for a tile with a shorter custom dwell.
+      const wantTicks = Math.min(DWELL_TICKS, Math.floor(this.progress * (DWELL_TICKS + 1)));
+      while (this.dwellTicks < wantTicks) {
+        this.dwellTicks++;
+        audio.play('tick', 0.9 + this.dwellTicks * 0.18);
+      }
+
       if (this.progress >= 1) {
         this.progress = 0;
+        this.dwellTicks = 0;
         this.latchedId = hovered.id;
         committed = hovered.id;
         this.commitAt = fc.time;
@@ -359,6 +393,12 @@ export class HoverCursor {
       }
     } else {
       this.progress = Math.max(0, this.progress - (fc.dt / this.dwellTime) * CANCEL_SPEED);
+      // Re-arm as the ring drains, so a cancelled-then-retried dwell ticks
+      // again instead of filling in silence.
+      this.dwellTicks = Math.min(
+        this.dwellTicks,
+        Math.floor(this.progress * (DWELL_TICKS + 1))
+      );
     }
 
     this.state = {
