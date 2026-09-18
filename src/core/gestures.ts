@@ -19,7 +19,7 @@
  * camera height than we tested with.
  */
 
-import { POSE, type Landmark } from './types.ts';
+import { POSE, POSE_LANDMARK_COUNT, type Landmark } from './types.ts';
 import type { TrackedPlayer } from './tracker.ts';
 
 /* ------------------------------------------------------------------ */
@@ -784,6 +784,28 @@ export class LaneDetector {
  * Deliberately reads RAW landmarks, not filtered ones: One Euro exists to
  * suppress small fast movement, which is precisely the signal this needs.
  */
+/**
+ * Every LEFT_/RIGHT_ landmark pair. Derived from POSE rather than listed, so a
+ * landmark added to the enum cannot be silently left unpaired.
+ */
+const MIRRORED: ReadonlyArray<readonly [number, number]> = Object.keys(POSE)
+  .filter((k) => k.startsWith('LEFT_'))
+  .map((k) => [
+    (POSE as Record<string, number>)[k]!,
+    (POSE as Record<string, number>)[k.replace('LEFT_', 'RIGHT_')]!,
+  ])
+  .filter((pair): pair is [number, number] => pair[0] !== undefined && pair[1] !== undefined);
+
+/** Index -> its mirrored partner, or -1. Built once. */
+const MIRROR_OF: number[] = (() => {
+  const out = new Array<number>(POSE_LANDMARK_COUNT).fill(-1);
+  for (const [a, b] of MIRRORED) {
+    out[a] = b;
+    out[b] = a;
+  }
+  return out;
+})();
+
 export class MotionEnergy {
   private prev: Landmark[] | null = null;
   private window: number[] = [];
@@ -819,9 +841,36 @@ export class MotionEnergy {
       // nearly qualified as standing still. The same signal drives Red Light's
       // elimination, so a player who swayed sideways during a red light was
       // under-detected by the same factor.
+      // SWAP-INVARIANT. MediaPipe's left/right are INFERRED, and a relabel
+      // exchanges ~30 paired landmarks in a single frame while nothing in the
+      // room has moved a millimetre. Differencing each index against its own
+      // previous position then reports a violent flail — measured as a 10+
+      // torso/s spike, smoothed into a 0.2s hump.
+      //
+      // That artefact was the entire heavy tail of the "still" distribution,
+      // and five Red Light constants were fitted to compensate for it
+      // (`breachSec` 0.12 -> 0.45 was justified by a p99 of 7.13 that this
+      // produces). Taking the CHEAPER of "this landmark moved" and "this
+      // landmark and its mirror twin exchanged" costs one extra distance per
+      // paired landmark and makes a relabel free, which is what it physically
+      // is.
+      //
+      // A real two-handed gesture is not silently discounted: swapping a pair
+      // is only cheaper when both landmarks genuinely ended up near where the
+      // other one was, which is a mirror-symmetric motion — and a body doing
+      // that symmetrically is also not the thing Red Light is trying to catch.
       const dx = (cur.x - old.x) * player.scale.aspect;
       const dy = cur.y - old.y;
-      sum += Math.sqrt(dx * dx + dy * dy);
+      let d = Math.hypot(dx, dy);
+
+      const twin = MIRROR_OF[i] ?? -1;
+      const oldTwin = twin >= 0 ? this.prev[twin] : undefined;
+      if (oldTwin) {
+        const sx = (cur.x - oldTwin.x) * player.scale.aspect;
+        const sy = cur.y - oldTwin.y;
+        d = Math.min(d, Math.hypot(sx, sy));
+      }
+      sum += d;
       n++;
     }
 

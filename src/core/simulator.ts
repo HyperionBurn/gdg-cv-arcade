@@ -201,6 +201,17 @@ function lm(x: number, y: number, visibility = 1): Landmark {
 export const SIM_ASPECT = 16 / 9;
 
 /**
+ * Inference rate the simulator pretends to deliver, matching
+ * `TARGET_INFERENCE_FPS` in `core/vision.ts`.
+ *
+ * Kept as its own constant rather than imported so `core/simulator.ts` stays
+ * free of the browser-only vision module and remains Node-testable. If the
+ * pipeline's target changes, change this with it — a mismatch silently re-scales
+ * every motion threshold in the app. See `step`.
+ */
+export const SIM_VISION_FPS = 30;
+
+/**
  * How unlike a camera the synthetic body is allowed to be.
  *
  * The simulator's bodies are noiseless, perfectly symmetric and always fully
@@ -330,6 +341,16 @@ function gauss(): number {
 export class PoseSimulator {
   players: SimPlayer[] = [makePlayer(0.5)];
   private frameId = 0;
+
+  /**
+   * Seconds of simulated time owed before the next NEW vision frame.
+   *
+   * See `step`. The real pipeline delivers inference at `TARGET_INFERENCE_FPS`
+   * (30), not at the render rate, and this makes the simulator do the same.
+   */
+  private visionDebt = 0;
+  /** The frame handed out again while the next inference is still "pending". */
+  private lastFrame: VisionFrame | null = null;
   private jumpT = 0;
   private autoPump = false;
 
@@ -778,13 +799,46 @@ export class PoseSimulator {
 
     if (this.auto) this.runAutoScript(t, dt);
 
-    return {
+    // VISION RUNS AT THE PIPELINE'S CADENCE, NOT THE RENDER RATE.
+    //
+    // This used to emit a brand-new frame on every render tick — 60 a second —
+    // while the real pipeline caps inference at TARGET_INFERENCE_FPS (30) and
+    // drops frames when one is in flight. That is not a rounding difference,
+    // because `MotionEnergy` reports a RATE: `perFrame / dtv`.
+    //
+    // Sensor noise displaces a landmark by about the same amount every frame
+    // regardless of how often you sample, so its RATE doubles when you sample
+    // twice as often. Real motion does not: the body has moved half as far in
+    // half the time, so the rate is unchanged. Sampling at 60 therefore
+    // inflates the noise floor by 2x and leaves the signal alone.
+    //
+    // MEASURED on the same body and the same noise, only the cadence changed:
+    //
+    //                    still p50   still p90   pump p50
+    //   60fps (sim)        2.07        4.69        5.98
+    //   30fps (camera)     1.00        1.10        4.54
+    //
+    // Every threshold in Red Light was fitted against the top row and the stall
+    // will run the bottom one. The still/moving separation is actually WIDER at
+    // the real cadence (4.5x rather than 2.9x) — so this was making the game
+    // look harder to detect than it is, and the constants compensated for a
+    // problem that does not exist on the day.
+    //
+    // Holding the previous frame rather than skipping one also exercises the
+    // `frameId` dedup that every consumer has, which sim mode never used to hit.
+    this.visionDebt += dt;
+    const interval = 1 / SIM_VISION_FPS;
+    if (this.lastFrame && this.visionDebt < interval) return this.lastFrame;
+    this.visionDebt = Math.min(this.visionDebt - interval, interval);
+
+    this.lastFrame = {
       poses: this.players.map((p) => this.buildSkeleton(p)),
       hands: [],
       captureTime: performance.now(),
       inferenceMs: 0,
       frameId: this.frameId++,
     };
+    return this.lastFrame;
   }
 
   /** Scripted loop: idle, pump, jump, crouch, lane-change, repeat. */
