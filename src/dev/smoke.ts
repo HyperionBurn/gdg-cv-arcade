@@ -182,7 +182,55 @@ type ArcadeHost = {
   simulator: PoseSimulator;
   screen: unknown;
   tick(frames?: number, dt?: number): unknown;
+  vision: {
+    start(config: Record<string, unknown>): Promise<void>;
+    getStats(): { ready: boolean; error: string | null; delegate: string | null };
+    dispose(): void;
+  };
 };
+
+/** Seconds to allow for MediaPipe to fetch and instantiate a model. */
+const VISION_BOOT_TIMEOUT_MS = 25000;
+
+/**
+ * Does the REAL vision pipeline start?
+ *
+ * THIS EXISTS BECAUSE EVERYTHING ELSE IN THIS FILE RUNS UNDER `?sim=1`, which
+ * replaces the camera and MediaPipe wholesale — so the vision worker is never
+ * constructed and a fault in it passes every check here at full marks.
+ *
+ * One did. `forVisionTasks()` defaults to MediaPipe's CLASSIC WASM loader,
+ * whose only export is a top-level `var ModuleFactory`; in the module worker
+ * this app uses, MediaPipe reaches that loader through `await import()`, where
+ * a top-level `var` is module-scoped and never becomes a global. Every model
+ * load failed with "ModuleFactory not set." on every machine, in dev and in
+ * production, from the first commit — and the entire test suite, every smoke
+ * sweep and every screenshot stayed green, because none of them ever built the
+ * worker. It took a real camera to find it.
+ *
+ * Needs no camera: model loading is independent of any video frame, which is
+ * exactly what makes it cheap enough to run on every sweep.
+ */
+async function checkVisionBoots(host: ArcadeHost): Promise<SmokeCheck[]> {
+  if (!host.vision) return [check('vision boots', false, 'host.vision not exposed')];
+
+  try {
+    void host.vision.start({ mode: 'pose', numPoses: 2, poseModel: 'lite' });
+  } catch (err) {
+    return [check('vision boots', false, `start() threw: ${String(err)}`)];
+  }
+
+  const deadline = performance.now() + VISION_BOOT_TIMEOUT_MS;
+  for (;;) {
+    const s = host.vision.getStats();
+    if (s.error) return [check('vision boots', false, s.error)];
+    if (s.ready) return [check('vision boots', true, `ready on ${s.delegate ?? '?'}`)];
+    if (performance.now() > deadline) {
+      return [check('vision boots', false, `still not ready after ${VISION_BOOT_TIMEOUT_MS}ms`)];
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
 
 function scoreOf(screen: unknown): number {
   const s = screen as { scoreFor?: (slot: number) => number } | null;
@@ -309,6 +357,20 @@ export async function runSmoke(host: ArcadeHost, only?: string[]): Promise<Smoke
   const started = performance.now();
   const probes = only ? PROBES.filter((p) => only.includes(p.id)) : PROBES;
   const results: SmokeResult[] = [];
+
+  // Pre-flight, and only on a full sweep — it is about the app, not one game.
+  if (!only) {
+    const checks = await checkVisionBoots(host);
+    results.push({
+      game: 'vision' as GameId,
+      passed: checks.every((c) => c.ok),
+      checks,
+      idleScore: 0,
+      activeScore: 0,
+      msPerFrame: 0,
+      errors: [],
+    });
+  }
 
   for (const probe of probes) {
     if (!host.router.has(probe.id)) {

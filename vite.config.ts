@@ -13,6 +13,9 @@ export default defineConfig({
     host: true,
   },
   worker: {
+    // ES, matching the module worker in src/core/vision.ts, which in turn is
+    // matched by the MODULE MediaPipe WASM build requested in vision.worker.ts.
+    // Changing any one of those three alone breaks model loading.
     format: 'es',
   },
   build: {
@@ -24,7 +27,10 @@ export default defineConfig({
       output: {
         manualChunks: {
           three: ['three'],
-          mediapipe: ['@mediapipe/tasks-vision'],
+          // No 'mediapipe' chunk. tasks-vision is imported ONLY by the vision
+          // worker, which rollup bundles separately, so naming it here produced
+          // a chunk with nothing in it — the "Generated an empty chunk:
+          // mediapipe" warning on every build was saying exactly that.
         },
       },
     },

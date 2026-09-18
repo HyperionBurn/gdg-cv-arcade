@@ -70,8 +70,25 @@ function toLandmarks(raw: Array<{ x: number; y: number; z: number; visibility?: 
   return out;
 }
 
+/**
+ * The MODULE WASM build, not the classic one.
+ *
+ * `forVisionTasks(path)` defaults to the classic loader, whose only export is a
+ * top-level `var ModuleFactory`. We run in a module worker, where MediaPipe
+ * reaches that loader via `await import()` and a top-level `var` never becomes
+ * a global — so `self.ModuleFactory` is undefined and every task throws
+ * "ModuleFactory not set."
+ *
+ * The second argument switches it to `vision_wasm_module_internal.js`, which
+ * ends with an explicit `globalThis.ModuleFactory = ModuleFactory`. Both builds
+ * are already on disk; only this flag was missing.
+ */
+function createFileset(): ReturnType<typeof FilesetResolver.forVisionTasks> {
+  return FilesetResolver.forVisionTasks(filesetPath, true);
+}
+
 async function createPose(): Promise<void> {
-  const fileset = await FilesetResolver.forVisionTasks(filesetPath);
+  const fileset = await createFileset();
   const modelFile =
     config.poseModel === 'full' ? 'pose_landmarker_full.task' : 'pose_landmarker_lite.task';
 
@@ -99,7 +116,7 @@ async function createPose(): Promise<void> {
 }
 
 async function createHands(): Promise<void> {
-  const fileset = await FilesetResolver.forVisionTasks(filesetPath);
+  const fileset = await createFileset();
   handLandmarker = await HandLandmarker.createFromOptions(fileset, {
     baseOptions: { modelAssetPath: `${modelsPath}/hand_landmarker.task`, delegate },
     runningMode: 'VIDEO',

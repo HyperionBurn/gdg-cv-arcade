@@ -98,6 +98,32 @@ class VisionPipeline {
 
     this.config = { ...this.config, ...config };
 
+    // MODULE WORKER, PAIRED WITH MediaPipe's MODULE WASM BUILD.
+    //
+    // This combination is load-bearing and the two halves must not be changed
+    // independently. See `createFileset` in vision.worker.ts.
+    //
+    // MediaPipe loads its runtime by fetching a loader script and then reading
+    // `self.ModuleFactory`. It ships two builds of that loader:
+    //
+    //   vision_wasm_internal.js         classic script, `var ModuleFactory = ...`
+    //   vision_wasm_module_internal.js  ES module, `globalThis.ModuleFactory = ...`
+    //
+    // In a module worker `importScripts` exists but throws, so MediaPipe falls
+    // back to `await import(loader)`. Against the CLASSIC loader that is fatal:
+    // under ES module semantics its top-level `var` is module-scoped and never
+    // reaches `self`, so `self.ModuleFactory` stays undefined and every model
+    // load dies with "ModuleFactory not set." — which is what a real camera hit
+    // on every machine, in dev and in production alike.
+    //
+    // The module loader assigns `globalThis.ModuleFactory` explicitly, which is
+    // precisely what a dynamic import needs. So the worker stays a module
+    // worker and the worker asks for the module fileset.
+    //
+    // A classic worker was tried instead and cannot work: Vite's dev server
+    // hardcodes `type: "module"` for `?worker` regardless of `worker.format`,
+    // and its `type=classic` worker file still contains ESM imports. Dev would
+    // have been permanently broken while only production worked.
     this.worker = new Worker(new URL('./vision.worker.ts', import.meta.url), {
       type: 'module',
     });
