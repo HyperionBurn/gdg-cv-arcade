@@ -83,8 +83,42 @@ function toLandmarks(raw: Array<{ x: number; y: number; z: number; visibility?: 
  * ends with an explicit `globalThis.ModuleFactory = ModuleFactory`. Both builds
  * are already on disk; only this flag was missing.
  */
-function createFileset(): ReturnType<typeof FilesetResolver.forVisionTasks> {
-  return FilesetResolver.forVisionTasks(filesetPath, true);
+async function createFileset(): ReturnType<typeof FilesetResolver.forVisionTasks> {
+  const fileset = await FilesetResolver.forVisionTasks(filesetPath, true);
+
+  // SELF-DIAGNOSING, because "ModuleFactory not set." on its own names neither
+  // the file it failed to load nor the reason. Both are knowable here, and a
+  // stall at 3pm is the wrong place to be reverse-engineering a minified
+  // bundle. Verify the loader is reachable and is the MODULE build before
+  // MediaPipe gets a chance to fail opaquely.
+  const loader = (fileset as { wasmLoaderPath?: string }).wasmLoaderPath ?? '(none)';
+  if (!loader.includes('module')) {
+    throw new Error(
+      `WASM loader is the CLASSIC build (${loader}). In a module worker that ` +
+        `cannot define self.ModuleFactory. forVisionTasks() needs its second ` +
+        `argument set to true.`
+    );
+  }
+
+  const res = await fetch(loader, { method: 'GET' }).catch((e: unknown) => {
+    throw new Error(`WASM loader unreachable at ${loader}: ${String(e)}`);
+  });
+  if (!res.ok) {
+    throw new Error(
+      `WASM loader ${loader} returned HTTP ${res.status}. ` +
+        `public/wasm is fetched by \`npm run setup\` and is NOT in git — a ` +
+        `fresh clone or a build that skipped setup will 404 here.`
+    );
+  }
+  const ct = res.headers.get('content-type') ?? '';
+  if (ct.includes('text/html')) {
+    throw new Error(
+      `WASM loader ${loader} served as HTML, not JavaScript — it is almost ` +
+        `certainly a 404 page from an SPA rewrite.`
+    );
+  }
+
+  return fileset;
 }
 
 async function createPose(): Promise<void> {

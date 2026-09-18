@@ -1,8 +1,29 @@
 import { defineConfig } from 'vite';
 import { fileURLToPath, URL } from 'node:url';
+import { execSync } from 'node:child_process';
+
+/**
+ * Commit + build time, stamped into the bundle and shown on Rig Check.
+ *
+ * WHY: "still broken" and "still broken on the old build" look identical from
+ * the outside, and we burned a round trip on exactly that. A visible stamp
+ * makes the question answerable in one glance instead of one message.
+ */
+function buildStamp(): string {
+  let sha = 'nogit';
+  try {
+    sha = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+  } catch {
+    /* a tarball checkout or a build box without git — the date still helps */
+  }
+  return `${sha} ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
+}
 
 export default defineConfig({
   base: './',
+  define: {
+    __BUILD_STAMP__: JSON.stringify(buildStamp()),
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

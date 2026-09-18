@@ -161,6 +161,7 @@ export class RigCheckScreen implements Screen {
       <div class="rig-stat"><span>camera</span><b id="rig-cam">—</b></div>
       <div class="rig-stat"><span>vision</span><b id="rig-ready">—</b></div>
       <div class="rig-fault" id="rig-fault"></div>
+      <div class="rig-stat"><span>build</span><b>${__BUILD_STAMP__}</b></div>
       <hr>
       <div class="rig-note">
         Stand back until <b>FULL BODY</b> shows green, then mark the floor with tape.
