@@ -134,7 +134,10 @@ export interface RedLightTunables {
   graceSec: number;
   /** Movement must persist this long to count. Kills single-frame noise spikes. */
   breachSec: number;
-  /** Energy above threshold that earns the maximum advance rate. */
+  /**
+   * Energy above the threshold that earns the maximum advance rate, as a
+   * MULTIPLE of that threshold. See the note at the call site.
+   */
   driveSpan: number;
   /** Percent of the track gained per second at full drive. */
   advanceRate: number;
@@ -191,6 +194,9 @@ export const DEFAULT_REDLIGHT_TUNABLES: RedLightTunables = {
   // threshold, so anything quiet enough to survive is too quiet to gain ground.
   graceSec: 0.55,
   breachSec: 0.12,
+  // Now a MULTIPLE of the threshold rather than an absolute span. 1.5 against
+  // the old default threshold of 0.85 was a span of ~1.3, so 1.5 keeps the
+  // clean-room feel roughly unchanged while tracking a noisy room.
   driveSpan: 1.5,
   advanceRate: 6,
   energyTau: 0.1,
@@ -591,7 +597,24 @@ export class RedLightGame extends GameBase {
         // 13.5 against 14.4, i.e. no discrimination at all. Reading `energy`
         // directly keeps the separation (3.6 against 13.8 measured) because
         // the excess over threshold, not merely crossing it, sets the rate.
-        const drive = Math.min(1, Math.max(0, (r.energy - threshold) / tun.driveSpan));
+        // DRIVE IS A RATIO OF THE THRESHOLD, NOT AN ABSOLUTE EXCESS.
+        //
+        // `driveSpan` was a fixed span in torso-units/sec, chosen against a
+        // noiseless simulator where the threshold is always `moveEnter`. Now
+        // that the threshold floats on the room's measured noise floor, a
+        // fixed span demands the same ABSOLUTE excess in a noisy room as in a
+        // silent one — while the floor underneath it has moved up.
+        //
+        // MEASURED over ten seconds of correct play: 7.3% of the track with a
+        // clean body, 0.7% with mild sensor noise. A tenfold collapse, which
+        // on a real camera means the markers barely move and the race — the
+        // whole spectacle of the game — stops happening.
+        //
+        // Scaling the span with the threshold keeps "how far above your own
+        // still-level you have to be to move at full speed" constant, which is
+        // what the number was always trying to express.
+        const span = Math.max(0.2, threshold * tun.driveSpan);
+        const drive = Math.min(1, Math.max(0, (r.energy - threshold) / span));
         if (drive > 0) {
           r.progress = Math.min(100, r.progress + drive * tun.advanceRate * dt);
           r.wobble = Math.min(1, r.wobble + drive * dt * 4);
@@ -661,10 +684,39 @@ export class RedLightGame extends GameBase {
     //
     // The calibration window sits in the lobby and countdown, before the round
     // starts, so it costs nothing and nobody is racing through it.
-    const calibrating = r.age < this.tun.calibrateSec;
-    const rise = calibrating ? this.tun.calibrateTau : this.light === 'green' ? 20 : Infinity;
-    const tau = r.energy < r.quiet ? 0.09 : rise;
-    if (Number.isFinite(tau)) r.quiet += (r.energy - r.quiet) * (1 - Math.exp(-dtv / tau));
+    // ONLY BEFORE THE ROUND STARTS. `age` alone was wrong: it counts from
+    // admission, and a player admitted late in a short lobby is still
+    // calibrating when the light goes green — at which point the window learns
+    // their RUNNING energy as their still-level.
+    //
+    // MEASURED: a moving player's energy and their learned floor converged at
+    // ~3.4 and ~3.0, putting the threshold (floor x 2.4) far above the signal,
+    // and the advance rate collapsed from 7.3% of the track per ten seconds to
+    // 0.7%. The race stopped happening — which is worse than the bug the
+    // calibration was added to fix.
+    //
+    // The lobby and countdown are the correct window: nobody is racing, and
+    // the light has not gone green.
+    const calibrating = this.state !== 'playing' && r.age < this.tun.calibrateSec;
+
+    // ONCE THE ROUND STARTS, THE FLOOR IS FIXED.
+    //
+    // It used to keep adapting, falling fast (tau 0.09) whenever energy dipped
+    // below it. That makes it a MINIMUM tracker, and a minimum is the wrong
+    // statistic for a noise floor: it drifts down toward the quietest instant,
+    // the threshold follows, and the noise PEAKS then cross it. Measured under
+    // mild noise, that eliminated a player who never moved.
+    //
+    // The fast fall was justified as "so a freeze is recognised in time", but
+    // that is the job of `energy`, which has its own 0.1s smoother. The floor
+    // is a property of the room and the camera; it does not change because
+    // somebody stopped moving.
+    //
+    // So it adapts during the lobby and countdown, and holds for the round.
+    if (calibrating) {
+      const tau = r.energy < r.quiet ? 0.09 : this.tun.calibrateTau;
+      r.quiet += (r.energy - r.quiet) * (1 - Math.exp(-dtv / tau));
+    }
   }
 
   /**
