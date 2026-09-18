@@ -22,7 +22,6 @@
  */
 
 import { RepCounter } from '../core/gestures';
-import { POSE } from '../core/types';
 import type { TrackedPlayer } from '../core/tracker';
 import { GameBase, type SlotRect } from './base';
 import { BURST } from '../engine/particles';
@@ -54,15 +53,6 @@ export class SixtySevenGame extends GameBase {
   /** Per-slot bar overshoot, for the springy fill. */
   private barPulse = [0, 0];
   private lastRepAt = [0, 0];
-  /**
-   * Latched up/down state per arm, indexed `slot * 2 + arm`.
-   *
-   * The indicator dots are now a flat two-state sticker rather than a fading
-   * one, because DESIGN.md has no tints — so the dot needs a boolean, and a
-   * bare `t > 0.5` on a live landmark flips tens of times a second at the
-   * boundary. Same hysteresis rule as every other gate in this codebase.
-   */
-  private armUp = [false, false, false, false];
 
   constructor() {
     super({
@@ -81,7 +71,6 @@ export class SixtySevenGame extends GameBase {
     for (const c of this.counters) c.reset();
     this.barPulse = [0, 0];
     this.lastRepAt = [0, 0];
-    this.armUp = [false, false, false, false];
 
     const best = leaderboard.getBest('sixtyseven');
     this.target = best ? Math.max(best.score, 10) : DEFAULT_TARGET;
@@ -341,12 +330,11 @@ export class SixtySevenGame extends GameBase {
    * shadow when it is up. The old version faded a glow in and out, which is
    * both a blur and a tint of a brand colour.
    */
-  private drawArmIndicators(fc: FrameContext, player: TrackedPlayer, slot: number): void {
+  private drawArmIndicators(fc: FrameContext, _player: TrackedPlayer, slot: number): void {
     const { ctx, v } = fc;
     const rect = this.slotRect(v, slot);
-    const lm = player.landmarks;
-    const unit = player.scale.unit;
-    if (unit <= 0) return;
+    const counter = this.counters[slot];
+    if (!counter) return;
 
     // Clear of the rate pill on both axes — the dots are now solid stickers
     // with a shadow rather than a faint halo, so they take real space.
@@ -357,25 +345,21 @@ export class SixtySevenGame extends GameBase {
     const drop = vh(v, SHADOW.base);
     const color = this.playerCount > 1 ? PLAYER_COLORS[slot]! : COLORS.red;
 
-    const arms: Array<{ wrist: number; shoulder: number; dx: number }> = [
-      { wrist: POSE.LEFT_WRIST, shoulder: POSE.LEFT_SHOULDER, dx: spacing },
-      { wrist: POSE.RIGHT_WRIST, shoulder: POSE.RIGHT_SHOULDER, dx: -spacing },
+    // SIDES WERE SWAPPED. `Projection.x` mirrors (`1 - nx`), which is the
+    // whole point — you move like you would in a mirror. So the subject's LEFT
+    // arm appears on the LEFT of the screen, and this had it the other way
+    // round, with a comment confidently asserting the opposite. Raising your
+    // left arm lit the right-hand dot.
+    const arms: Array<{ side: 'left' | 'right'; dx: number }> = [
+      { side: 'left', dx: -spacing },
+      { side: 'right', dx: spacing },
     ];
 
     for (let i = 0; i < arms.length; i++) {
       const arm = arms[i]!;
-      const w = lm[arm.wrist];
-      const s = lm[arm.shoulder];
-      if (!w || !s) continue;
-
-      const raised = (s.y - w.y) / unit;
-      const idx = slot * 2 + i;
-      const wasUp = this.armUp[idx] ?? false;
-      // Hysteresis, as ARCHITECTURE.md requires on every gate.
-      const up = wasUp ? raised > 0.06 : raised > 0.14;
-      this.armUp[idx] = up;
-
-      // Mirrored display: subject-left appears on the right of the screen.
+      // Ask the COUNTER, rather than running a second, different test on
+      // filtered landmarks. See RepCounter.armUp.
+      const up = counter.armUp(arm.side);
       const cx = rect.centerX + arm.dx;
 
       ctx.save();

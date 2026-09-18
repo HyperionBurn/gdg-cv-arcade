@@ -249,6 +249,13 @@ const RESULTS_SEC = 7;
 const GHOST_W = 480;
 const GHOST_H = 270;
 
+/**
+ * Age at which a vision frame stops counting as evidence that anyone is there.
+ * Generous: it must clear a `numPoses` model rebuild, measured at a 492-575ms
+ * dead window plus a 354-418ms first inference.
+ */
+const VISION_STALE_MS = 1500;
+
 const RESULTS_ABANDONED_SEC = 2.6;
 const RESULTS_EMPTY_GRACE_SEC = 0.9;
 
@@ -614,6 +621,22 @@ export abstract class GameBase implements Screen {
   }
 
   private updateTracking(fc: FrameContext): void {
+    // STALE VISION MEANS NOBODY, NOT "THE LAST PERSON, FOREVER".
+    //
+    // `players` is only refreshed on a NEW frameId, so if the worker dies or
+    // wedges it simply stops being updated — and a non-empty `players` array
+    // then persists indefinitely. The consequences are all silent: a round
+    // plays itself out against a frozen skeleton, and `tickWaiting` sees a
+    // phantom that never leaves, so the idle timeout never fires and the kiosk
+    // never returns to attract. At a stall that is a screen stuck on one dead
+    // frame until somebody notices and reloads it.
+    //
+    // The worker's `onerror` only emits a stat, so nothing else catches this.
+    if (fc.vision && fc.now - fc.vision.captureTime > VISION_STALE_MS) {
+      if (this.players.length > 0) this.players = [];
+      return;
+    }
+
     if (!fc.vision || fc.vision.frameId === this.lastFrameId) return;
     this.lastFrameId = fc.vision.frameId;
 

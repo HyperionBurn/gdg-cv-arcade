@@ -37,6 +37,9 @@ const DEFAULT_CONFIG: VisionConfig = {
  * Inference target. 30fps is plenty for gesture detection and leaves headroom
  * for a 60fps render. Raising this mostly heats the laptop up.
  */
+/** See the watchdog in `beginPump`. */
+const IN_FLIGHT_TIMEOUT_MS = 2000;
+
 const TARGET_INFERENCE_FPS = 30;
 
 class VisionPipeline {
@@ -50,6 +53,13 @@ class VisionPipeline {
   private frameId = 0;
   private lastPumpTime = 0;
   private lastVideoTime = -1;
+  /**
+   * Frames posted to the worker and not yet answered. Capped at one — see the
+   * backpressure note in `beginPump`.
+   */
+  private inFlight = 0;
+  /** When the in-flight frame was posted, for the watchdog. */
+  private lastPostTime = 0;
 
   private fpsWindow: number[] = [];
   private msWindow: number[] = [];
@@ -180,6 +190,7 @@ class VisionPipeline {
         break;
 
       case 'frame': {
+        this.inFlight = Math.max(0, this.inFlight - 1);
         const frame = msg.frame!;
         const now = performance.now();
 
@@ -206,6 +217,7 @@ class VisionPipeline {
       }
 
       case 'dropped':
+        this.inFlight = Math.max(0, this.inFlight - 1);
         this.emitStats({ dropped: this.stats.dropped + 1 });
         break;
 
@@ -214,6 +226,10 @@ class VisionPipeline {
         break;
 
       case 'error':
+        // Release the slot too. An error IS a terminal reply, and leaving the
+        // counter pinned would stop the pump permanently — trading a bounded
+        // queue for a dead camera, which is worse than the bug being fixed.
+        this.inFlight = Math.max(0, this.inFlight - 1);
         this.emitStats({ error: msg.message ?? 'Unknown vision error' });
         break;
     }
@@ -238,13 +254,53 @@ class VisionPipeline {
       // Don't re-submit a frame the camera hasn't refreshed. Saves real work
       // when the capture rate is below our inference target.
       if (video.currentTime === this.lastVideoTime) return;
+
+      // ONE FRAME IN FLIGHT. The main thread is the only place backpressure
+      // can actually be applied.
+      //
+      // The worker has a `busy` flag, but it is dead code: `processFrame` is
+      // fully synchronous, so `busy` is always false by the time the next
+      // message is dequeued, and a worker handles messages one at a time
+      // regardless. Frames therefore queue in the message port with nothing
+      // bounding the queue.
+      //
+      // MEASURED: posting at 30Hz (the real pump rate) latency stays flat at
+      // ~15ms and nothing queues. Posting faster than the worker can consume,
+      // latency grows LINEARLY — a burst of 60 frames ends at 687ms, climbing
+      // by exactly one inference time per frame. The queue grows at
+      // `pumpRate - 1000/inferenceMs` frames per second, so it stays at zero
+      // while inference is under ~33ms and runs away the moment it is not:
+      // a CPU-delegate fallback (60-150ms), an integrated GPU landmarking six
+      // bodies, or a laptop thermally throttled at hour three. Each queued
+      // frame also pins ~3.7MB of ImageBitmap.
+      //
+      // Dropping the frame instead is strictly better than queueing it: a
+      // stale pose delivered half a second late is worse than no pose.
+      if (this.inFlight > 0) {
+        // WATCHDOG. Every path that posts a frame also releases the slot, but
+        // "every path" is exactly the assumption that fails when a worker
+        // wedges mid-inference or a message is lost — and the cost of being
+        // wrong is a camera that never recovers for the rest of the event.
+        // Two seconds is far beyond any legitimate inference, including the
+        // ~400ms first frame after a model rebuild.
+        if (now - this.lastPostTime > IN_FLIGHT_TIMEOUT_MS) {
+          this.inFlight = 0;
+        } else {
+          this.emitStats({ dropped: this.stats.dropped + 1 });
+          return;
+        }
+      }
+
       this.lastVideoTime = video.currentTime;
       this.lastPumpTime = now;
+      this.lastPostTime = now;
+      this.inFlight++;
 
       createImageBitmap(video)
         .then((bitmap) => {
           if (!this.worker || !this.running) {
             bitmap.close();
+            this.inFlight--;
             return;
           }
           this.worker.postMessage(
@@ -254,6 +310,7 @@ class VisionPipeline {
         })
         .catch(() => {
           /* video not decodable this tick — skip */
+          this.inFlight--;
         });
     };
 
@@ -262,6 +319,7 @@ class VisionPipeline {
 
   stop(): void {
     this.running = false;
+    this.inFlight = 0;
     cancelAnimationFrame(this.rafHandle);
   }
 

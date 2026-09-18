@@ -94,7 +94,19 @@ function step(now: number, dt: number): void {
   const time = (now - startTime) / 1000;
 
   // In sim mode the simulator stands in for camera + MediaPipe entirely.
-  if (SIM) latestVision = simulator.step(time, dt);
+  if (SIM) {
+    latestVision = simulator.step(time, dt);
+    // Stamp with the SAME clock the frame is delivered on.
+    //
+    // The simulator stamps `performance.now()`, but `__arcade.tick()` drives
+    // `now` from a synthetic monotonic clock that advances a fixed 16.7ms per
+    // call regardless of real time — so after a few hundred ticks the two are
+    // seconds apart, in the same units but from different origins. Anything
+    // comparing them (the stale-vision guard in GameBase, the latency stat)
+    // then reads a fresh frame as ancient. A synthetic frame is by definition
+    // exactly as old as the frame it is delivered in.
+    latestVision.captureTime = now;
+  }
 
   const fc: FrameContext = { time, dt, now, v, ctx, vision: latestVision };
 

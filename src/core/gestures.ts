@@ -158,7 +158,8 @@ export const DEFAULT_REP_TUNABLES: RepTunables = {
 type ArmState = 'down' | 'up';
 
 class ArmPump {
-  private state: ArmState = 'down';
+  /** Readable so the UI can show the gate the COUNTER is using. */
+  state: ArmState = 'down';
   private lastRepTime = 0;
   private upGate: Hysteresis;
   private downGate: Hysteresis;
@@ -258,6 +259,21 @@ export class RepCounter {
 
   getTunables(): Readonly<RepTunables> {
     return this.tun;
+  }
+
+  /**
+   * Is this arm currently UP, according to the gate that actually counts?
+   *
+   * 67's on-screen arm dots used to run their own copy of this test, on
+   * FILTERED landmarks and at different thresholds (0.14/0.06 against the
+   * counter's raw 0.12/0.04). So the dots could light while the score did not
+   * move, or vice versa — and their entire reason for existing, per their own
+   * comment, is to tell a player whether the problem is their motion or the
+   * camera. A readout that can disagree with the thing it is reporting on is
+   * worse than no readout.
+   */
+  armUp(side: 'left' | 'right'): boolean {
+    return (side === 'left' ? this.left : this.right).state === 'up';
   }
 
   update(player: TrackedPlayer, now: number): number {
