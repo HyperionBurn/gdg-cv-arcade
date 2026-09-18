@@ -93,10 +93,60 @@ interface BladeState extends Blade {
 /** Maps a normalised landmark into screen pixels. */
 export type ProjectFn = (nx: number, ny: number) => BladePoint;
 
+/**
+ * How far apart the two wrists must be before an exchange means anything, in
+ * torso units. Hands held together genuinely are near each other's last
+ * position, and that is not a swap.
+ */
+const SWAP_APART_TORSOS = 0.35;
+
+/**
+ * How far the pair must move, relative to this body's OWN recent movement,
+ * before an apparent exchange is believed.
+ *
+ * Antiphase fists crossing at speed are algebraically identical to a label
+ * swap, and a naive test fired 47 times across ordinary swiping. A real swap
+ * is a discontinuity: measured, every false positive stayed under 2.02x the
+ * body's rolling baseline, so 3x clears them by an order of magnitude while
+ * still catching 37 of 41 real exchanges — including 17 of 17 on a body that
+ * was not moving at all, which is the case that actually scores points.
+ */
+const SWAP_STAY_SPIKE = 3;
+
+/**
+ * Seconds a body's blades stay fiction after its labels exchange.
+ *
+ * Suppressing the single spike frame is not enough. The One Euro filter then
+ * GLIDES each wrist across to its new label over the following frames — 13 of
+ * them, measured, sweeping a live cutting segment the whole way at 1.54 down to
+ * 0.25 screen-heights/sec. 0.25s covers the measured 0.22s settle with a frame
+ * to spare, and is set by the filter's time constant rather than the frame
+ * rate, so it holds at 30fps too.
+ */
+const SWAP_SETTLE_SEC = 0.25;
+
+/**
+ * Milliseconds after which the previous raw sample is too old to difference
+ * against. Two vision frames at 30fps is 67ms, so 120 tolerates an ordinary
+ * dropped frame while still catching a real gap.
+ */
+const SWAP_GAP_MS = 120;
+
 export class BladeTracker {
   private blades = new Map<string, BladeState>();
   /** Set for the frame on which this player's left/right labels exchanged. */
   private forceReacquire = false;
+  /**
+   * Last frame's RAW wrists per player, plus a rolling baseline of how far the
+   * pair moves per frame. Raw, because the swap has to be caught before the
+   * filter smooths it away — see `labelsExchanged`.
+   */
+  private rawWrists = new Map<
+    number,
+    { lx: number; ly: number; rx: number; ry: number; step: number; at: number }
+  >();
+  /** `now` (ms) until which this player's blades are fiction. */
+  private swapUntil = new Map<number, number>();
   private tun: BladeTunables;
 
   constructor(tunables: Partial<BladeTunables> = {}) {
@@ -141,7 +191,16 @@ export class BladeTracker {
       //
       // MEASURED before this, with label swapping enabled: a Rhythm player
       // holding both fists still scored 318 points across fifteen seconds.
-      this.forceReacquire = this.labelsExchanged(player, project);
+      if (this.labelsExchanged(player, now)) {
+        this.swapUntil.set(player.id, now + SWAP_SETTLE_SEC * 1000);
+      }
+
+      // A body whose labels are still settling is NOT observable, so its blades
+      // are simply not updated: they fall out of `visible` below, nothing
+      // scores off them, nothing draws them where the hand is not, and the
+      // `wasHidden` path snaps them cleanly when the body comes back instead of
+      // sweeping the gap.
+      if (now < (this.swapUntil.get(player.id) ?? 0)) continue;
 
       // Subject-left and subject-right. The projection mirrors, so the blade
       // appears on the side of the screen the player sees their own hand on.
@@ -154,6 +213,17 @@ export class BladeTracker {
     for (const [key, blade] of this.blades) {
       if (now - blade.lastSeen > 400) this.blades.delete(key);
       else if (now - blade.lastSeen > 0) blade.visible = blade.lastSeen === now;
+    }
+
+    // Forget the swap state of anyone who left. A kiosk runs for hours and
+    // tracker ids never repeat, so these two maps would otherwise grow for the
+    // whole event.
+    const live = new Set(players.map((p) => p.id));
+    for (const id of this.rawWrists.keys()) {
+      if (!live.has(id)) {
+        this.rawWrists.delete(id);
+        this.swapUntil.delete(id);
+      }
     }
 
     return [...this.blades.values()].filter((b) => b.visible);
@@ -175,27 +245,92 @@ export class BladeTracker {
    * meaningfully apart, since with both hands together the question is
    * meaningless and the answer does not matter.
    */
-  private labelsExchanged(player: TrackedPlayer, project: ProjectFn): boolean {
-    const prevL = this.blades.get(`${player.id}:left`);
-    const prevR = this.blades.get(`${player.id}:right`);
-    if (!prevL || !prevR || !prevL.visible || !prevR.visible) return false;
-
-    const lm = player.landmarks;
-    const l = lm[POSE.LEFT_WRIST];
-    const r = lm[POSE.RIGHT_WRIST];
-    if (!l || !r) return false;
-
-    const nl = project(l.x, l.y);
-    const nr = project(r.x, r.y);
-
-    const apart = Math.hypot(prevL.x - prevR.x, prevL.y - prevR.y);
+  /**
+   * Have this player's left/right labels just exchanged?
+   *
+   * READS `player.raw`, NOT `player.landmarks`. This is the whole fix. On the
+   * frame the labels exchange, the One Euro filtered wrist has barely moved —
+   * that is what a smoother is for — so `swap < stay * 0.5` was never true and
+   * this method fired ZERO times in 900 frames with label swapping enabled. The
+   * exchange then played out as a quarter-second of plausible-looking cutting
+   * motion, and a MOTIONLESS player scored up to 45 in Fruit Ninja and 239 in
+   * Rhythm Punch.
+   *
+   * Three conditions, and all three are load-bearing:
+   *
+   *   1. the hands are meaningfully APART (`SWAP_APART_TORSOS`) — hands held
+   *      together are legitimately near each other's last position;
+   *   2. each new wrist is markedly closer to where the OTHER was than to where
+   *      its own was, which is the exchange itself;
+   *   3. the pair moved far more than this body's own recent baseline
+   *      (`SWAP_STAY_SPIKE`) — without this, antiphase fists crossing at speed
+   *      are algebraically indistinguishable from a swap and fire it 47 times
+   *      across ordinary swiping.
+   *
+   * Distances are aspect-corrected before being divided by a torso height:
+   * landmark x is normalised by frame WIDTH and y by HEIGHT, so the raw pair
+   * are not the same unit (ARCHITECTURE.md).
+   */
+  private labelsExchanged(player: TrackedPlayer, now: number): boolean {
+    const lw = player.raw[POSE.LEFT_WRIST];
+    const rw = player.raw[POSE.RIGHT_WRIST];
     const unit = player.scale.unit;
-    const screenH = Math.abs(project(0, 1).y - project(0, 0).y) || 1;
-    if (!(unit > 0) || apart < unit * screenH * 0.35) return false;
+    if (!lw || !rw || !(unit > 0)) return false;
 
-    const stay = Math.hypot(nl.x - prevL.x, nl.y - prevL.y) + Math.hypot(nr.x - prevR.x, nr.y - prevR.y);
-    const swap = Math.hypot(nl.x - prevR.x, nl.y - prevR.y) + Math.hypot(nr.x - prevL.x, nr.y - prevL.y);
-    return swap < stay * 0.5;
+    const prev = this.rawWrists.get(player.id);
+    const a = player.scale.aspect;
+    const d = (ax: number, ay: number, bx: number, by: number): number =>
+      Math.hypot((ax - bx) * a, ay - by) / unit;
+
+    let exchanged = false;
+    let step = prev?.step ?? -1;
+
+    // A GAP IS NOT A SPIKE.
+    //
+    // The sample before this one may be old: the caller can legitimately stop
+    // passing a body for a while — the games drop one for 0.25s after their own
+    // swap guard fires, and a player can simply leave frame. Differencing
+    // against a stale position produces a huge `stay`, which reads as exactly
+    // the discontinuity this method hunts for, re-arms the latch, and the body
+    // never recovers. Measured as Rhythm Punch scoring 0 on active play, three
+    // runs of three, with both guards running.
+    //
+    // So a stale sample re-seeds the baseline and asserts nothing.
+    const stale = !prev || now - prev.at > SWAP_GAP_MS;
+    if (stale) {
+      this.rawWrists.set(player.id, {
+        lx: lw.x,
+        ly: lw.y,
+        rx: rw.x,
+        ry: rw.y,
+        step: -1,
+        at: now,
+      });
+      return false;
+    }
+
+    if (prev) {
+      const apart = d(prev.lx, prev.ly, prev.rx, prev.ry);
+      const stay = d(lw.x, lw.y, prev.lx, prev.ly) + d(rw.x, rw.y, prev.rx, prev.ry);
+      const swap = d(lw.x, lw.y, prev.rx, prev.ry) + d(rw.x, rw.y, prev.lx, prev.ly);
+
+      exchanged =
+        step >= 0 &&
+        apart >= SWAP_APART_TORSOS &&
+        swap < stay * 0.5 &&
+        stay >= Math.max(1e-3, step) * SWAP_STAY_SPIKE;
+
+      // The baseline deliberately EXCLUDES the spike frame. Folding a swap into
+      // it lifts it by an order of magnitude, and the next swap a second later
+      // would be measured against that and go unnoticed. ~10-frame constant:
+      // long enough to be a baseline, short enough to follow a player winding
+      // up for a hard swipe.
+      if (step < 0) step = stay;
+      else if (!exchanged) step = step * 0.9 + stay * 0.1;
+    }
+
+    this.rawWrists.set(player.id, { lx: lw.x, ly: lw.y, rx: rw.x, ry: rw.y, step, at: now });
+    return exchanged;
   }
 
   private maxTravelPerFrame(player: TrackedPlayer, project: ProjectFn): number {
@@ -320,6 +455,11 @@ export class BladeTracker {
 
   reset(): void {
     this.blades.clear();
+    // Per-round state too: a second round must not inherit the first round's
+    // raw wrists or a settle latch that never expired. Latched state surviving
+    // a round boundary is this codebase's recurring bug class.
+    this.rawWrists.clear();
+    this.swapUntil.clear();
   }
 
   get all(): Blade[] {

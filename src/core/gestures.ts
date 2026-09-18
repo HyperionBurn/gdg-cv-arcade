@@ -19,8 +19,8 @@
  * camera height than we tested with.
  */
 
-import { POSE, type Landmark } from './types';
-import type { TrackedPlayer } from './tracker';
+import { POSE, type Landmark } from './types.ts';
+import type { TrackedPlayer } from './tracker.ts';
 
 /* ------------------------------------------------------------------ */
 /* Primitive                                                           */
@@ -38,11 +38,18 @@ export class Hysteresis {
   private _justEntered = false;
   private _justExited = false;
 
-  constructor(
-    public enter: number,
-    public exit: number,
-    private invert = false
-  ) {}
+  public enter: number;
+  public exit: number;
+  private invert: boolean;
+
+  // Explicit fields, not parameter properties: Node's --test type stripping is
+  // strip-only and rejects those, which made this whole module — every gesture
+  // detector every game depends on — impossible to unit test.
+  constructor(enter: number, exit: number, invert = false) {
+    this.enter = enter;
+    this.exit = exit;
+    this.invert = invert;
+  }
 
   update(value: number): boolean {
     const v = this.invert ? -value : value;
@@ -90,7 +97,11 @@ export class Hysteresis {
 export class Baseline {
   private value: number | null = null;
 
-  constructor(private rate = 0.02) {}
+  private rate: number;
+
+  constructor(rate = 0.02) {
+    this.rate = rate;
+  }
 
   update(sample: number, settled: boolean): number {
     if (this.value === null) {
@@ -160,11 +171,20 @@ type ArmState = 'down' | 'up';
 class ArmPump {
   /** Readable so the UI can show the gate the COUNTER is using. */
   state: ArmState = 'down';
-  private lastRepTime = 0;
+  /**
+   * -Infinity, not 0. Zero means "a rep happened at the epoch", so if a round's
+   * clock starts within `minRepIntervalMs` of zero the FIRST rep of the round
+   * is silently swallowed. Measured: the same motion scored 1 rep when counting
+   * began at t=33ms and 2 from t=83ms onward.
+   */
+  private lastRepTime = -Infinity;
   private upGate: Hysteresis;
   private downGate: Hysteresis;
 
-  constructor(private tun: RepTunables) {
+  private tun: RepTunables;
+
+  constructor(tun: RepTunables) {
+    this.tun = tun;
     this.upGate = new Hysteresis(tun.upEnter, tun.upExit);
     this.downGate = new Hysteresis(tun.downEnter, tun.downExit);
   }
@@ -246,7 +266,10 @@ export class RepCounter {
   /** Rolling rep rate in reps/sec, drives the audio pitch ramp. */
   private repTimes: number[] = [];
 
-  constructor(private tun: RepTunables = { ...DEFAULT_REP_TUNABLES }) {
+  private tun: RepTunables;
+
+  constructor(tun: RepTunables = { ...DEFAULT_REP_TUNABLES }) {
+    this.tun = tun;
     this.left = new ArmPump(tun);
     this.right = new ArmPump(tun);
   }
@@ -373,7 +396,10 @@ export class VerticalGestures {
   private _jumped = false;
   private _crouched = false;
 
-  constructor(private tun: JumpTunables = { ...DEFAULT_JUMP_TUNABLES }) {
+  private tun: JumpTunables;
+
+  constructor(tun: JumpTunables = { ...DEFAULT_JUMP_TUNABLES }) {
+    this.tun = tun;
     this.jumpGate = new Hysteresis(tun.jumpEnter, tun.jumpExit);
     this.crouchGate = new Hysteresis(tun.crouchEnter, tun.crouchExit);
     this.baseline = new Baseline(tun.baselineRate);
@@ -489,7 +515,11 @@ export class LaneDetector {
   private lane = 0;
   private _changed = 0;
 
-  constructor(private tun: LaneTunables = { ...DEFAULT_LANE_TUNABLES }) {}
+  private tun: LaneTunables;
+
+  constructor(tun: LaneTunables = { ...DEFAULT_LANE_TUNABLES }) {
+    this.tun = tun;
+  }
 
   setTunables(patch: Partial<LaneTunables>): void {
     this.tun = { ...this.tun, ...patch };
@@ -570,7 +600,11 @@ export class MotionEnergy {
   private prev: Landmark[] | null = null;
   private window: number[] = [];
 
-  constructor(private windowSize = 5) {}
+  private windowSize: number;
+
+  constructor(windowSize = 5) {
+    this.windowSize = windowSize;
+  }
 
   update(player: TrackedPlayer): number {
     const lms = player.raw;
@@ -587,7 +621,17 @@ export class MotionEnergy {
       const cur = lms[i]!;
       const old = this.prev[i];
       if (!old || cur.visibility < 0.4) continue;
-      const dx = cur.x - old.x;
+      // ASPECT-CORRECTED. Landmark x is normalised by frame WIDTH and y by
+      // frame HEIGHT, so the raw pair are not the same physical unit and
+      // `sqrt(dx^2 + dy^2)` is not a distance. Uncorrected, this under-read
+      // HORIZONTAL movement by the aspect ratio — 1.78x at 16:9 — which is
+      // precisely the axis somebody walking through frame moves along.
+      //
+      // Found by measuring a stroller against attract's stillness gate: it
+      // nearly qualified as standing still. The same signal drives Red Light's
+      // elimination, so a player who swayed sideways during a red light was
+      // under-detected by the same factor.
+      const dx = (cur.x - old.x) * player.scale.aspect;
       const dy = cur.y - old.y;
       sum += Math.sqrt(dx * dx + dy * dy);
       n++;
@@ -622,13 +666,17 @@ export class MotionEnergy {
 export class TPoseDetector {
   private heldSince = 0;
 
-  constructor(
-    /** Max vertical deviation of wrist from shoulder, in torso units. */
-    private tolerance = 0.35,
-    /** Min horizontal extension from shoulder, in torso units. */
-    private extension = 0.7,
-    private holdMs = 800
-  ) {}
+  /** Max vertical deviation of wrist from shoulder, in torso units. */
+  private tolerance: number;
+  /** Min horizontal extension from shoulder, in torso units. */
+  private extension: number;
+  private holdMs: number;
+
+  constructor(tolerance = 0.35, extension = 0.7, holdMs = 800) {
+    this.tolerance = tolerance;
+    this.extension = extension;
+    this.holdMs = holdMs;
+  }
 
   /** @returns 0..1 progress toward confirmation */
   update(player: TrackedPlayer, now: number): number {

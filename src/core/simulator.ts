@@ -87,9 +87,20 @@ export interface SimPlayer {
   /** Flail frequency, Hz. */
   motionRate: number;
   /**
-   * Player has stopped dead. Governs `motion` only — `pumpRate` and `swipeRate`
-   * keep running, because those belong to other games and freezing is a Red
-   * Light concept.
+   * Player has stopped dead. Stops `motion`, `pumpRate` AND `swipeRate`.
+   *
+   * It used to govern `motion` only, on the reasoning that pump and swipe
+   * "belong to other games". That made `setFrozen` a lie in the one case it
+   * exists for: a Red Light body driven by `setPump` — which is how both
+   * `smoke.ts` and every hand-written probe drive it — kept pumping its arms
+   * while nominally frozen. MEASURED: a "frozen" pumping body read an energy
+   * of 5.02 against a threshold of 4.23 and was eliminated every time, while
+   * the same body with `setPump(0)` read 2.26 and survived. That looked
+   * exactly like Red Light judging every player collectively instead of
+   * individually, and it is not — it was the simulator.
+   *
+   * A human who freezes stops everything. No game needs a frozen player who
+   * is still swinging.
    *
    * Implemented by stopping `motionClock`, not by zeroing the amplitude: a
    * human who freezes holds the pose they were in, they do not snap back to a
@@ -103,8 +114,15 @@ export interface SimPlayer {
    * motionless skeleton would be tuned far too tight for the hall.
    */
   frozen: boolean;
-  /** Advances only while not frozen. Drives `motion` and nothing else. */
+  /** Advances only while not frozen. Drives `motion`. */
   motionClock: number;
+  /**
+   * Advances only while not frozen. Drives the pump and swipe waves.
+   *
+   * Separate from `motionClock` because the two run at different rates and
+   * share no phase; both stop together when the player freezes.
+   */
+  driveClock: number;
   /**
    * Drives the whole body into an arbitrary joint configuration, overriding
    * arms, legs and torso lean. Null = the procedural motion above.
@@ -164,6 +182,7 @@ function makePlayer(x: number, phase = 0): SimPlayer {
     motionRate: 3.2,
     frozen: false,
     motionClock: 0,
+    driveClock: 0,
     pose: null,
   };
 }
@@ -318,7 +337,21 @@ export class PoseSimulator {
    * How camera-like the output should be. See SimRealism. Off by default so
    * the deterministic regression figures stay deterministic.
    */
-  realism: SimRealism = { ...NO_REALISM };
+  /**
+   * REALISTIC by default, not NO_REALISM.
+   *
+   * A clean skeleton is the one input the app will never receive. Defaulting to
+   * it meant every smoke sweep, every turn sweep and every hand-typed probe
+   * tested the easy case unless someone remembered to opt in — and the bugs
+   * that actually reached the playtest were all noise-dependent: a motionless
+   * player eliminated in ten seconds, a race that never advanced, a cursor that
+   * teleported on a dropped frame. Every one of them passed a clean sweep.
+   *
+   * `NO_REALISM` is still there to isolate a mechanic from its noise while
+   * debugging, which is a deliberate act and should read as one at the call
+   * site. `HOSTILE` is the stress case.
+   */
+  realism: SimRealism = { ...REALISTIC };
 
   /** Latched left/right label swap. See SimRealism.limbSwap. */
   private swapped = false;
@@ -332,12 +365,23 @@ export class PoseSimulator {
   setPlayerCount(n: number): void {
     while (this.players.length < n) {
       this.players.push(makePlayer(this.players.length === 1 ? 0.3 : 0.7, Math.PI * this.players.length));
-      // Re-space everyone evenly.
-      this.players.forEach((p, i) => {
-        p.x = (i + 1) / (this.players.length + 1);
-      });
     }
     while (this.players.length > n) this.players.pop();
+
+    // RE-SPACE AFTER BOTH LOOPS, not just while growing.
+    //
+    // Shrinking used to leave everyone where the larger layout had put them, so
+    // going 6 -> 1 (a Red Light round, then anything else) stranded the only
+    // player at x = 1/7 = 0.14 — hard against the left edge of the frame, where
+    // `edgeBias` is strongest and a body-anchored play area runs off screen.
+    //
+    // Measured as Rhythm Punch scoring 0 on ACTIVE play while passing every
+    // other check, but only ever when something else had run first. It looked
+    // exactly like cross-game state corruption in the game, and it was one
+    // stale number in the simulator.
+    this.players.forEach((p, i) => {
+      p.x = (i + 1) / (this.players.length + 1);
+    });
   }
 
   /**
@@ -355,17 +399,34 @@ export class PoseSimulator {
    *    literally unreproducible here, because sim landmarks are always
    *    visibility 1.
    *
-   * Applied AFTER the aspect squeeze so the noise is isotropic in the space
-   * the consumer actually reads, which is the same space MediaPipe reports in.
+   * Applied AFTER the aspect squeeze, and the position noise is scaled DOWN in
+   * x by the same aspect — see the note on `nx`. A real sensor's jitter is a
+   * roughly constant number of pixels in both axes, which in a width-normalised
+   * x and a height-normalised y is a SMALLER number horizontally.
    */
   private roughen(landmarks: Landmark[]): void {
     const r = this.realism;
     if (r.noise <= 0 && r.dropout <= 0 && r.limbSwap <= 0 && r.lightingDip <= 0) return;
 
     if (r.noise > 0) {
+      // ISOTROPIC IN PIXELS, NOT IN LANDMARK SPACE.
+      //
+      // A real sensor's landmark jitter is roughly the same number of PIXELS in
+      // both axes. Landmark x is normalised by frame WIDTH and y by HEIGHT, so
+      // the same pixel error is a SMALLER number in x than in y — by exactly
+      // the aspect ratio. This ran after the anisotropy squeeze and added the
+      // same magnitude to both, which is a camera whose horizontal noise is
+      // 1.78x its vertical noise. No such camera exists.
+      //
+      // It went unnoticed while the consumers were themselves missing their
+      // aspect correction — two errors cancelling. Fixing `MotionEnergy` (and
+      // the detectors before it) exposed this one: Red Light's measured
+      // still-energy jumped 41% overnight, which was the simulator's phantom
+      // horizontal noise finally being counted at full weight.
+      const nx = r.noise / SIM_ASPECT;
       for (const l of landmarks) {
         if (!l) continue;
-        l.x += gauss() * r.noise;
+        l.x += gauss() * nx;
         l.y += gauss() * r.noise;
       }
     }
@@ -418,7 +479,12 @@ export class PoseSimulator {
     }
   }
 
-  private buildSkeleton(p: SimPlayer, t: number): RawPose {
+  /**
+   * No `t` parameter any more: every wave in here is driven by the player's own
+   * `motionClock`/`driveClock`, which stop when that player freezes. Taking the
+   * global clock was what let a frozen body keep pumping.
+   */
+  private buildSkeleton(p: SimPlayer): RawPose {
     const landmarks: Landmark[] = new Array(POSE_LANDMARK_COUNT);
 
     const h = p.height;
@@ -489,7 +555,10 @@ export class PoseSimulator {
     for (const side of [1, -1] as const) {
       const isLeft = side === 1;
       const sx = cx + shoulderHalf * side;
-      const wave = Math.sin(t * p.pumpRate * Math.PI * 2 + p.phase + (isLeft ? 0 : Math.PI));
+      // p.driveClock, not the global `t`: it stops when this player freezes.
+      const wave = Math.sin(
+        p.driveClock * p.pumpRate * Math.PI * 2 + p.phase + (isLeft ? 0 : Math.PI)
+      );
       const raise = p.pumpRate > 0 ? ((wave + 1) / 2) * p.amplitude : 0;
 
       // Down: wrist beside the hip. Up: well clear of the shoulder.
@@ -504,7 +573,9 @@ export class PoseSimulator {
 
       if (p.swipeRate > 0) {
         // Horizontal sweep at chest height — the Fruit Ninja motion.
-        const sweep = Math.sin(t * p.swipeRate * Math.PI * 2 + p.phase + (isLeft ? 0 : Math.PI));
+        const sweep = Math.sin(
+          p.driveClock * p.swipeRate * Math.PI * 2 + p.phase + (isLeft ? 0 : Math.PI)
+        );
         wx = cx + sweep * p.swipeWidth * 0.5;
         wy = shoulderY + torsoH * 0.15;
       }
@@ -691,7 +762,11 @@ export class PoseSimulator {
 
   /** @param t seconds */
   step(t: number, dt: number): VisionFrame {
-    for (const p of this.players) if (!p.frozen) p.motionClock += dt;
+    for (const p of this.players) {
+      if (p.frozen) continue;
+      p.motionClock += dt;
+      p.driveClock += dt;
+    }
 
     if (this.jumpT > 0) {
       this.jumpT += dt * 2.6;
@@ -704,7 +779,7 @@ export class PoseSimulator {
     if (this.auto) this.runAutoScript(t, dt);
 
     return {
-      poses: this.players.map((p) => this.buildSkeleton(p, t)),
+      poses: this.players.map((p) => this.buildSkeleton(p)),
       hands: [],
       captureTime: performance.now(),
       inferenceMs: 0,
