@@ -10,11 +10,19 @@ import { execSync } from 'node:child_process';
  * makes the question answerable in one glance instead of one message.
  */
 function buildStamp(): string {
-  let sha = 'nogit';
-  try {
-    sha = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
-  } catch {
-    /* a tarball checkout or a build box without git — the date still helps */
+  // Vercel FIRST. `.vercelignore` excludes `.git` from the upload, so the build
+  // box has no repository to ask and `git rev-parse` fails there — the first
+  // deploy of this stamped itself "nogit", which is exactly the ambiguity the
+  // stamp exists to remove. Vercel hands us the commit as an env var instead.
+  const fromCi = process.env.VERCEL_GIT_COMMIT_SHA ?? process.env.GITHUB_SHA;
+  let sha = fromCi ? fromCi.slice(0, 7) : '';
+
+  if (!sha) {
+    try {
+      sha = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim();
+    } catch {
+      sha = 'nogit';
+    }
   }
   return `${sha} ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`;
 }
