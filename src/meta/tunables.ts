@@ -695,6 +695,22 @@ tunables.registerAll([
       'late and checking the grades come out symmetric.',
   },
   {
+    key: 'game.cameraGhost',
+    label: 'CAMERA GHOST',
+    group: 'STALL CONTROL',
+    min: 0,
+    max: 0.45,
+    step: 0.01,
+    default: 0.16,
+    description:
+      'How strongly the camera feed shows through behind a game. Players ' +
+      'reported not being able to tell whether they were lined up: outside ' +
+      'Rig Check nothing showed the body at all, so someone standing half out ' +
+      'of frame had no way to know. The right value belongs to the ROOM — a ' +
+      'bright hall washes it out, a dim one makes it shout. Set 0 to turn it ' +
+      'off if it distracts on the night.',
+  },
+  {
     key: 'game.idleTimeoutSec',
     label: 'IDLE TIMEOUT',
     group: 'STALL CONTROL',

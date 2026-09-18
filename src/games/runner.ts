@@ -192,6 +192,9 @@ export class RunnerGame extends GameBase {
       // 3D camera: a camera-space ghost skeleton would straddle the track.
       // The ghost still races through the score line.
       ghostSilhouette: false,
+      // Same reason: the track is not in camera space, so a mirrored webcam
+      // image behind it is two incompatible spaces stacked on each other.
+      cameraGhost: false,
     });
   }
 

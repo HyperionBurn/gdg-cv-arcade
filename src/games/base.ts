@@ -137,6 +137,14 @@ export interface GameConfig {
    * percentage creep upward for 300ms — reported, accurately, as "very laggy".
    */
   filterPreset?: FilterPreset;
+  /**
+   * Draw the faint camera ghost behind this game's playfield. Defaults to true.
+   *
+   * Off for games that own the whole frame with their own camera space — the
+   * Runner's 3D track is not in camera coordinates, so a mirrored webcam image
+   * behind it is two incompatible spaces stacked on each other.
+   */
+  cameraGhost?: boolean;
 }
 
 /**
@@ -475,6 +483,9 @@ export abstract class GameBase implements Screen {
 
     clearFrame(ctx, v);
     this.onRenderBackground?.(fc);
+    // AFTER the background, BEFORE the playfield. `graphPaper` fills opaque
+    // paper, so a ghost drawn earlier would simply be painted over.
+    this.drawCameraGhost(fc);
 
     this.juice.pushTransform(ctx, v);
 
@@ -1162,6 +1173,53 @@ export abstract class GameBase implements Screen {
     const half = v.width / 2;
     const x = slot === 0 ? 0 : half;
     return { x, y: 0, width: half, height: v.height, centerX: x + half / 2 };
+  }
+
+  /**
+   * A faint, mirrored ghost of the camera feed behind the playfield.
+   *
+   * REPORTED FROM A REAL SESSION: "it's hard to actually see if you're lining
+   * up properly". Rig Check draws the feed, and nothing else did — so once a
+   * game starts, the only evidence of where your body is are the few landmarks
+   * that game happens to render. Fruit Ninja and Balloon Pop draw hands and
+   * nothing else, so a player standing half out of frame has no way to know it
+   * until things stop responding. They blame themselves, or the game.
+   *
+   * WHY THIS DOES NOT BREAK THE BRAND. DESIGN.md forbids see-through BRAND
+   * COLOUR — flat fills, no tints. A camera frame is a photograph, not a brand
+   * colour, and at these alphas it reads as a grey wash behind paper rather
+   * than as colour competing with the playfield. It sits under everything, so
+   * no ink, sticker or type is drawn on top of a moving image.
+   *
+   * Live on `game.cameraGhost` because the right value is a property of the
+   * ROOM — a bright hall and a dim one want different numbers, and 0 turns it
+   * off entirely if it proves distracting on the night.
+   */
+  protected drawCameraGhost(fc: FrameContext): void {
+    if (this.config.cameraGhost === false) return;
+    // `camera.isLive()` is the whole condition. An explicit `isSimEnabled()`
+    // check was redundant — sim mode has no camera, so `isLive()` is already
+    // false — and it made the ghost impossible to exercise without a webcam,
+    // which is the opposite of useful for the one feature added to fix a
+    // framing complaint.
+    if (!this.proj || !camera.isLive()) return;
+
+    const base = tunables.get('game.cameraGhost', 0.16);
+    if (base <= 0.001) return;
+
+    // STRONGER BEFORE THE ROUND, FAINTER DURING IT.
+    //
+    // "Am I lined up?" is a question you ask while stepping up, not while
+    // playing — and before the round there is no playfield for the feed to
+    // compete with, so it can afford to be properly visible. Once play starts
+    // it drops back to a hint, because by then the player needs to read fruit
+    // and balloons, not their own jumper.
+    const alpha = this.state === 'playing' ? base : Math.min(0.55, base * 2.4);
+
+    fc.ctx.save();
+    fc.ctx.shadowBlur = 0;
+    this.proj.drawVideo(fc.ctx, camera.getVideo(), alpha);
+    fc.ctx.restore();
   }
 
   /**
