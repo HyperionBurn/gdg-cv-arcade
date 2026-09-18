@@ -48,6 +48,7 @@ import { GameBase, type SlotRect } from './base';
 import {
   POSES,
   passThreshold,
+  passThresholdAt,
   matchColor,
   matchLabel,
   pickPose,
@@ -87,7 +88,25 @@ import type { FrameContext } from '../shell/screen';
 
 /* ---------------- tuning ---------------- */
 
-/** Seconds a wall takes to arrive, at the start and at the end of the round. */
+/**
+ * Seconds a wall takes to arrive, at the bottom and the top of the ramp.
+ *
+ * MEASURED — seconds from a wall appearing until the score first reaches the
+ * gate, for a player who takes 0.35s to notice and 0.55s to move, under HOSTILE
+ * simulated input (12 poses x 12 reps):
+ *
+ *                        p50    p90    p99
+ *   accurate   (0 deg)   0.73   0.77   0.80
+ *   good      (16 deg)   0.75   0.80   0.83
+ *   rough     (24 deg)   0.77   0.87   —     (4% never reach an 0.84 gate)
+ *
+ * So 1.9s at the top of the ramp still leaves a full second of slack after a
+ * player has done everything they are going to do, and speed is NOT where this
+ * game's difficulty lives — which is why the ramp buys its late-round
+ * difficulty with tolerance instead (see `passThresholdAt` in poses.ts). Below
+ * about 1.2s these numbers stop having any margin at all and the game would
+ * start testing reaction time, which nobody at a stall came for.
+ */
 const WALL_TIME_START = 4.4;
 const WALL_TIME_END = 1.9;
 
@@ -153,6 +172,22 @@ interface WallState {
   z: number;
   /** Seconds this wall takes to travel from z=1 to z=0. */
   travel: number;
+  /**
+   * Where this wall sits on the ramp, 0..1. One number drives its speed, its
+   * pose and its tolerance, so the three can never disagree about how hard the
+   * wall in front of the player is meant to be.
+   */
+  difficulty: number;
+  /**
+   * The score this wall opens at — `passThresholdAt(difficulty)`.
+   *
+   * FIXED AT SPAWN, NOT RECOMPUTED PER FRAME. The ramp moves with the clock, so
+   * a live-evaluated gate would slide to the right WHILE the player is holding
+   * the pose: the dashed pass line would creep away under them and a hold that
+   * was green a moment ago would go yellow with nothing having changed on their
+   * side. Whatever the wall asked for when it appeared is what it judges.
+   */
+  gate: number;
   /** Instantaneous match, 0..1. */
   live: number;
   /** Decaying peak match — this is what the gate reads. */
@@ -263,20 +298,49 @@ export class PoseMatchGame extends GameBase {
     return s.accuracySum / s.faced;
   }
 
-  /**
-   * PLAN.md §3: "walls arrive faster and poses get harder as the round goes
-   * on." One curve drives both, so the ramp is a single thing to tune rather
-   * than two that can disagree.
-   */
+  /** How far through the round we are, 0..1. */
   private rampProgress(): number {
     const total = Math.max(0.001, this.roundTotal);
     return Math.max(0, Math.min(1, 1 - this.timeLeft / total));
   }
 
-  /** Seconds a wall spawned right now will take to arrive. */
+  /**
+   * HOW HARD THE NEXT WALL IN THIS SLOT SHOULD BE, 0..1.
+   *
+   * PLAN.md §3: "walls arrive faster and poses get harder as the round goes
+   * on." ONE curve drives all three axes — travel time, which pose is picked,
+   * and the tolerance the wall is judged at — so the ramp stays a single thing
+   * to tune rather than three that can disagree. It did disagree before this:
+   * speed ran off round progress alone while the pose pick ran off round
+   * progress PLUS walls cleared, so a player on a streak got harder poses
+   * arriving at beginner speed.
+   *
+   * BOTH TERMS EARN THEIR PLACE. Round progress alone would hand an identical
+   * ramp to someone clearing everything and someone who has not cleared a wall
+   * yet. Walls cleared alone would let a player who freezes coast at the
+   * opening difficulty for a full minute, which is the version of this game
+   * that gets boring to watch — and the queue is watching. Cleared count is
+   * the smaller term (0.035 a wall, so about 0.5 across a good round) because
+   * it is a bonus for doing well, not the ramp itself.
+   *
+   * In 2P this makes the leading player's walls harder than their opponent's.
+   * That is deliberate and it is not new — the pose pick has always read
+   * `cleared` — and it is the only thing keeping a duel between a regular and a
+   * first-timer interesting for both of them.
+   */
+  private wallDifficulty(state: SlotState): number {
+    return Math.min(1, this.rampProgress() * 0.9 + state.cleared * 0.035);
+  }
+
+  /** Seconds a wall at this point on the ramp takes to arrive. */
+  private travelTime(difficulty: number): number {
+    return WALL_TIME_START + (WALL_TIME_END - WALL_TIME_START) * difficulty;
+  }
+
+  /** What a wall spawned right now in slot 0 would get. For `debugState`. */
   private travelTimeNow(): number {
-    const t = this.rampProgress();
-    return WALL_TIME_START + (WALL_TIME_END - WALL_TIME_START) * t;
+    const state = this.slots[0];
+    return this.travelTime(state ? this.wallDifficulty(state) : this.rampProgress() * 0.9);
   }
 
   private playerFor(players: readonly TrackedPlayer[], slot: number): TrackedPlayer | null {
@@ -336,7 +400,7 @@ export class PoseMatchGame extends GameBase {
         wall.live = 0;
       }
       wall.best = Math.max(wall.live, wall.best - PEAK_DECAY * dt);
-      state.tint = matchColor(wall.live);
+      state.tint = matchColor(wall.live, wall.gate);
 
       wall.z -= dt / wall.travel;
       if (wall.z <= 0) {
@@ -367,16 +431,25 @@ export class PoseMatchGame extends GameBase {
   }
 
   private spawnWall(state: SlotState): void {
-    const difficulty = Math.min(1, this.rampProgress() * 0.9 + state.cleared * 0.035);
+    const difficulty = this.wallDifficulty(state);
     const pose = pickPose(difficulty, state.recent);
 
+    // No-repeat window. MEASURED over 6000 simulated rounds of 15 walls with
+    // the nineteen-pose library: window 15 gives 0.00 repeats a round and a
+    // mean difficulty-target error of 0.127, and anything from 6 upward is
+    // within 0.002 of that — the window stopped fighting the ramp for control
+    // of the pick the moment the library got big enough. (With twelve poses it
+    // could not: 15 walls out of 12 poses forced 3.0 repeats a round however
+    // the window was set, and a window this deep cost 0.163 of targeting.)
     state.recent.push(pose.id);
     if (state.recent.length > Math.max(3, POSES.length - 4)) state.recent.shift();
 
     state.wall = {
       pose,
       z: 1,
-      travel: this.travelTimeNow(),
+      travel: this.travelTime(difficulty),
+      difficulty,
+      gate: passThresholdAt(difficulty),
       live: 0,
       best: 0,
       worst: null,
@@ -387,7 +460,7 @@ export class PoseMatchGame extends GameBase {
   }
 
   private resolveWall(fc: FrameContext, slot: number, state: SlotState, wall: WallState): void {
-    const cleared = wall.best >= passThreshold();
+    const cleared = wall.best >= wall.gate;
     wall.resolved = cleared ? 'clear' : 'fail';
     wall.since = 0;
 
@@ -399,7 +472,7 @@ export class PoseMatchGame extends GameBase {
     const y = fc.v.height * BODY_Y;
     const color = this.playerCount > 1 ? PLAYER_COLORS[slot]! : this.config.color;
 
-    state.tint = matchColor(wall.best);
+    state.tint = matchColor(wall.best, wall.gate);
 
     if (cleared) {
       state.cleared++;
@@ -410,11 +483,11 @@ export class PoseMatchGame extends GameBase {
       // Weight the impact by HOW WELL they hit it. This was flat, so a 66%
       // scrape-through landed with exactly the same force as a 99% clean match
       // — even though the percentage is already on screen and already drives
-      // the pitch. `best` runs from the pass threshold to 1, so normalise across
+      // the pitch. `best` runs from THIS WALL'S gate to 1, so normalise across
       // that range rather than 0..1, where everything would bunch up at the top.
       const quality = Math.min(
         1,
-        Math.max(0, (wall.best - passThreshold()) / Math.max(0.01, 1 - passThreshold()))
+        Math.max(0, (wall.best - wall.gate) / Math.max(0.01, 1 - wall.gate))
       );
       this.juice.shake(0.18 + 0.16 * quality);
       this.juice.hitStop(Math.round(38 + 30 * quality));
@@ -428,7 +501,7 @@ export class PoseMatchGame extends GameBase {
         `${Math.round(wall.best * 100)}%`,
         x,
         y - vh(fc.v, 4),
-        matchColor(wall.best),
+        matchColor(wall.best, wall.gate),
         vh(fc.v, 3)
       );
 
@@ -730,7 +803,7 @@ export class PoseMatchGame extends GameBase {
     // and snaps to green only on a pass, so "you are through" is a state change
     // rather than a shade. Slot colour + green is two brand colours, never
     // three, and never both at once.
-    const through = wall.live >= passThreshold();
+    const through = wall.live >= wall.gate;
     drawPoseSilhouette(bctx, wall.pose.angles, {
       cx,
       cy,
@@ -811,6 +884,13 @@ export class PoseMatchGame extends GameBase {
     // much more they need, not just that they are wrong.
     const live = wall?.live ?? 0;
     const best = wall?.best ?? 0;
+    // THE GATE THIS WALL IS JUDGED AT, not the round's opening one. Every
+    // channel below reads it — the bar's colour, the dashed pass line, the
+    // percentage pill and the word — because they are one signal and a player
+    // who sees green must walk through. Between walls there is nothing being
+    // asked, so the opening gate stands in and the line does not jump about
+    // during the gap.
+    const gate = wall?.gate ?? passThreshold();
     const barW = Math.min(rect.width * 0.5, vh(v, 42));
     const barH = vh(v, 1.9);
     const barX = rect.centerX - barW / 2;
@@ -822,7 +902,7 @@ export class PoseMatchGame extends GameBase {
     // `progressBar` is already the brand component: grid-coloured track, flat
     // fill, ink outline. The glow argument is ignored; passing 0 makes that
     // explicit rather than leaving a number that looks like it does something.
-    progressBar(ctx, barX, barY, barW, barH, live, matchColor(live), 0);
+    progressBar(ctx, barX, barY, barW, barH, live, matchColor(live, gate), 0);
 
     // Decaying peak, shown so the generosity is visible rather than mysterious.
     // Flat ink, full opacity — it is a tick mark, not a ghost.
@@ -834,16 +914,23 @@ export class PoseMatchGame extends GameBase {
       ctx.restore();
     }
 
-    // The pass line.
+    // THE PASS LINE — and, because the tolerance ramps, the one place the game
+    // admits it is getting harder.
+    //
+    // It steps to the right between walls as `passThresholdAt` climbs, on the
+    // same bar, next to the same percentage, so "I cleared that at 70% and this
+    // one didn't open" has a visible answer instead of feeling like the camera
+    // gave up. Nothing else is added to say it: a second badge or a level
+    // number would be more to read in the one second between walls, and the
+    // line is already the thing a player is watching.
     ctx.save();
     ctx.shadowBlur = 0;
     ctx.strokeStyle = COLORS.ink;
     ctx.lineWidth = vh(v, STROKE.base);
     ctx.setLineDash([vh(v, 0.7), vh(v, 0.55)]);
     ctx.beginPath();
-    const pass = passThreshold();
-    ctx.moveTo(barX + barW * pass, barY - vh(v, 1.4));
-    ctx.lineTo(barX + barW * pass, barY + barH + vh(v, 1.4));
+    ctx.moveTo(barX + barW * gate, barY - vh(v, 1.4));
+    ctx.lineTo(barX + barW * gate, barY + barH + vh(v, 1.4));
     ctx.stroke();
     ctx.restore();
 
@@ -858,7 +945,7 @@ export class PoseMatchGame extends GameBase {
     //
     // Tabular, because it changes every frame: proportional figures make a
     // live-updating percentage jitter left and right inside its own pill.
-    const stateColor = matchColor(live);
+    const stateColor = matchColor(live, gate);
     const pct = `${Math.round(live * 100)}%`;
     const pillH = vh(v, 5.2);
     const pctSize = vh(v, 3.2);
@@ -882,7 +969,7 @@ export class PoseMatchGame extends GameBase {
 
     // THE WORD. The third channel, so the signal survives a badly calibrated
     // panel, a colour-blind player, or someone reading it from the back.
-    drawText(ctx, matchLabel(live), rect.centerX, barY + barH + vh(v, 3.4), {
+    drawText(ctx, matchLabel(live, gate), rect.centerX, barY + barH + vh(v, 3.4), {
       size: vh(v, 2.4),
       color: COLORS.ink,
       font: FONTS.body,
@@ -963,6 +1050,10 @@ export class PoseMatchGame extends GameBase {
       accuracy: number;
       poseId: string | null;
       poseName: string | null;
+      /** Where this wall sits on the ramp, 0..1. */
+      difficulty: number;
+      /** The score THIS wall opens at. Ramps with `difficulty`. */
+      gate: number;
       live: number;
       best: number;
       z: number;
@@ -981,6 +1072,8 @@ export class PoseMatchGame extends GameBase {
         accuracy: s.faced ? s.accuracySum / s.faced : 0,
         poseId: s.wall?.pose.id ?? null,
         poseName: s.wall?.pose.name ?? null,
+        difficulty: s.wall?.difficulty ?? 0,
+        gate: s.wall?.gate ?? passThreshold(),
         live: s.wall?.live ?? 0,
         best: s.wall?.best ?? 0,
         z: s.wall?.z ?? 1,
@@ -994,15 +1087,24 @@ export class PoseMatchGame extends GameBase {
    * Force the wall in a slot to a specific pose, resetting its approach.
    * Used by the tests to exercise a known pose against a known body, and by the
    * operator console to demo a pose on request.
+   *
+   * `difficulty` places the forced wall on the ramp, which is what decides its
+   * GATE. It defaults to the pose's own difficulty rather than to 0 so that
+   * "show me THE VOGUE" demonstrates the wall a player would actually meet,
+   * tolerance included — a demo at the opening gate would be a different wall
+   * wearing the same silhouette.
    */
-  setWallPose(slot: number, poseId: string, travel = 3): boolean {
+  setWallPose(slot: number, poseId: string, travel = 3, difficulty?: number): boolean {
     const state = this.slots[slot];
     const pose = POSES.find((p) => p.id === poseId);
     if (!state || !pose) return false;
+    const d = Math.max(0, Math.min(1, difficulty ?? pose.difficulty));
     state.wall = {
       pose,
       z: 1,
       travel: Math.max(0.2, travel),
+      difficulty: d,
+      gate: passThresholdAt(d),
       live: 0,
       best: 0,
       worst: null,

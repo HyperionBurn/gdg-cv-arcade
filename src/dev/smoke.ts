@@ -214,13 +214,61 @@ const PROBES: Probe[] = [
   },
   {
     id: 'rhythm',
-    // Both fists parked on the lane targets. The game's anti-passive gate
-    // requires a hand to ARRIVE from outside the ring, so a parked fist scores
-    // zero — which is exactly the idle check we want.
-    play: (s) => s.setSwipe(1.6, 0.55),
+    /**
+     * CLOSED-LOOP, because waving is no longer play.
+     *
+     * This probe used to swing both fists across the lane targets and call that
+     * active play. That worked only because the hit radius was half a torso —
+     * big enough that a fist flung anywhere near the grid clipped something. At
+     * the measured radius (0.3) a flailing player scores 284 where an aiming one
+     * scores 2425, which is the entire point of the change, and the probe was
+     * on the wrong side of it: it scored a flat ZERO and looked like a broken
+     * game.
+     *
+     * So it now punches the notes the chart is actually asking for, using the
+     * game's own `debug()` hook, which reports each live note's hand and its
+     * target already converted to camera space. Between notes the fists retract
+     * to a rest position — that is not decoration, it is what arms the
+     * anti-passive gate, which requires a hand to ARRIVE from outside the ring.
+     */
+    play: (s) => s.clearWristTargets(),
     idle: (s) => {
       s.setSwipe(0);
       s.setPump(0);
+      s.clearWristTargets();
+    },
+    drive: (sim, game, tick, frames) => {
+      const g = game as {
+        debug?: () => {
+          notes: Array<{
+            kind: string;
+            delta: number;
+            hands: Array<string | null>;
+            status: string[];
+            target: Array<{ x: number; y: number } | null>;
+          }>;
+        };
+      } | null;
+      // Hands down and outside the lanes, so every punch arrives from outside.
+      const rest = { left: { x: 0.38, y: 0.75 }, right: { x: 0.62, y: 0.75 } };
+      const slice = 2;
+      for (let done = 0; done < frames; done += slice) {
+        const notes = g?.debug?.().notes ?? [];
+        for (const hand of ['left', 'right'] as const) {
+          const n = notes.find(
+            (x) =>
+              x.kind === 'punch' &&
+              x.hands[0] === hand &&
+              x.status[0] === 'live' &&
+              x.delta > -0.15 &&
+              x.delta < 0.5
+          );
+          const t = n?.target[0];
+          sim.setWristTargetAll(hand, t ?? rest[hand]);
+        }
+        tick(slice);
+      }
+      sim.clearWristTargets();
     },
     idleMustBeZero: true,
     warmupFrames: 320,

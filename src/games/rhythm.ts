@@ -134,14 +134,76 @@ const DEPTH = 3.2;
 
 /**
  * Hit radius, in TORSO UNITS (ARCHITECTURE.md: "scale.unit is the only correct
- * denominator for a threshold"). Half a torso is a big circle — deliberately
- * larger than the drawn note, so a punch that only looks like it grazed the
- * target still counts. Position is not the skill being tested here; timing is.
+ * denominator for a threshold").
+ *
+ * WAS 0.5 — half a torso — on the theory that "position is not the skill being
+ * tested here; timing is". A playtester reported both halves of what that
+ * actually bought: hits registering "to a target that is far away", and the
+ * perfect-hit timing being inconsistent. Both are the same number.
+ *
+ * WHY 0.5 REGISTERED ON THE WRONG TARGET. The chart places a hand's targets at
+ * x = 0.275 / 0.638 / 1.0 torsos from the lane centre and y = 0 / 0.45, so the
+ * NEAREST TWO TARGETS FOR ONE HAND ARE 0.3625 TORSOS APART (measured off
+ * `targetPos`, not assumed). A 0.5 circle centred on any of them therefore
+ * swallowed its neighbours: MEASURED, targets whose own centre lies inside one
+ * hit circle, over all six positions for a hand —
+ *
+ *   radius (torsos)   0.50   0.40   0.34   0.30   0.25   0.18
+ *   targets covered   3-4    2-3    1      1      1      1
+ *
+ * At 0.5 a single fist position was live for over half the grid, which is
+ * exactly "a target that is far away". Anything under 0.3625 covers one.
+ *
+ * WHY 0.5 ALSO BROKE THE TIMING. Contact is detected the instant the swept
+ * segment crosses the circle, so a punch is judged R/v seconds EARLY, where v
+ * is how fast that particular punch happens to be travelling. The radius is
+ * therefore a speed-dependent timing error. MEASURED, simulator, fist driven to
+ * arrive EXACTLY on the note, judged offset in seconds (negative = judged
+ * early), 12 hits per row:
+ *
+ *   punch speed      R = 0.50                     R = 0.30
+ *   (torso/s)        p10 / p50 / p90    grades    p10 / p50 / p90    grades
+ *   2.0             -.186 / -.141 / -.131  1P 11G  -.098 / -.091 / -.069  12P
+ *   3.5             -.143 / -.131 / -.103  3P  9G  -.048 / -.041 / -.019  12P
+ *   6.0             -.096 / -.091 / -.053 12P      -.029 / -.024 / +.014  12P
+ *
+ * At 0.5 the judgement swings 133ms across ordinary punch speeds — 121% of the
+ * ±0.11s perfect window — so whether a dead-on punch reads PERFECT or GREAT
+ * depended on how hard it was thrown. That is the reported inconsistency, and
+ * it is not a tracking fault. At 0.3 every one of those lands PERFECT.
+ *
+ * WHY NOT SMALLER. The floor is tracking lag, not aim: the blade tip is a One
+ * Euro filtered landmark, so it arrives after the fist does. MEASURED closest
+ * approach of a dead-on punch, by how long the fist is held on the target —
+ *
+ *   hold (s)     0.05   0.10   0.20   0.30
+ *   p50 (torsos) 0.239  0.171  0.089  0.048
+ *
+ * A snappy jab that retracts immediately only ever gets the tracked blade to
+ * ~0.24. 0.30 clears that and still leaves room to miss: MEASURED hit rate
+ * against a deliberate radial aim error, 12 hittable notes, 0.12s hold —
+ *
+ *   aim error (torsos)   0     0.10   0.18   0.25
+ *   notes hit            12    12     12     1
+ *
+ * So 0.30 is the middle of the only band that exists: above the 0.24 tracking
+ * floor, below the 0.3625 target spacing.
+ *
+ * WHAT IT BOUGHT, end to end (REALISTIC noise, 40s, same seed):
+ *   a player who AIMS               1241 -> 2425   (3 perfect/13 great -> 22 perfect)
+ *   a player who waves both fists   1281 ->  284   (23 hits -> 6)
+ * Aiming used to be worth nothing at all. HOSTILE noise is unaffected by the
+ * change (12-14 hits at 0.30, 0.34 and 0.40 alike).
  */
-const HIT_RADIUS_TORSOS = 0.5;
+const HIT_RADIUS_TORSOS = 0.3;
 
-/** Drawn note radius. Smaller than the hit radius, which is why it feels good. */
-const NOTE_RADIUS_TORSOS = 0.3;
+/**
+ * Drawn note radius. Still smaller than the hit radius, which is why it feels
+ * good — the ring drawn at the target IS the hit radius, so the disc has to
+ * stay inside it for that to remain true. Cut with the radius, keeping roughly
+ * the 0.6 ratio it had at 0.3/0.5.
+ */
+const NOTE_RADIUS_TORSOS = 0.2;
 
 /** Horizontal half-span of a lane, in torso units. Outer targets sit at ~1.0. */
 const LANE_HALF_TORSOS = 1.25;
@@ -200,6 +262,29 @@ interface NoteRuntime {
    * hand never came from outside — but a punch that arrives and stops dead
    * still scores, which a pure speed gate would reject at exactly the moment
    * the player did the thing correctly.
+   *
+   * IT DOES FIRE, AND IT IS NOT DEFEATED BY SPAWNING INSIDE THE RING. The flag
+   * starts `true`, but `resolvePunch` re-evaluates it from the first frame the
+   * note is within APPROACH_SEC — 1.9s out, which is 1.6s before the judgement
+   * window opens at |delta| <= TIMING.good. A fist already parked on the target
+   * is therefore disarmed long before the note can be scored. MEASURED over a
+   * full 60s round, REALISTIC noise, fists pinned and held for the whole round:
+   *
+   *   arms at rest by the hips                    0 points
+   *   boxing guard, fists in front of the chest   0
+   *   fists parked ON the inner targets           0
+   *   fists parked ON the mid targets             0
+   *   guard + a slow human wobble, 0.2 torso @ 0.5Hz   0
+   *
+   * WHAT DID SCORE was `|| blade.active` on the landing test, which lets any
+   * hand moving faster than BladeTracker's activateSpeed skip this gate
+   * entirely. That is deliberate — it is the second chance for a player jabbing
+   * repeatedly inside the ring — but with a half-torso hit radius it meant a
+   * hand waving in the general area was live for 3-4 targets at once.
+   * MEASURED, both fists swept in a plain 0.35-torso sinusoid at 1.5Hz aimed at
+   * nothing, 30s, REALISTIC: 23 hits / 1281 points at the old 0.5 radius,
+   * against 1241 for a player who actually aimed. Aiming was worth nothing.
+   * At HIT_RADIUS_TORSOS 0.3 the same waving scores 6 hits / 284.
    */
   armed: boolean[];
   /** Post-resolution animation, 1 → 0. */
@@ -805,8 +890,15 @@ export class RhythmGame extends GameBase {
     return { x: vp.x + (target.x - vp.x) * scale, y: vp.y + (target.y - vp.y) * scale };
   }
 
+  /**
+   * Live-adjustable at the stall as `rhythm.hitRadiusTorsos`, because it is the
+   * one number here whose right value depends on the room: a hall that pushes
+   * the queue back shrinks every body in frame, which does not change the torso
+   * denominator but does change how much sensor noise rides on it.
+   */
   private hitRadius(slot: number): number {
-    return (this.slots[slot]?.unit ?? 0) * HIT_RADIUS_TORSOS;
+    const torsos = tunables.get('rhythm.hitRadiusTorsos', HIT_RADIUS_TORSOS);
+    return (this.slots[slot]?.unit ?? 0) * torsos;
   }
 
   /* ---------------- judgement ---------------- */

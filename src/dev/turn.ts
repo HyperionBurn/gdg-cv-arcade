@@ -94,6 +94,7 @@ interface SimLike {
   setLane?: (n: number) => void;
   triggerJump?: () => void;
   clearWristTargets?: () => void;
+  setWristTargetAll?: (side: 'left' | 'right', target: { x: number; y: number } | null) => void;
 }
 
 /**
@@ -111,7 +112,7 @@ const PLAY: Record<string, (s: SimLike) => void> = {
   balloonpop: (s) => s.setPump(1.4, 1),
   redlight: (s) => s.setPump(0),
   posematch: (s) => s.setPoseAll(null),
-  rhythm: (s) => s.setSwipe(1.6, 0.55),
+  rhythm: (s) => s.clearWristTargets?.(),
   runner: (s) => {
     s.setLane?.(0);
     s.triggerJump?.();
@@ -132,6 +133,44 @@ const DRIVE: Record<string, (s: SimLike, game: unknown) => void> = {
     // round. A person waiting for the countdown is not racing yet.
     const racing = g?.state === 'playing';
     s.setPump(racing && g?.light === 'green' ? 5 : 0, 1);
+  },
+  // Punch the notes the chart is asking for. Waving both fists across the grid
+  // used to score, and no longer does — at the measured hit radius a flailing
+  // player scores 284 against an aiming player's 2425, which is the whole point
+  // of that change. Between notes the fists retract, which is what arms the
+  // anti-passive gate: it requires a hand to ARRIVE from outside the ring.
+  rhythm: (s, game) => {
+    const g = game as {
+      state?: string;
+      debug?: () => {
+        notes: Array<{
+          kind: string;
+          delta: number;
+          hands: Array<string | null>;
+          status: string[];
+          target: Array<{ x: number; y: number } | null>;
+        }>;
+      };
+    } | null;
+    // ONLY ONCE THE ROUND IS RUNNING. `turn()` starts driving the moment the
+    // game mounts, so this also runs through the lobby and countdown — where
+    // the note runtime does not exist yet and `status[0]` threw, killing the
+    // whole turn. The same shape of mistake as driving Red Light off a light
+    // that reads green before the round has started.
+    if (g?.state !== 'playing') return;
+    const rest = { left: { x: 0.38, y: 0.75 }, right: { x: 0.62, y: 0.75 } };
+    const notes = g?.debug?.().notes ?? [];
+    for (const hand of ['left', 'right'] as const) {
+      const n = notes.find(
+        (x) =>
+          x.kind === 'punch' &&
+          x.hands?.[0] === hand &&
+          x.status?.[0] === 'live' &&
+          x.delta > -0.15 &&
+          x.delta < 0.5
+      );
+      s.setWristTargetAll?.(hand, n?.target?.[0] ?? rest[hand]);
+    }
   },
   // Adopt the pose the wall is actually asking for. Random flailing scores
   // zero here, which is the correct behaviour and a useless turn.

@@ -166,6 +166,59 @@ const ENGAGE_SPEED = 0.35;
  */
 const ENGAGE_WINDOW_MS = 1200;
 
+/**
+ * How far OUTSIDE the drawn balloon a hand still pops it, in TORSO UNITS.
+ *
+ * This replaces `b.r * 1.35`, and the change is the unit as much as the number.
+ * A multiple of the balloon's own radius is not a tolerance, it is a tolerance
+ * that scales with the target: balloons here are drawn at 0.035-0.063 of screen
+ * height, so 1.35x handed the BIGGEST balloons the most slack and the small
+ * fast golden ones the least — the opposite of what difficulty wants, and not
+ * body-relative at all, which is the one thing every threshold in this codebase
+ * has to be.
+ *
+ * MEASURED at the stall's 3m framing (one torso = 0.216 of screen height), slop
+ * beyond the drawn edge under the old rule:
+ *
+ *   balloon          drawn r (torsos)   old slop (torsos)   new slop
+ *   golden           0.162              0.057               0.040
+ *   smallest normal  0.208              0.073               0.040
+ *   largest normal   0.292              0.102               0.040
+ *
+ * WHY IT READ AS "TOO FAR". The hand marker is drawn at vh 2.6 = 0.120 torsos.
+ * Subtract the slop and that is how much of the marker is inside the balloon at
+ * the instant it pops: 0.018 torsos — under 3 PIXELS at 720p — for the largest
+ * balloons. A playtester asked to "decrease the range at which they register as
+ * a strikeable object", and a pop that fires on a 3px graze is that.
+ *
+ * WHY 0.04 AND NOT LESS. MEASURED, simulator, a driver that actually reaches
+ * for the nearest armed balloon (rather than the flailing the smoke probe
+ * does), REALISTIC noise, 25s rounds, 5 repeats per row:
+ *
+ *   slop (torsos)   score (mean)   golden popped   pops   pop distance p50/p90
+ *   0.077 (= 1.35x) 1257           5.0             45.6   0.300 / 0.348 torsos
+ *   0.040           1274           5.8             42.8   0.270 / 0.313
+ *   0.020           1165           4.2             41.4   0.242 / 0.286
+ *   0.000           942            2.4             39.0   0.220 / 0.264
+ *
+ * 0.04 is the last value that costs a competent player nothing — the score is
+ * flat from 0.077 down to it and falls off below. It also fixes golden, which
+ * the old size-proportional rule was quietly punishing twice (smaller AND
+ * faster). Over a longer 33s run the worst case moves from 1.47 balloon radii
+ * to 1.24, and the marker/balloon overlap at the pop goes from 8px to 15px.
+ *
+ * A hand that merely drifts through the field is hit harder than one that
+ * reaches, which is the point: flailing 361 -> 322 while reaching 1572 -> 1660.
+ */
+const POP_SLOP_TORSOS = 0.04;
+
+/**
+ * Torso height as a fraction of screen height, used only for the frame or two
+ * before a body is measured. The stall's 3m framing measures 0.216; 0.2 is the
+ * conservative direction, because a smaller unit means a smaller slop.
+ */
+const UNIT_FALLBACK = 0.2;
+
 export class BalloonPopGame extends GameBase {
   private blades = new BladeTracker({
     // Touch, not swipe. Zero activation speed is the entire accessibility
@@ -556,6 +609,10 @@ export class BalloonPopGame extends GameBase {
       if (fc.now - (this.engagedAt.get(blade.id) ?? -Infinity) > ENGAGE_WINDOW_MS) continue;
 
       const slot = this.slotOf(blade);
+      // `||`, not `??`, and the same shape the arm line uses: a bodyUnit of 0
+      // is an unwritten entry, not a body with no height, and multiplying the
+      // slop by it would silently turn the tolerance off.
+      const unit = this.bodyUnit[slot] || fc.v.height * UNIT_FALLBACK;
       for (let i = this.balloons.length - 1; i >= 0; i--) {
         const b = this.balloons[i]!;
         if (this.playerCount > 1 && b.slot !== slot) continue;
@@ -566,9 +623,12 @@ export class BalloonPopGame extends GameBase {
         // being unhittable.
         if (b.y > (this.armLine[slot] || fc.v.height * ARM_FALLBACK)) continue;
 
-        // Generous hit radius. This game is about inclusion, not precision, and
-        // a near miss that reads as a hit is far better here than the reverse.
-        const hitR = b.r * 1.35;
+        // The drawn balloon, plus a fixed body-relative margin. Still forgiving
+        // — this game is about inclusion, not precision — but the forgiveness
+        // is now the same for every balloon and small enough that the hand
+        // marker is visibly two-thirds inside the balloon when it pops. See
+        // POP_SLOP_TORSOS for the measured table this came from.
+        const hitR = b.r + POP_SLOP_TORSOS * unit;
         const d = Math.hypot(blade.x - b.x, blade.y - b.y);
 
         if (d < hitR * 2.2) b.squash = Math.min(1, b.squash + 0.5);

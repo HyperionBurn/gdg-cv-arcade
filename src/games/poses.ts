@@ -17,7 +17,7 @@
  *   2. The generator. `generatePoses()` enumerates the legal pose space from
  *      the constraint sets, rejecting anything unachievable, anything too close
  *      to standing still, and anything CONFUSABLE WITH A POSE ALREADY IN THE
- *      SET under the metric itself. `POSES` is the hand-picked dozen out of
+ *      SET under the metric itself. `POSES` is the hand-picked nineteen out of
  *      that space, with names, because the names are half the comedy.
  *
  *   3. The renderer. `drawPoseSilhouette()` draws the same joint angles as the
@@ -53,10 +53,20 @@
  * rotate the limb angles, which stay absolute.
  */
 
-import { POSE, POSE_LANDMARK_COUNT, type Landmark } from '../core/types';
-import { tunables } from '../meta/tunables';
-import type { TrackedPlayer } from '../core/tracker';
-import { COLORS } from '../shell/theme';
+// EXPLICIT `.ts` EXTENSIONS, like `core/`, so this module is importable by
+// `node --test` as well as by Vite.
+//
+// The library's guarantees — no pose confusable with another, none confusable
+// with standing still, every pose scoring the same through a left/right label
+// swap — are pure arithmetic over `SEGMENTS`, and they are the kind of thing
+// that should be proved in CI rather than only at the stall. `validateLibrary`
+// runs at module load and catches the first two; the confusion MARGINS, the
+// difficulty ramp and the swap behaviour need a test file, and a test file
+// needs to be able to import this one outside a bundler.
+import { POSE, POSE_LANDMARK_COUNT, type Landmark } from '../core/types.ts';
+import { tunables } from '../meta/tunables.ts';
+import type { TrackedPlayer } from '../core/tracker.ts';
+import { COLORS } from '../shell/theme.ts';
 
 const DEG = Math.PI / 180;
 
@@ -192,15 +202,105 @@ const MATCH_FLOOR = Math.cos(MATCH_TOLERANCE_DEG * DEG);
 export const PASS_THRESHOLD = 0.66;
 
 /**
- * Live pass threshold.
+ * Live pass threshold — the gate the FIRST wall of a round is judged against.
  *
- * Tuned against a noiseless simulator with only ~0.07 headroom over the worst
- * confusable pose pair. Real MediaPipe jitter pulls live scores down, so the
- * Sept 22 playtest is expected to want this LOWER — and that has to be possible
- * without a rebuild.
+ * Tuned against a noiseless simulator with only 0.009 headroom over the worst
+ * confusable pose pair (GOALPOST/FLEX at 0.651). Real MediaPipe jitter pulls
+ * live scores down, so the Sept 22 playtest is expected to want this LOWER —
+ * and that has to be possible without a rebuild.
  */
 export function passThreshold(): number {
   return tunables.get('posematch.passThreshold', PASS_THRESHOLD);
+}
+
+/**
+ * The gate the LAST wall of a round is judged against. The difficulty ramp's
+ * tolerance axis.
+ *
+ * THE PROBLEM THIS SOLVES. At 0.66 the wall opens for a player who is 32
+ * degrees off on every single joint 94% of the time, and 40 degrees off 75% of
+ * the time — measured, not estimated, below. That is the right answer for a
+ * stranger's first wall and far too kind for their fifteenth, and it is exactly
+ * what the playtester meant by "make the game harder". Time already ramps
+ * (WALL_TIME_START -> WALL_TIME_END) and so does pose difficulty; tolerance was
+ * the one axis still flat for the whole round.
+ *
+ * WHY TOLERANCE AND NOT MORE SPEED. MEASURED — seconds from a wall appearing
+ * until the score first reaches the gate, for a player who takes 0.35s to
+ * react and 0.55s to move, HOSTILE input, 12 poses x 12 reps:
+ *
+ *                       gate 0.66     gate 0.84
+ *   accurate (0 deg)    p99 0.75      p99 0.80
+ *   good     (16 deg)   p99 0.75      p99 0.83
+ *   rough    (24 deg)   p99 0.78      p99 0.87 (4% never get there)
+ *
+ * The last wall of a round travels for 1.9s, so time-to-pose is not the binding
+ * constraint at either gate and buying difficulty with more speed would only
+ * punish reaction time, which is not what this game is about. Tolerance is
+ * where the slack actually is.
+ *
+ * MEASURED — clear rate for a player HOLDING a pose that is `sigma` degrees off
+ * on every joint, HOSTILE input, 20 reps x 12 poses = 240 samples per row:
+ *
+ *   sigma   0.66   0.72   0.78   0.82*  0.84   0.90
+ *     8     100    100    100    100    100    100
+ *    12     100    100    100    100    100    100
+ *    16     100    100    100    100    100     95
+ *    20     100    100    100     99     96     78
+ *    24     100    100     98     94     90     54
+ *    28     100     95     85     77     63     33
+ *    32      94     88     73     60     50     20
+ *    40      75     58     41     30     21      7
+ *                                 (* interpolated)
+ *
+ * 0.82 is picked off that table. A player who genuinely copies the shape —
+ * within about 20 degrees a joint, which is what "I did the pose" looks like —
+ * still clears the hardest wall in the round 99% of the time. A player waving
+ * roughly in the right direction at 32 degrees drops from 94% to 60%, and one
+ * barely in the pose at 40 degrees from 75% to 30%. The thing that gets harder
+ * is sloppiness, not the pose.
+ *
+ * CONFIRMED END TO END, full 60s rounds driven through the real game loop —
+ * real pose picks, real travel times, real decaying peak — with the ramp
+ * flattened to 0.66 and then left live. Walls cleared out of walls faced:
+ *
+ *                              ramp flat (before)   ramp live (after)
+ *   accurate      (0 deg)          19/19                19/19
+ *   a good copy  (22 deg)          19/19                19/19
+ *   sloppy       (30 deg)          18/19                14/18
+ *   a flail      (45 deg)          12/17                 8/16
+ *
+ * A round is still a full round for anybody who does the poses, and a round
+ * spent waving is now worth about half what it was.
+ *
+ * It also makes the library's separation guarantee STRICTLY STRONGER as the
+ * round goes on: the worst confusable pair sits at 0.651, so headroom over "you
+ * cleared by doing a different pose" grows from 0.009 at the first wall to
+ * 0.169 at the last. `MAX_CONFUSION` is keyed to the START gate, which is the
+ * binding case, and is unchanged.
+ *
+ * Live-tunable for the same reason the start gate is: if the hall is dark and
+ * everybody is scraping through at 70%, the marshal needs to flatten the ramp
+ * between plays, not rebuild.
+ */
+export const PASS_THRESHOLD_END = 0.82;
+
+export function passThresholdEnd(): number {
+  return tunables.get('posematch.passThresholdEnd', PASS_THRESHOLD_END);
+}
+
+/**
+ * The gate for a wall at difficulty `d` (0 = first wall of the round, 1 = last).
+ *
+ * `Math.max` rather than a straight lerp so that a marshal who drags the START
+ * slider above the END one gets a FLAT ramp at the value they chose, not an
+ * inverted one where the game gets easier as it goes. Both ends are live
+ * sliders and nothing stops them crossing.
+ */
+export function passThresholdAt(d: number): number {
+  const start = passThreshold();
+  const end = Math.max(start, passThresholdEnd());
+  return start + (end - start) * Math.max(0, Math.min(1, d));
 }
 
 /** Below this a landmark is guesswork; ignore the segment rather than fail it. */
@@ -401,6 +501,21 @@ const MIN_ARM_COVERAGE = 0.85;
  * meter's approach curve is unchanged and monotone — a T-pose reads
  * 30 -> 51 -> 70 -> 86 -> 96 -> 100 across the movement, so NOT YET, CLOSE and
  * <MATCH> all still appear in order.
+ *
+ * RE-MEASURED when the library went 12 -> 19, because this headroom is set by
+ * whichever pose an idle body happens to score best against and seven new
+ * candidates is seven new chances to lose it. 59 280 idle pose-frames per
+ * condition across six dropout patterns (nothing hidden, either forearm, both
+ * forearms, both legs, legs and forearms together):
+ *
+ *                    max idle score      best-scoring pose
+ *   realistic            0.358            THE FLEX, unchanged
+ *   hostile              0.365            THE FLEX, unchanged
+ *
+ * Zero frames at or over the gate in either condition. None of the seven
+ * additions comes near THE FLEX's record — the worst of them is THE VOGUE at
+ * 0.226 ideal — and that was a selection criterion rather than a happy result.
+ * `tests/posematch.test.ts` keeps it that way.
  */
 const REST_MARGIN = 0.05;
 
@@ -591,6 +706,24 @@ export function poseSimilarity(player: TrackedPlayer, target: PoseAngles): Match
 }
 
 /**
+ * The segments that survive the stall's NORMAL FRAMING.
+ *
+ * Legs out of frame is not an edge case here — it is what a laptop on a table
+ * at a club fair sees, and `poseSimilarity` deliberately drops what the camera
+ * could not see rather than failing a player for it. Both legs gone leaves 0.72
+ * of total coverage, comfortably over `MIN_COVERAGE`, so the scorer carries on
+ * happily with arms and torso alone.
+ *
+ * Which means the library's separation proof has to hold over THIS set too, not
+ * only over a whole body. A pair of poses that differ only below the waist
+ * scores 1.000 against each other the moment the legs drop out, and nothing
+ * on screen would say why the wall opened.
+ */
+export const CROPPED_SEGMENT_KEYS: readonly SegmentKey[] = [
+  'upperArmL', 'foreArmL', 'upperArmR', 'foreArmR', 'torso',
+];
+
+/**
  * What a body holding `held` PERFECTLY would score against a wall asking for
  * `target`. The same arithmetic as `poseSimilarity`, with an ideal body instead
  * of a measured one.
@@ -600,18 +733,27 @@ export function poseSimilarity(player: TrackedPlayer, target: PoseAngles): Match
  * arms-up-in-a-V at 125° and at 168° are visibly distinct and score 0.85
  * against each other — and a library with a pair like that ships a wall that
  * opens for the wrong pose. Which reads, correctly, as the game being broken.
+ *
+ * `over` restricts the comparison to a subset of segments, so the same question
+ * can be asked of a body the camera can only half see — see
+ * `CROPPED_SEGMENT_KEYS`, and `validateLibrary`, which asks it both ways.
  */
-export function poseConfusion(held: PoseAngles, target: PoseAngles): number {
+export function poseConfusion(
+  held: PoseAngles,
+  target: PoseAngles,
+  over?: readonly SegmentKey[]
+): number {
   let num = 0;
   let den = 0;
   for (const seg of SEGMENTS) {
+    if (over && !over.includes(seg.key)) continue;
     const w2 = seg.weight * seg.weight;
     const a = targetDirection(seg, held);
     const b = targetDirection(seg, target);
     num += w2 * (a.x * b.x + a.y * b.y);
     den += w2;
   }
-  return scoreFromCosine(num / den);
+  return den > 0 ? scoreFromCosine(num / den) : 0;
 }
 
 /**
@@ -651,11 +793,17 @@ export function poseConfusion(held: PoseAngles, target: PoseAngles): number {
  * CLOSE. The player is told they missed by all three channels the design is
  * built on — colour, word and number — and then walks through. That reads as
  * the game being broken in the exact session held to find out whether it is.
+ *
+ * SAME ARGUMENT, NOW FOR THE RAMP: the gate moves BETWEEN WALLS
+ * (`passThresholdAt`), so these take the gate the wall in front of the player
+ * is actually being judged against. Defaulting the parameter keeps the promise
+ * true for any caller that has no wall — the attract screen, a test — without
+ * letting the live game silently fall back to the wrong number.
  */
 export const CLOSE_THRESHOLD = 0.45;
 
-export function matchColor(score: number): string {
-  if (score >= passThreshold()) return COLORS.green;
+export function matchColor(score: number, gate: number = passThreshold()): string {
+  if (score >= gate) return COLORS.green;
   if (score >= CLOSE_THRESHOLD) return COLORS.yellow;
   return COLORS.red;
 }
@@ -668,8 +816,8 @@ export function matchColor(score: number): string {
  * Voice: brackets on the call-to-action, and nothing punishing. "NOT YET" is
  * an instruction to keep moving; "MISS" would be a verdict.
  */
-export function matchLabel(score: number): string {
-  if (score >= passThreshold()) return '<MATCH>';
+export function matchLabel(score: number, gate: number = passThreshold()): string {
+  if (score >= gate) return '<MATCH>';
   if (score >= CLOSE_THRESHOLD) return 'CLOSE';
   return 'NOT YET';
 }
@@ -745,6 +893,13 @@ const MAX_FLEX = 155;
  * No shipped pose may score above this against any other shipped pose, or
  * against standing still. Comfortably under PASS_THRESHOLD, with margin for a
  * real body being noisier than an ideal one.
+ *
+ * KEYED TO THE ROUND-OPENING GATE, WHICH IS THE BINDING CASE. The tolerance
+ * ramps up across a round (`passThresholdAt`), so a pair of poses that cannot
+ * pass for each other at the first wall cannot at the fifteenth either —
+ * headroom over this only grows, from 0.009 at `PASS_THRESHOLD` to 0.169 at
+ * `PASS_THRESHOLD_END` for the library's worst pair. Nothing here may be
+ * relaxed on the strength of the raised end of the ramp.
  */
 export const MAX_CONFUSION = 0.66;
 const MAX_REST_CONFUSION = 0.55;
@@ -919,7 +1074,7 @@ function definePose(id: string, name: string, difficulty: number, parts: PosePar
 }
 
 /**
- * Twelve, in increasing difficulty, hand-picked out of the generated space.
+ * Nineteen, in increasing difficulty, hand-picked out of the generated space.
  *
  * Selection criteria, in order:
  *   1. Distinguishable from every other pose and from standing still, verified
@@ -932,8 +1087,67 @@ function definePose(id: string, name: string, difficulty: number, parts: PosePar
  * Deliberately NOT here: anything whose only difference from another pose is a
  * leg. Legs carry ~27% of the weight and are frequently out of frame, so a
  * leg-only pose (a flamingo next to a T-pose, say) scores 0.97 against the pose
- * it is meant to be distinct from. Leg variation survives as decoration on
- * three of the twelve, where it never has to carry the decision.
+ * it is meant to be distinct from. Leg variation survives as decoration, where
+ * it never has to carry the decision.
+ *
+ * ---------------------------------------------------------------------------
+ * THE SEVEN ADDED FOR THE CLUB FAIR, AND WHY THESE SEVEN
+ * ---------------------------------------------------------------------------
+ *
+ * The playtest verdict on this game was "make it harder, more pose variation",
+ * so the library went 12 -> 19. Finding seven was not a matter of thinking of
+ * seven shapes: the metric's capacity is the binding constraint, and the
+ * original twelve had very nearly used it up. A full sweep of the constraint
+ * sets (11 006 legal arm/leg/lean combinations) yields only 329 candidates that
+ * clear every guard below, and the largest MUTUALLY distinguishable subset of
+ * those is seven. Widening the vocabulary does not help — adding a 55-degree
+ * shoulder and +-45-degree elbow flexes to the sets raised the candidate count
+ * by 76% and the achievable subset size by zero. The wall is the metric, not
+ * the imagination.
+ *
+ * Each of the seven had to clear, all at once:
+ *
+ *   CONFUSION <= 0.60 against every other pose, WHOLE BODY and LEGS CROPPED.
+ *     Worst of the seven is THE CRANE at 0.600 (against THE ORANGUTAN), so the
+ *     slackest new pair has 0.060 of headroom under the first wall's 0.66 gate
+ *     — 6.7x the 0.009 the shipped library's own worst pair (GOALPOST/FLEX at
+ *     0.651) was living on. Legs cropped, the worst of the seven is 0.477.
+ *
+ *   SILHOUETTE IoU <= 0.70 against every other pose. Confusion is what the
+ *     SCORER can tell apart; this is what a PLAYER can, and they are not the
+ *     same question. Each pose is rasterised exactly as `drawPoseSilhouette`
+ *     normalises it — fit to height, centred on the bounding box — and overlaid
+ *     on every other. Worst of the seven is 0.606 (THE RAINBOW against THE
+ *     WAITER); for reference the shipped twelve contain GOALPOST/ROBOT at
+ *     0.906, which is the same shape with one forearm flipped.
+ *
+ *   REST CONFUSION <= 0.30, and <= 0.11 with the legs cropped. The idle-body
+ *     guard (see REST_MARGIN) has 0.199 of headroom — 0.461 measured max
+ *     against a 0.66 gate — and that headroom is set by whichever pose an idle
+ *     body scores best against. THE FLEX still holds that record at 0.349; the
+ *     worst of the seven is THE VOGUE at 0.226, so the guard is untouched.
+ *
+ *   LIMBS CLEAR OF THE TORSO by at least 0.05 torso units at every elbow and
+ *     wrist, so no hand vanishes into the body in an outline, and a bounding
+ *     box at least 0.42 as wide as it is tall — the shipped library's own floor,
+ *     set by THE TOUCHDOWN.
+ *
+ *   ARMS AND A STANCE, NEVER A BALANCE. Every one is reachable standing on two
+ *     feet with the legs either planted or apart, so it works for any height at
+ *     3m and does not care whether the camera can see the legs at all.
+ *
+ * DIFFICULTY IS FITTED, NOT GUESSED. The twelve hand-assigned difficulties turn
+ * out to be almost exactly a linear function of three measurable things —
+ * how far the limbs travel from rest, how much the two arms DISAGREE, and how
+ * bent the elbows are:
+ *
+ *   d = -0.160 + 0.384*(travel/180) + 0.724*(asym/360) + 0.619*(fold/180)
+ *
+ * which fits the shipped twelve at r = 0.935, RMS residual 0.095. Asymmetry is
+ * the single strongest term (r = 0.69 alone), which is the real finding: a pose
+ * is hard when your two arms have to do different jobs. The seven below are
+ * placed at their FITTED value, nudged by at most 0.078 — inside that residual
+ * — to keep the ladder evenly spaced.
  */
 export const POSES: readonly PoseDef[] = [
   definePose('t', 'THE T', 0.05, {
@@ -978,11 +1192,31 @@ export const POSES: readonly PoseDef[] = [
     legL: PLANTED, legR: PLANTED,
   }),
 
+  // One arm straight out, the other thrown up with the forearm curving across
+  // over the head, hips open. The best-separated pose in the whole library —
+  // 0.542 confusion and 0.396 IoU against its nearest neighbour — because
+  // nothing else combines a horizontal arm with a vertical one.
+  definePose('bhangra', 'THE BHANGRA', 0.54, {
+    left: arm(SHOULDER_SET.OUT, FLEX_SET.STRAIGHT),
+    right: arm(SHOULDER_SET.UP, FLEX_SET.FOLD_UP),
+    legL: WIDE, legR: WIDE,
+    lean: 10,
+  }),
+
   definePose('teapot', 'THE TEAPOT', 0.58, {
     left: arm(SHOULDER_SET.LOW, FLEX_SET.ON_HIP),
     right: arm(SHOULDER_SET.DIAG_UP, FLEX_SET.STRAIGHT),
     legL: PLANTED, legR: PLANTED,
     lean: -9,
+  }),
+
+  // One hand on top of the head, the other elbow bent out from the hip, leaning
+  // away from it. Reads as washing your hair and being caught at it.
+  definePose('shampoo', 'THE SHAMPOO', 0.62, {
+    left: arm(SHOULDER_SET.HIGH, FLEX_SET.CURL),
+    right: arm(SHOULDER_SET.DOWN, FLEX_SET.ZAG),
+    legL: PLANTED, legR: PLANTED,
+    lean: -10,
   }),
 
   definePose('orangutan', 'THE ORANGUTAN', 0.64, {
@@ -991,11 +1225,47 @@ export const POSES: readonly PoseDef[] = [
     legL: PLANTED, legR: PLANTED,
   }),
 
+  // Both forearms sweeping the same way across the top of the head, one coming
+  // down from an arm that is up and one coming up from an arm that is out — an
+  // arc over the head with the body offset under one end of it.
+  definePose('rainbow', 'THE RAINBOW', 0.66, {
+    left: arm(SHOULDER_SET.UP, FLEX_SET.ZAG),
+    right: arm(SHOULDER_SET.OUT, FLEX_SET.CURL),
+    legL: WIDE, legR: WIDE,
+  }),
+
+  // Mast and jib: one arm straight up, the other out on the diagonal with the
+  // forearm hanging dead vertical off the elbow like a hook on a cable.
+  definePose('crane', 'THE CRANE', 0.69, {
+    left: arm(SHOULDER_SET.DIAG_UP, FLEX_SET.WING),
+    right: arm(SHOULDER_SET.UP, FLEX_SET.STRAIGHT),
+    legL: WIDE, legR: WIDE,
+    lean: -10,
+  }),
+
   definePose('disco', 'THE DISCO', 0.72, {
     left: arm(SHOULDER_SET.DIAG_UP, FLEX_SET.STRAIGHT),
     right: arm(SHOULDER_SET.ACROSS, FLEX_SET.TUCK),
     legL: WIDE, legR: WIDE,
     lean: 8,
+  }),
+
+  // Both upper arms out on the same diagonal and the forearms pointing at
+  // completely different things — the best clearance in the library at 0.29
+  // torso units, so every one of those angles survives as an outline.
+  definePose('semaphore', 'THE SEMAPHORE', 0.75, {
+    left: arm(SHOULDER_SET.DIAG_UP, FLEX_SET.ZAG),
+    right: arm(SHOULDER_SET.DIAG_UP, FLEX_SET.ON_HIP),
+    legL: WIDE, legR: WIDE,
+    lean: -10,
+  }),
+
+  // Tray up at head height on one side, the other hand folded down across the
+  // belly. The full obsequious bow, minus the bow.
+  definePose('waiter', 'THE WAITER', 0.78, {
+    left: arm(SHOULDER_SET.UP, FLEX_SET.TUCK),
+    right: arm(SHOULDER_SET.OUT, FLEX_SET.OVERHEAD),
+    legL: WIDE, legR: WIDE,
   }),
 
   definePose('zorro', 'THE ZORRO', 0.82, {
@@ -1011,31 +1281,82 @@ export const POSES: readonly PoseDef[] = [
     legL: WIDE, legR: WIDE,
     lean: 10,
   }),
+
+  // The hardest thing in the library by the fitted model, and it is the
+  // asymmetry that does it: one arm folded shut straight overhead, the other
+  // thrown open low and wide. Nothing about one arm tells you the other.
+  definePose('vogue', 'THE VOGUE', 0.97, {
+    left: arm(SHOULDER_SET.LOW, FLEX_SET.ZAG),
+    right: arm(SHOULDER_SET.UP, FLEX_SET.WING),
+    legL: WIDE, legR: WIDE,
+  }),
 ];
+
+/**
+ * Ceiling on confusability WITH THE LEGS OUT OF FRAME.
+ *
+ * The whole-body check below is the conservative one for most pairs, because
+ * most poses stand on the same planted legs and those agreeing segments push
+ * the score UP: the shipped library's worst pair is 0.651 whole-body and 0.522
+ * cropped. But that is a property of the library, not of the metric, and it
+ * stops being true the moment somebody adds a pose whose separation lives below
+ * the waist — which is precisely the mistake the stall's framing punishes and
+ * precisely the one nobody would spot by eye.
+ *
+ * Same value as MAX_CONFUSION rather than a tighter one: the question is
+ * identical ("can holding this open a wall asking for that?"), only the
+ * evidence is smaller. Measured worst over the shipped nineteen: 0.522.
+ */
+const MAX_CROPPED_CONFUSION = MAX_CONFUSION;
 
 /**
  * Library self-check, at module load.
  *
- * Cheap (12 × 12 × 9 dot products) and worth doing every boot rather than in a
- * test file, because the failure it catches is invisible at the stall: a wall
- * that opens for the wrong pose looks exactly like a wall that opened for the
- * right one, and nobody debugging on the day would think to look here.
+ * Cheap (19 × 19 × 9 dot products, twice) and worth doing every boot rather
+ * than in a test file, because the failure it catches is invisible at the
+ * stall: a wall that opens for the wrong pose looks exactly like a wall that
+ * opened for the right one, and nobody debugging on the day would think to look
+ * here.
+ *
+ * Checked TWICE over, once whole-body and once over `CROPPED_SEGMENT_KEYS`.
+ * A stall camera sees legs roughly never, and the scorer drops what it cannot
+ * see from both sides of the ratio — so a guarantee that only holds for a whole
+ * body is a guarantee that holds in the one framing this game will not be
+ * played in.
  */
 export function validateLibrary(): string[] {
   const problems: string[] = [];
+  const worst = (
+    a: PoseAngles,
+    b: PoseAngles,
+    over?: readonly SegmentKey[]
+  ): number => Math.max(poseConfusion(a, b, over), poseConfusion(b, a, over));
+
   for (const p of POSES) {
-    const rest = Math.max(poseConfusion(REST_POSE, p.angles), poseConfusion(p.angles, REST_POSE));
+    const rest = worst(REST_POSE, p.angles);
     if (rest > MAX_REST_CONFUSION) {
       problems.push(`${p.name} is ${rest.toFixed(2)} confusable with standing still`);
+    }
+    const cropped = worst(REST_POSE, p.angles, CROPPED_SEGMENT_KEYS);
+    if (cropped > MAX_REST_CONFUSION) {
+      problems.push(
+        `${p.name} is ${cropped.toFixed(2)} confusable with standing still once the legs crop`
+      );
     }
   }
   for (let i = 0; i < POSES.length; i++) {
     for (let j = i + 1; j < POSES.length; j++) {
       const a = POSES[i]!;
       const b = POSES[j]!;
-      const v = Math.max(poseConfusion(a.angles, b.angles), poseConfusion(b.angles, a.angles));
+      const v = worst(a.angles, b.angles);
       if (v > MAX_CONFUSION) {
         problems.push(`${a.name} and ${b.name} are ${v.toFixed(2)} confusable`);
+      }
+      const c = worst(a.angles, b.angles, CROPPED_SEGMENT_KEYS);
+      if (c > MAX_CROPPED_CONFUSION) {
+        problems.push(
+          `${a.name} and ${b.name} are ${c.toFixed(2)} confusable once the legs crop`
+        );
       }
     }
   }
@@ -1046,9 +1367,24 @@ for (const problem of validateLibrary()) console.warn(`[poses] ${problem}`);
 
 /**
  * Pick a pose at roughly the requested difficulty, never repeating anything in
- * `recent`. Nobody plays long enough to exhaust the library, so the no-repeat
- * window is what stops the same pose landing twice in one round — which reads
- * as the game being broken far more than it reads as luck.
+ * `recent`. The no-repeat window is what stops the same pose landing twice in
+ * one round — which reads as the game being broken far more than it reads as
+ * luck.
+ *
+ * WITH TWELVE POSES IT COULD NOT KEEP THAT PROMISE. A 60s round is about 15
+ * walls at a good pace and 19 at a perfect one, so a twelve-pose library was
+ * arithmetically guaranteed to repeat, and a window wide enough to try left so
+ * few candidates that the difficulty target stopped choosing anything.
+ * MEASURED over 6000 simulated rounds of 15 walls, mean repeats a round and
+ * mean |pose difficulty - target|:
+ *
+ *                 window 6      window 8      window 15
+ *   12 poses    3.9 / 0.205   3.5 / 0.249   3.0 / 0.163
+ *   19 poses    0.7 / 0.126   0.2 / 0.128   0.0 / 0.127
+ *
+ * At nineteen the two goals stop competing: the window can be deep enough to
+ * eliminate repeats outright AND the targeting is better than it ever was.
+ * That is most of what "more pose variation" bought.
  */
 export function pickPose(difficulty: number, recent: readonly string[] = []): PoseDef {
   const target = Math.max(0, Math.min(1, difficulty));
@@ -1151,14 +1487,22 @@ export function poseSkeleton(a: PoseAngles): PoseSkeleton {
   };
 }
 
-interface Blob {
+/** One capsule of the drawn silhouette. */
+export interface PoseBlob {
   a: PosePoint;
   b: PosePoint;
   /** Half-width in torso units. */
   r: number;
 }
 
-function blobs(sk: PoseSkeleton, grow: number): Blob[] {
+/**
+ * The silhouette as a list of capsules, plus the head, in body-frame torso
+ * units. Exported because it is the ONLY description of the shape a player
+ * actually sees — `drawPoseSilhouette` and `poseBounds` both read it — and
+ * "does this new pose read as a different shape from three metres" is a
+ * question about that shape, not about the joint angles behind it.
+ */
+export function poseBlobs(sk: PoseSkeleton, grow = 0): PoseBlob[] {
   return [
     { a: sk.hipMid, b: sk.shoulderMid, r: P.torsoW / 2 + grow },
     { a: sk.shoulderL, b: sk.shoulderR, r: P.beltW / 2 + grow },
@@ -1198,7 +1542,7 @@ export function poseBounds(a: PoseAngles, grow = 0): PoseBounds {
     maxY = Math.max(maxY, p.y + r);
   };
 
-  for (const b of blobs(sk, grow)) {
+  for (const b of poseBlobs(sk, grow)) {
     consider(b.a, b.r);
     consider(b.b, b.r);
   }
@@ -1270,7 +1614,7 @@ export function drawPoseSilhouette(
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
 
-  for (const b of blobs(sk, grow)) {
+  for (const b of poseBlobs(sk, grow)) {
     ctx.lineWidth = b.r * 2 * unit;
     ctx.beginPath();
     ctx.moveTo(sx(b.a), sy(b.a));
