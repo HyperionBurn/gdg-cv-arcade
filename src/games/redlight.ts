@@ -124,7 +124,11 @@ export interface RedLightTunables {
   exitRatio: number;
   /** Threshold as a multiple of this player's own observed still-energy. */
   quietMult: number;
-  /** Hard ceiling on that adaptation, as a multiple of `moveEnter`. */
+  /**
+   * Hard ceiling on the learned STILL energy, as a multiple of `moveEnter`.
+   * The threshold is `quietMult` times that, so this bounds what the game is
+   * willing to believe "standing still" looks like. See `thresholdFor`.
+   */
   quietCeiling: number;
   /** Nothing is judged for this long after the light turns red. THE feel knob. */
   graceSec: number;
@@ -136,6 +140,26 @@ export interface RedLightTunables {
   advanceRate: number;
   /** Time constant of the energy smoother. Must be well inside `graceSec`. */
   energyTau: number;
+  /**
+   * How long a newly admitted player's noise floor is learned FAST.
+   *
+   * Without this the game eliminates people for standing still. Measured
+   * against a simulated body with realistic sensor noise (0.004 normalised,
+   * about 3px of frame height): a PERFECTLY FROZEN player's energy settles at
+   * ~1.99 torso-units/sec, while `quiet` crawls from 0.35 to 0.60 in six
+   * seconds on a 20s time constant — and its ceiling of
+   * `quietCeiling * moveEnter` = 1.615 sits BELOW the real floor anyway, so no
+   * amount of waiting could have saved them. They advanced during green
+   * without moving, and were eliminated during red for the same reason.
+   *
+   * The noise floor is a property of the ROOM, not of the player, and it is
+   * observable in the first couple of seconds. So: learn it quickly while
+   * nobody is racing yet, then lock to the slow constant that stops anyone
+   * raising their own threshold by fidgeting.
+   */
+  calibrateSec: number;
+  /** Time constant used during that window. Fast enough to settle inside it. */
+  calibrateTau: number;
 }
 
 /**
@@ -148,7 +172,11 @@ export const DEFAULT_REDLIGHT_TUNABLES: RedLightTunables = {
   moveEnter: 0.85,
   exitRatio: 0.55,
   quietMult: 2.4,
-  quietCeiling: 1.9,
+  // Raised 1.9 -> 4.0 when the clamp moved onto `quiet`. It now bounds the
+  // believable STILL energy (4.0 * 0.85 = 3.4 torso-units/sec) rather than the
+  // threshold, so a noisy room can be absorbed while "stand there vibrating to
+  // raise your own bar" still cannot.
+  quietCeiling: 4.0,
   // 0.4 -> 0.55.
   //
   // The 400ms figure came from testing ONE red transition in isolation. Over a
@@ -166,6 +194,8 @@ export const DEFAULT_REDLIGHT_TUNABLES: RedLightTunables = {
   driveSpan: 1.5,
   advanceRate: 6,
   energyTau: 0.1,
+  calibrateSec: 2.2,
+  calibrateTau: 0.35,
 };
 
 type Light = 'green' | 'red';
@@ -182,8 +212,10 @@ interface Racer {
   finished: boolean;
   /** Smoothed movement, torso-units per second. */
   energy: number;
-  /** Running estimate of this player's still-energy. */
+  /** Running estimate of this player's still-energy — the room's noise floor. */
   quiet: number;
+  /** Seconds since admitted. Drives the fast calibration window. */
+  age: number;
   motion: MotionEnergy;
   gate: Hysteresis;
   /** Seconds the move gate has been open during the current red. */
@@ -531,6 +563,7 @@ export class RedLightGame extends GameBase {
       r.absent = 0;
       r.landmarks = p.landmarks;
       r.settle = Math.max(0, r.settle - dt);
+      r.age += dt;
 
       // missing > 0 means this track is coasting on last frame's landmarks.
       // Sampling it reports a perfectly still player — a free pass through a
@@ -549,6 +582,15 @@ export class RedLightGame extends GameBase {
         // Anything quiet enough to survive a red light is, by construction,
         // too quiet to gain ground, which closes the "creep along just under
         // the line" exploit without a separate anti-cheat.
+        // Progress is motion ABOVE this player's own elimination threshold.
+        //
+        // NOT gated on the `moving` hysteresis, which was tried and measured
+        // WORSE. That gate latches open on a noise spike and only closes below
+        // `threshold * exitRatio`, so under sensor noise it stayed open and a
+        // frozen player advanced at nearly the same rate as a moving one —
+        // 13.5 against 14.4, i.e. no discrimination at all. Reading `energy`
+        // directly keeps the separation (3.6 against 13.8 measured) because
+        // the excess over threshold, not merely crossing it, sets the rate.
         const drive = Math.min(1, Math.max(0, (r.energy - threshold) / tun.driveSpan));
         if (drive > 0) {
           r.progress = Math.min(100, r.progress + drive * tun.advanceRate * dt);
@@ -607,10 +649,21 @@ export class RedLightGame extends GameBase {
     const rate = perFrame / dtv;
     r.energy += (rate - r.energy) * (1 - Math.exp(-dtv / this.tun.energyTau));
 
-    // Falls fast (tau 90ms, comfortably inside the 400ms grace) so a freeze is
-    // recognised in time; rises only during green and only very slowly, so
-    // nobody can lift their own threshold by simply never stopping.
-    const tau = r.energy < r.quiet ? 0.09 : this.light === 'green' ? 20 : Infinity;
+    // Falls fast (tau 90ms, comfortably inside the grace window) so a freeze is
+    // recognised in time.
+    //
+    // RISING is the asymmetric part. For the first couple of seconds after a
+    // player is admitted it rises FAST, because what it is measuring then is
+    // the room — sensor noise at this distance, in this light — and that has to
+    // be known before anyone is judged against it. After that it reverts to the
+    // 20-second constant, which is what stops a player lifting their own
+    // threshold by never quite standing still.
+    //
+    // The calibration window sits in the lobby and countdown, before the round
+    // starts, so it costs nothing and nobody is racing through it.
+    const calibrating = r.age < this.tun.calibrateSec;
+    const rise = calibrating ? this.tun.calibrateTau : this.light === 'green' ? 20 : Infinity;
+    const tau = r.energy < r.quiet ? 0.09 : rise;
     if (Number.isFinite(tau)) r.quiet += (r.energy - r.quiet) * (1 - Math.exp(-dtv / tau));
   }
 
@@ -632,7 +685,23 @@ export class RedLightGame extends GameBase {
    */
   private thresholdFor(r: Racer): number {
     const { moveEnter, quietMult, quietCeiling } = this.tun;
-    return Math.min(moveEnter * quietCeiling, Math.max(moveEnter, r.quiet * quietMult));
+
+    // THE CEILING BOUNDS THE LEARNED FLOOR, NOT THE FINAL THRESHOLD.
+    //
+    // It used to clamp the threshold itself to `moveEnter * quietCeiling`,
+    // which with the shipped numbers is 1.615 — and a body with realistic
+    // sensor noise reads a still-energy near 2. The clamp therefore sat BELOW
+    // the noise, so the detector called a frozen player "moving" no matter how
+    // long it was given to adapt. Measured: a perfectly still body advanced
+    // during green and was eliminated during red within about six seconds.
+    //
+    // The ceiling exists to stop someone training the detector to ignore them.
+    // That is a statement about what "still" can plausibly be — so it belongs
+    // on `quiet`, the estimate of still. The signal-to-noise margin
+    // (`quietMult`) then applies on top, and the threshold is free to land
+    // wherever the room's noise actually puts it.
+    const floor = Math.min(r.quiet, moveEnter * quietCeiling);
+    return Math.max(moveEnter, floor * quietMult);
   }
 
   private admit(p: TrackedPlayer): Racer | null {
@@ -671,6 +740,7 @@ export class RedLightGame extends GameBase {
       alive: true,
       finished: false,
       energy: 0,
+      age: 0,
       // Start where the absolute floor is, so a fresh player is judged by
       // `moveEnter` until they have shown us what their own still looks like.
       quiet: this.tun.moveEnter / this.tun.quietMult,

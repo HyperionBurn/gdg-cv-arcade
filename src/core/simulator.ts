@@ -181,11 +181,74 @@ function lm(x: number, y: number, visibility = 1): Landmark {
  */
 export const SIM_ASPECT = 16 / 9;
 
+/**
+ * How unlike a camera the synthetic body is allowed to be.
+ *
+ * The simulator's bodies are noiseless, perfectly symmetric and always fully
+ * visible. Real MediaPipe output is none of those things, and every single bug
+ * this project has shipped to a camera lived in that gap — a stale blade
+ * position on reacquire, a rep gate that assumed a limb never drops out, a
+ * tracker that had never seen two detections of one person.
+ *
+ * OFF BY DEFAULT, deliberately. The regression sweep asserts exact figures
+ * ("4Hz x 5s = exactly 40 reps") and those are worth keeping deterministic.
+ * Turn it on to ask a different question: does this still work when the input
+ * is ugly?
+ */
+export interface SimRealism {
+  /**
+   * Per-landmark positional noise, in normalised units, 1 sigma.
+   *
+   * MediaPipe at ~3m on a 1280x720 feed wanders a few pixels frame to frame
+   * even on a still subject; 0.004 is about 3px of frame height. This is the
+   * number the One Euro filter exists to absorb.
+   */
+  noise: number;
+  /**
+   * Chance per frame that a wrist drops below the visibility threshold.
+   *
+   * Real hands blur when swung and vanish behind torsos. This is what made
+   * "the right hand feels murky" a real report and an unreproducible one.
+   */
+  dropout: number;
+  /**
+   * Extra dropout multiplier on the subject's dominant side.
+   *
+   * ~90% of people lead with the right, swing it harder, and blur it more. A
+   * symmetric simulator can never produce an asymmetric complaint.
+   */
+  dominantBias: number;
+}
+
+export const NO_REALISM: SimRealism = { noise: 0, dropout: 0, dominantBias: 1 };
+
+/**
+ * A plausible 3m webcam. Not calibrated against a specific camera — it exists
+ * to make the input UGLY in the ways real input is ugly, not to predict a
+ * particular sensor.
+ */
+export const REALISTIC: SimRealism = { noise: 0.004, dropout: 0.03, dominantBias: 2.5 };
+
+/** Box-Muller, so noise is gaussian rather than uniform like `jitter`. */
+function gauss(): number {
+  let u = 0;
+  let v = 0;
+  while (u === 0) u = Math.random();
+  while (v === 0) v = Math.random();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
 export class PoseSimulator {
   players: SimPlayer[] = [makePlayer(0.5)];
   private frameId = 0;
   private jumpT = 0;
   private autoPump = false;
+
+  /**
+   * How camera-like the output should be. See SimRealism. Off by default so
+   * the deterministic regression figures stay deterministic.
+   */
+  realism: SimRealism = { ...NO_REALISM };
 
   /** Cycles through a scripted demo so the stall has something to show. */
   auto = false;
@@ -200,6 +263,51 @@ export class PoseSimulator {
       });
     }
     while (this.players.length > n) this.players.pop();
+  }
+
+  /**
+   * Make a clean skeleton look like one a camera produced.
+   *
+   * Two effects, both chosen because a real failure hid behind their absence:
+   *
+   *  - GAUSSIAN POSITION NOISE on every landmark. The filter presets, the
+   *    hysteresis gaps and the dwell timers all exist to absorb this, and
+   *    without it none of them are ever actually exercised.
+   *  - VISIBILITY DROPOUT on the wrists, biased toward the dominant side. A
+   *    blade whose landmark vanishes and returns was sweeping a segment across
+   *    the gap — a phantom slash through anything between — and that bug was
+   *    reported from a camera as "the right hand feels murky" while being
+   *    literally unreproducible here, because sim landmarks are always
+   *    visibility 1.
+   *
+   * Applied AFTER the aspect squeeze so the noise is isotropic in the space
+   * the consumer actually reads, which is the same space MediaPipe reports in.
+   */
+  private roughen(landmarks: Landmark[]): void {
+    const r = this.realism;
+    if (r.noise <= 0 && r.dropout <= 0) return;
+
+    if (r.noise > 0) {
+      for (const l of landmarks) {
+        if (!l) continue;
+        l.x += gauss() * r.noise;
+        l.y += gauss() * r.noise;
+      }
+    }
+
+    if (r.dropout > 0) {
+      // Subject-RIGHT is the dominant side for most people.
+      const sides: Array<[number, number]> = [
+        [POSE.RIGHT_WRIST, r.dropout * r.dominantBias],
+        [POSE.RIGHT_INDEX, r.dropout * r.dominantBias],
+        [POSE.LEFT_WRIST, r.dropout],
+        [POSE.LEFT_INDEX, r.dropout],
+      ];
+      for (const [idx, chance] of sides) {
+        const l = landmarks[idx];
+        if (l && Math.random() < chance) l.visibility = 0.1;
+      }
+    }
   }
 
   private buildSkeleton(p: SimPlayer, t: number): RawPose {
@@ -338,6 +446,35 @@ export class PoseSimulator {
     landmarks[POSE.RIGHT_FOOT_INDEX] = lm(cx - hipHalf - 0.018, ankleY + 0.008);
 
     if (p.pose) this.applyPose(landmarks, p.pose, cx, hipY, h);
+
+    // ---- MAKE THE BODY ANISOTROPIC, LAST ----
+    //
+    // Everything above is built in ISOTROPIC units: a shoulder half-width of
+    // `h * 0.12` means the same physical distance as a torso segment of
+    // `h * 0.12`. That is how a body actually works, and it is the only way
+    // this code stays readable.
+    //
+    // It is NOT how MediaPipe reports one. Landmark x is normalised by frame
+    // WIDTH and y by frame HEIGHT, so on a 16:9 camera the same physical
+    // distance is 1.78x SMALLER in x than in y. A simulator that skips this
+    // step emits bodies no camera can produce — and, far worse, bodies that
+    // agree with any consumer making the same mistake.
+    //
+    // That is not hypothetical. It hid three real bugs until a camera found
+    // them: LaneDetector and TPoseDetector compared a horizontal distance
+    // against a torso height, and poseSimilarity measured limb angles, all
+    // without correcting for aspect. Every one passed here with full marks,
+    // because the sim was wrong in exactly the same direction. A 45-degree
+    // limb really did measure 45 degrees — to two wrongs agreeing.
+    //
+    // One squeeze about the body's true centre, after all the geometry
+    // including `applyPose`, so nothing upstream has to think about it.
+    for (let i = 0; i < landmarks.length; i++) {
+      const l = landmarks[i];
+      if (l) l.x = p.x + (l.x - p.x) / SIM_ASPECT;
+    }
+
+    this.roughen(landmarks);
 
     return { landmarks, worldLandmarks: landmarks };
   }
