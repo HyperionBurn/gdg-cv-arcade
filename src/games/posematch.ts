@@ -329,6 +329,16 @@ export class PoseMatchGame extends GameBase {
    * first-timer interesting for both of them.
    */
   private wallDifficulty(state: SlotState): number {
+    // IN VERSUS, BOTH PLAYERS FACE THE SAME CURVE.
+    //
+    // `state.cleared` is a per-player term, and in a head-to-head that means
+    // the player who is AHEAD is handed harder poses and a tighter gate than
+    // the player who is behind. As a solo ramp that is exactly right — you earn
+    // your difficulty. As a duel it means the two scores are not measuring the
+    // same thing, and the leader is punished for leading.
+    //
+    // So versus escalates on the round clock alone, which both players share.
+    if (this.playerCount > 1) return Math.min(1, this.rampProgress() * 0.9);
     return Math.min(1, this.rampProgress() * 0.9 + state.cleared * 0.035);
   }
 
@@ -625,7 +635,28 @@ export class PoseMatchGame extends GameBase {
         const state = this.slots[slot];
         const wall = state?.wall;
         if (!state || !wall || wall.resolved === 'clear') continue;
-        this.drawWall(bctx, v, this.slotRect(v, slot), state, wall, slot);
+
+        // CLIPPED TO THIS PLAYER'S HALF, and it has to be.
+        //
+        // Both walls share ONE offscreen buffer, and a wall at impact spans
+        // 1.8x its slot rect — 0.9 of the whole viewport in versus — so each
+        // one overhangs the divider by up to ~250px at 1024 wide. Slot 1 draws
+        // second, so without a clip its opaque plane REPAINTED OVER slot 0's
+        // already-punched hole, sealing a hole that player had earned, while
+        // its `destination-out` punch CUT A PHANTOM HOLE in slot 0's wall.
+        // Photographed with slot 0 at z=0.18 and slot 1 at z=0.02.
+        //
+        // The clip has to wrap the punch as well as the fill, which is why it
+        // is here around the whole call rather than inside `drawWall`.
+        const rect = this.slotRect(v, slot);
+        bctx.save();
+        if (this.playerCount > 1) {
+          bctx.beginPath();
+          bctx.rect(rect.x, rect.y, rect.width, rect.height);
+          bctx.clip();
+        }
+        this.drawWall(bctx, v, rect, state, wall, slot);
+        bctx.restore();
       }
       ctx.drawImage(this.buffer!, 0, 0, v.width, v.height);
     }

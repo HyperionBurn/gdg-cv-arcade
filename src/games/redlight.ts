@@ -360,6 +360,14 @@ interface Racer {
   landmarks: readonly Landmark[] | null;
   /** 0..1, drives the marker's bounce. Purely cosmetic. */
   wobble: number;
+  /**
+   * Seconds left on the round clock when this racer crossed the line, or 0.
+   *
+   * Per racer rather than read off `timeLeft` at scoring time, so finishing
+   * FIRST is worth more than finishing last — the clock has moved on by the
+   * time the round ends, and everyone would otherwise collect the same bonus.
+   */
+  finishedWith: number;
 }
 
 /**
@@ -506,14 +514,39 @@ export class RedLightGame extends GameBase {
    * second remaining, so a decisive win reads clearly above a photo finish, and
    * a non-finisher can never out-score someone who crossed the line.
    */
-  protected scoreFor(): number {
-    let best = 0;
-    for (const r of this.racers.values()) best = Math.max(best, r.progress);
-
-    if (best >= 100) {
-      return 100 + Math.round(Math.max(0, this.timeLeft) * 10);
+  /**
+   * PER PLAYER, by lane.
+   *
+   * This used to ignore its `slot` argument entirely and return the best
+   * progress in the race, so a six-person round handed all six the same number
+   * — measured, six racers all scored 296 while three of them were frozen at
+   * 26% of the track. Everyone got the winner's score, including the people who
+   * were eliminated in the first ten seconds. A playtester asked for exactly
+   * this: "it'd keep track of two separate players scores, same thing with hole
+   * in the wall and red light".
+   *
+   * Lane is the right key rather than iteration order: it is fixed when a racer
+   * is first seen, it is keyed on the tracker id, and it is never re-sorted —
+   * which is the whole reason a lane never swaps owner mid-round.
+   *
+   * The finish bonus stays per player, so crossing the line first is worth more
+   * than crossing it last, and somebody who never crossed cannot out-score
+   * somebody who did.
+   */
+  protected scoreFor(slot: number): number {
+    let racer: Racer | undefined;
+    for (const r of this.racers.values()) {
+      if (r.lane === slot) {
+        racer = r;
+        break;
+      }
     }
-    return Math.round(best);
+    if (!racer) return 0;
+
+    if (racer.progress >= 100) {
+      return 100 + Math.round(Math.max(0, racer.finishedWith) * 10);
+    }
+    return Math.round(racer.progress);
   }
 
   private aliveCount(): number {
@@ -1117,6 +1150,7 @@ export class RedLightGame extends GameBase {
       settle: SETTLE_SEC,
       landmarks: p.landmarks,
       wobble: 0,
+      finishedWith: 0,
     };
     this.racers.set(p.id, racer);
     return racer;
@@ -1190,6 +1224,7 @@ export class RedLightGame extends GameBase {
     if (crossedTheLine) {
       r.progress = 100;
       r.finished = true;
+      r.finishedWith = Math.max(0, this.timeLeft);
     }
     this.winnerId = r.id;
     this.finalCall = `PLAYER ${r.lane + 1} WINS`;
