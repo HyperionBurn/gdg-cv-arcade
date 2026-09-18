@@ -164,12 +164,21 @@ All driven deterministically via `window.__arcade.tick()`:
   a balloon below the shoulder line = **+0**
 - **Red Light**: 0 false eliminations in a full 45s round; progress gained only
   during green (0.00% change during red); body-scale fair to ~2% across a 1.6×
-  height ratio. **Reaction time: the survive/eliminate cliff is 400–500 ms over a
-  full round** — an earlier "500 ms survives, 600 ms is out" figure came from
-  single-transition tests and flattered the game, because a round has 10+
-  transitions and you only have to be slow once. `graceSec` was widened 0.4 →
-  0.55 in response; simple visual reaction is ~250 ms *before* recognising the
-  change and stopping a moving body
+  height ratio.
+
+  **Reaction time: the survive/eliminate cliff is 500–650 ms** — 500 survives,
+  650 is out, measured over full rounds rather than single transitions (a round
+  has 10+ transitions and you only have to be slow once). Simple visual
+  reaction is ~250 ms *before* recognising the change and stopping a moving
+  body, so most first-timers clear this.
+
+  This figure is newer than it looks. `graceSec` was widened 0.4 → 0.55 days
+  ago and documented here as being in effect, but `tunables.get()` returns the
+  registry default and ignores the caller's fallback for any registered key —
+  so the game went on reading 0.4, and every earlier reaction figure in this
+  file was measured against a grace window the code no longer claimed to have.
+  Reconciled and re-measured; the old cliff was 400–500 ms.
+
 - **Pose Match**: all 12 poses score >0.998 when matched; scale/position
   invariance **5.55e-16** across a 2.19× body-size range; max pose confusion 0.651.
   Closed-loop, feeding each wall's own angles back to the simulator: **16 of 17
@@ -181,7 +190,11 @@ All driven deterministically via `window.__arcade.tick()`:
   frames of a 2 Hz sweep. Judgement is now shifted back by that latency; the
   note's drawn position is not, so notes still cross the strike line on the beat
 - **Runner**: **33,958 generated rows across 600 runs, 0 unclearable**; detection
-  latency 0.100s ± 0.001; 48 WebGL mount/unmount cycles never leaked a context
+  latency 0.100s ± 0.001; 48 WebGL mount/unmount cycles never leaked a context.
+  **Lane change fires at 0.6 torso units of side-step (~30 cm)** — a normal
+  step. Before the aspect correction the same threshold demanded 0.55 × 1.78 =
+  0.98 torso (~49 cm), a lunge, which is why it read as "didn't detect
+  movement" on a real body
 - **Shell**: dwell commits at exactly 1.2s and not before; COMING SOON tiles inert
   after 4× the dwell; initials entry 6.0s new / 4.3s repeat; auto-accept fires at 16s.
   Menu now escapes a present-but-non-gesturing player to attract at **31.7s**
