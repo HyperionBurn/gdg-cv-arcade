@@ -93,6 +93,8 @@ export interface TrackerOptions {
    * is a worse failure than an occasional ghost.
    */
   dedupeTorsos: number;
+  /** See SelectOptions.minRelativeSize — bystander rejection, and its limits. */
+  minRelativeSize: number;
   /** Display is mirrored, so slot ordering has to be flipped to match. */
   mirrored: boolean;
   filterPreset: FilterPreset;
@@ -127,6 +129,7 @@ export const DEFAULT_TRACKER_OPTIONS: TrackerOptions = {
   minArea: 0.02,
   minConfidence: 0.45,
   dedupeTorsos: 0.55,
+  minRelativeSize: 0.5,
   mirrored: true,
   filterPreset: 'body',
   aspect: 16 / 9,
@@ -171,6 +174,7 @@ export class PoseTracker {
       minArea: this.opts.minArea,
       minConfidence: this.opts.minConfidence,
       dedupeTorsos: this.opts.dedupeTorsos,
+      minRelativeSize: this.opts.minRelativeSize,
       aspect: this.opts.aspect,
     });
 

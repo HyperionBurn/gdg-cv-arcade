@@ -643,9 +643,13 @@ export abstract class GameBase implements Screen {
     // Landmark space is anisotropic (x normalised by width, y by height), so
     // the tracker needs the real aspect to measure bodies correctly.
     const cam = camera.getState();
-    if (cam.width > 0 && cam.height > 0) {
-      this.tracker.setOptions({ aspect: cam.width / cam.height });
-    }
+    this.tracker.setOptions({
+      ...(cam.width > 0 && cam.height > 0 ? { aspect: cam.width / cam.height } : {}),
+      // Live, so a marshal can tune crowd rejection in the actual room rather
+      // than guessing it here. See the notes on both keys.
+      minArea: tunables.get('tracker.minArea', 0.02),
+      minRelativeSize: tunables.get('tracker.minRelativeSize', 0.5),
+    });
     this.players = this.tracker.update(fc.vision.poses, fc.time);
   }
 

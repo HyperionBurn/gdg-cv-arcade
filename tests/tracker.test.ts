@@ -56,6 +56,7 @@ function people(poses: RawPose[], maxPlayers = 6): number {
     minArea: 0.02,
     minConfidence: 0.45,
     dedupeTorsos: 0.55,
+    minRelativeSize: 0.5,
     aspect: 16 / 9,
   }).length;
 }
@@ -101,6 +102,28 @@ describe('PoseTracker — duplicate detections of one body', () => {
       people([body(0.5, 0.5), body(0.15, 0.5, 0.22, 0.1)]),
       1,
       'low visibility must not count as a person'
+    );
+  });
+
+  test('a spectator clearly further back does not get a lane', () => {
+    // Red Light takes the six largest bodies, and an onlooker behind the play
+    // area is a complete, confident, valid detection. Two players plus three
+    // watchers was five racers, three of whom get eliminated for shifting
+    // their weight.
+    const player = body(0.4, 0.5, 0.22);
+    const watcher = body(0.75, 0.45, 0.09); // ~0.41 of the player: much further back
+    assert.equal(people([player, watcher]), 1, 'a distant onlooker is not a player');
+  });
+
+  test('a real player standing a step back is STILL a player', () => {
+    // The failure the bystander gate must not cause. Apparent size is inverse
+    // to distance, so two genuine players at 3m and 4m are already at 0.75 —
+    // rejecting one of those is far worse than letting an onlooker in, because
+    // a player being ignored reads as the game being broken.
+    assert.equal(
+      people([body(0.35, 0.5, 0.22), body(0.7, 0.5, 0.165)]),
+      2,
+      'a player one step back must not be culled'
     );
   });
 

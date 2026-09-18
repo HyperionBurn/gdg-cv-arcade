@@ -694,6 +694,41 @@ tunables.registerAll([
       'gets GREAT for a PERFECT. Tune it by punching deliberately early and ' +
       'late and checking the grades come out symmetric.',
   },
+  /* ---- core/tracker.ts: who counts as a player at all ---- */
+  {
+    key: 'tracker.minArea',
+    label: 'MIN BODY SIZE',
+    group: 'STALL CONTROL',
+    min: 0.005,
+    max: 0.12,
+    step: 0.005,
+    default: 0.02,
+    unit: 'frame area',
+    description:
+      'How much of the frame a body must fill to count as a player at all. ' +
+      'This is the crowd-rejection lever: people queueing behind are further ' +
+      'away and therefore smaller. Raise it in the real room, with tape on the ' +
+      'floor marking where the nearest onlooker can stand, until watchers stop ' +
+      'being given lanes in Red Light. Too high and a short player at the back ' +
+      'of the play zone stops existing.',
+  },
+  {
+    key: 'tracker.minRelativeSize',
+    label: 'BYSTANDER CUTOFF',
+    group: 'STALL CONTROL',
+    min: 0,
+    max: 0.85,
+    step: 0.05,
+    default: 0.5,
+    unit: 'x nearest body',
+    description:
+      'Reject a body smaller than this fraction of the NEAREST body. Second ' +
+      'line of defence against onlookers getting lanes. Cannot be pushed far: ' +
+      'a spectator at 6m is 0.5 of a player at 3m, but two REAL players at 3m ' +
+      'and 4m are already 0.75, so the ranges overlap. Culling a real player ' +
+      'is the worse failure — an onlooker with a lane is funny, a player being ' +
+      'ignored looks broken. 0 disables it.',
+  },
   {
     key: 'game.cameraGhost',
     label: 'CAMERA GHOST',

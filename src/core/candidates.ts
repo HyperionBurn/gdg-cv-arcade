@@ -157,6 +157,28 @@ export interface SelectOptions {
   minConfidence: number;
   dedupeTorsos: number;
   aspect: number;
+  /**
+   * A body smaller than this FRACTION of the nearest body is a bystander, not
+   * a player. 0 disables the check.
+   *
+   * Red Light is the case: it takes the six largest bodies, and a spectator
+   * standing behind the play area is still a complete, confident, perfectly
+   * valid detection. Two players plus three people watching is five racers,
+   * three of whom get eliminated for shifting their weight.
+   *
+   * BE HONEST ABOUT WHAT THIS CAN AND CANNOT DO. Apparent size is inverse to
+   * distance, so the ratio between a player at 3m and an onlooker at 6m is
+   * 0.5 — but a spectator at 4.5m is 0.67, and TWO REAL PLAYERS at 3m and 4m
+   * are 0.75. Those ranges overlap. A threshold high enough to reliably reject
+   * the queue will also reject a genuine player standing a step back, which is
+   * the worse failure: an onlooker getting a lane is funny, a player being
+   * ignored is the game appearing broken.
+   *
+   * So the default only catches people who are CLEARLY further away, and the
+   * real fix on the night is floor tape plus `tracker.minArea` tuned in the
+   * actual room. This is a second line of defence, not a substitute for one.
+   */
+  minRelativeSize: number;
 }
 
 /**
@@ -194,5 +216,12 @@ export function selectCandidates(poses: readonly RawPose[], opts: SelectOptions)
     if (!duplicate) distinct.push(c);
   }
 
-  return distinct.slice(0, opts.maxPlayers);
+  // Relative-size gate, against the NEAREST body. Runs after dedupe so a ghost
+  // cannot set the reference, and after the sort so `distinct[0]` is the
+  // largest.
+  const nearest = distinct[0];
+  const floor = nearest && opts.minRelativeSize > 0 ? nearest.unit * opts.minRelativeSize : 0;
+  const present = floor > 0 ? distinct.filter((c) => c.unit >= floor) : distinct;
+
+  return present.slice(0, opts.maxPlayers);
 }

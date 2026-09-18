@@ -112,6 +112,7 @@ function rows(fc: FrameContext): Row[] {
         minArea: 0.02,
         minConfidence: 0.45,
         dedupeTorsos: 0.55,
+        minRelativeSize: 0.5,
         aspect: (cam.width || 16) / (cam.height || 9),
       })
     : [];
