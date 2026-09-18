@@ -48,6 +48,17 @@ export interface Blade {
   angle: number;
   /** True when moving fast enough to cut. Stops resting hands mowing the field. */
   active: boolean;
+  /**
+   * Set for the ONE frame after this blade snapped to a new position rather
+   * than travelling there — a visibility dropout returning, or a jump too
+   * large to be an arm.
+   *
+   * Consumers that treat the gap between frames as a swipe must ignore that
+   * frame entirely. Snapping `px/py` stops the phantom SEGMENT, but a game
+   * holding its own per-note "was this hand outside the ring" flag can still
+   * be fooled by the snapped position alone.
+   */
+  reacquired: boolean;
   visible: boolean;
   /** Recent tips, newest last. Drives the trail ribbon. */
   trail: BladePoint[];
@@ -84,6 +95,8 @@ export type ProjectFn = (nx: number, ny: number) => BladePoint;
 
 export class BladeTracker {
   private blades = new Map<string, BladeState>();
+  /** Set for the frame on which this player's left/right labels exchanged. */
+  private forceReacquire = false;
   private tun: BladeTunables;
 
   constructor(tunables: Partial<BladeTunables> = {}) {
@@ -114,10 +127,27 @@ export class BladeTracker {
 
     for (const player of players) {
       const slot = Math.max(0, player.slot);
+      // LABEL SWAP DETECTION, before either blade is updated.
+      //
+      // MediaPipe's left/right are inferred and subject-relative, so a player
+      // turning side-on can have them exchange for a run of frames. Each blade
+      // then teleports to the OTHER hand's position — and the segment it
+      // sweeps on the way is indistinguishable from a punch.
+      //
+      // A per-blade distance threshold does not catch this reliably, because
+      // the two hands are frequently closer together than any plausible
+      // fast-swipe limit. The exchange itself is the signal: both new
+      // positions sitting where the other blade was last frame.
+      //
+      // MEASURED before this, with label swapping enabled: a Rhythm player
+      // holding both fists still scored 318 points across fifteen seconds.
+      this.forceReacquire = this.labelsExchanged(player, project);
+
       // Subject-left and subject-right. The projection mirrors, so the blade
       // appears on the side of the screen the player sees their own hand on.
       this.updateOne(player, slot, 'left', POSE.LEFT_WRIST, project, safeDt, now);
       this.updateOne(player, slot, 'right', POSE.RIGHT_WRIST, project, safeDt, now);
+      this.forceReacquire = false;
     }
 
     // Retire blades whose player vanished, so their trail doesn't hang mid-air.
@@ -127,6 +157,52 @@ export class BladeTracker {
     }
 
     return [...this.blades.values()].filter((b) => b.visible);
+  }
+
+  /**
+   * The furthest a real hand can travel between two samples, in screen pixels.
+   *
+   * Expressed in torso units so it means the same thing for a child and an
+   * adult, and for someone at 2m or 4m. Generous: a hard swipe is ~0.2 torso
+   * per frame at 30fps, so 0.9 leaves a wide margin for a genuinely fast arm
+   * on a slow frame while still being far below a cross-body label swap.
+   */
+  /**
+   * Have this player's left/right labels just exchanged?
+   *
+   * True when each incoming wrist is markedly closer to where the OTHER blade
+   * was last frame than to where its own was. Requires the hands to be
+   * meaningfully apart, since with both hands together the question is
+   * meaningless and the answer does not matter.
+   */
+  private labelsExchanged(player: TrackedPlayer, project: ProjectFn): boolean {
+    const prevL = this.blades.get(`${player.id}:left`);
+    const prevR = this.blades.get(`${player.id}:right`);
+    if (!prevL || !prevR || !prevL.visible || !prevR.visible) return false;
+
+    const lm = player.landmarks;
+    const l = lm[POSE.LEFT_WRIST];
+    const r = lm[POSE.RIGHT_WRIST];
+    if (!l || !r) return false;
+
+    const nl = project(l.x, l.y);
+    const nr = project(r.x, r.y);
+
+    const apart = Math.hypot(prevL.x - prevR.x, prevL.y - prevR.y);
+    const unit = player.scale.unit;
+    const screenH = Math.abs(project(0, 1).y - project(0, 0).y) || 1;
+    if (!(unit > 0) || apart < unit * screenH * 0.35) return false;
+
+    const stay = Math.hypot(nl.x - prevL.x, nl.y - prevL.y) + Math.hypot(nr.x - prevR.x, nr.y - prevR.y);
+    const swap = Math.hypot(nl.x - prevR.x, nl.y - prevR.y) + Math.hypot(nr.x - prevL.x, nr.y - prevL.y);
+    return swap < stay * 0.5;
+  }
+
+  private maxTravelPerFrame(player: TrackedPlayer, project: ProjectFn): number {
+    const unit = player.scale.unit;
+    if (!(unit > 0)) return Infinity;
+    const screenH = Math.abs(project(0, 1).y - project(0, 0).y) || 1;
+    return unit * screenH * 0.9;
   }
 
   private updateOne(
@@ -165,6 +241,7 @@ export class BladeTracker {
         speed: 0,
         angle: 0,
         active: false,
+        reacquired: true,
         visible: true,
         trail: [{ x: p.x, y: p.y }],
         lastSeen: now,
@@ -186,14 +263,36 @@ export class BladeTracker {
     // The simulator cannot reproduce it at all: its landmarks are always
     // visibility 1.
     const wasHidden = !blade.visible;
-    blade.px = wasHidden ? p.x : blade.x;
-    blade.py = wasHidden ? p.y : blade.y;
+
+    // A JUMP TOO BIG TO BE AN ARM IS NOT AN ARM.
+    //
+    // A swept segment from the previous position to this one is what turns a
+    // fast hand into a slice. It is also what turns a TRACKING ARTIFACT into a
+    // slice, and a hidden blade is not the only source of those: MediaPipe's
+    // left/right labels are inferred and subject-relative, so a player turning
+    // side-on can have them swap for a run of frames. The blade then teleports
+    // across the body, and the segment it sweeps on the way passes through
+    // whatever is in between.
+    //
+    // MEASURED with limb swapping enabled: a Rhythm player holding both fists
+    // still on the targets scored 67 points without moving. The `sawHand` fix
+    // did not catch it, because a hand WAS seen — just the wrong one.
+    //
+    // A real hand covers about 0.2 torso units between frames at 30fps even
+    // when swung hard; a swap moves it across the whole body. Anything past
+    // this is treated as a re-acquisition: snap, do not sweep.
+    const jump = Math.hypot(p.x - blade.x, p.y - blade.y);
+    const teleported = jump > this.maxTravelPerFrame(player, project);
+
+    blade.reacquired = wasHidden || teleported || this.forceReacquire;
+    blade.px = blade.reacquired ? p.x : blade.x;
+    blade.py = blade.reacquired ? p.y : blade.y;
     blade.x = p.x;
     blade.y = p.y;
     blade.slot = slot;
     blade.visible = true;
     blade.lastSeen = now;
-    if (wasHidden) {
+    if (blade.reacquired) {
       // A trail bridging the gap would draw the same phantom slash.
       blade.trail.length = 0;
       blade.trail.push({ x: p.x, y: p.y });

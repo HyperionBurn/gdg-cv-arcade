@@ -242,6 +242,11 @@ export class FruitNinjaGame extends GameBase {
   private resolveSlices(fc: FrameContext, blades: Blade[]): void {
     for (const blade of blades) {
       if (!blade.active) continue;
+      // A blade that SNAPPED rather than travelled has no swipe to test. Its
+      // segment is fiction — a returning dropout, or MediaPipe exchanging this
+      // player's left/right labels when they turn side-on. Measured: a resting
+      // hand scored while the labels flickered.
+      if (blade.reacquired) continue;
 
       // SOLO ROUNDS SCORE INTO SLOT 0, WHOEVER THE TRACKER THINKS YOU ARE.
       //

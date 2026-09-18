@@ -254,6 +254,10 @@ export class BalloonPopGame extends GameBase {
 
   private resolvePops(fc: FrameContext, blades: Blade[]): void {
     for (const blade of blades) {
+      // Same reason as Fruit Ninja: a snapped blade's position is valid but the
+      // motion implied by it is not, and a pop is a statement about a hand
+      // having arrived somewhere.
+      if (blade.reacquired) continue;
       for (let i = this.balloons.length - 1; i >= 0; i--) {
         const b = this.balloons[i]!;
         if (this.playerCount > 1 && b.slot !== blade.slot) continue;

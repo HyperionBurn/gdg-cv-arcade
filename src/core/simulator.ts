@@ -218,16 +218,86 @@ export interface SimRealism {
    * symmetric simulator can never produce an asymmetric complaint.
    */
   dominantBias: number;
+  /**
+   * Chance per frame that the model swaps this body's left and right limbs.
+   *
+   * MediaPipe genuinely does this. Its left/right are SUBJECT-relative and
+   * inferred, so a person turning side-on, crossing their arms, or standing at
+   * an angle can flip the labels for a run of frames. Anything that tracks a
+   * specific limb — 67's per-arm gates, Rhythm's fist colours, the hover
+   * cursor's chosen hand — sees a teleport.
+   */
+  limbSwap: number;
+  /**
+   * How far out of frame the body drifts, as a fraction of frame width.
+   *
+   * MediaPipe returns all 33 landmarks ALWAYS, extrapolating the ones it
+   * cannot see — so an off-centre player yields confident coordinates outside
+   * 0..1 rather than missing ones. Standing too close or off to one side is
+   * the single most common framing mistake at a stall, and the simulator has
+   * never produced a body that was anything but perfectly centred.
+   */
+  edgeBias: number;
+  /**
+   * Global visibility floor, for a room where the lights change.
+   *
+   * A hall's lighting is not constant: a projector, a door opening, someone
+   * standing between the player and a window. Scales every landmark's
+   * confidence, so gates keyed on visibility see the whole body get less
+   * certain at once rather than one limb at a time.
+   */
+  lightingDip: number;
 }
 
-export const NO_REALISM: SimRealism = { noise: 0, dropout: 0, dominantBias: 1 };
+export const NO_REALISM: SimRealism = {
+  noise: 0,
+  dropout: 0,
+  dominantBias: 1,
+  limbSwap: 0,
+  edgeBias: 0,
+  lightingDip: 0,
+};
 
 /**
  * A plausible 3m webcam. Not calibrated against a specific camera — it exists
  * to make the input UGLY in the ways real input is ugly, not to predict a
  * particular sensor.
  */
-export const REALISTIC: SimRealism = { noise: 0.004, dropout: 0.03, dominantBias: 2.5 };
+export const REALISTIC: SimRealism = {
+  noise: 0.004,
+  dropout: 0.03,
+  dominantBias: 2.5,
+  limbSwap: 0.004,
+  edgeBias: 0,
+  lightingDip: 0,
+};
+
+/**
+ * The stall on a bad day: a player standing off-centre and half out of frame,
+ * in light that keeps changing, turning enough to confuse the model.
+ */
+export const HOSTILE: SimRealism = {
+  noise: 0.007,
+  dropout: 0.06,
+  dominantBias: 3,
+  limbSwap: 0.02,
+  edgeBias: 0.22,
+  lightingDip: 0.35,
+};
+
+/**
+ * Every LEFT_/RIGHT_ landmark pair, for the limb-swap model.
+ *
+ * Built from POSE rather than listed by hand so a landmark added to the enum
+ * cannot be silently left unswapped.
+ */
+const MIRRORED_PAIRS: ReadonlyArray<readonly [number, number]> = Object.keys(POSE)
+  .filter((k) => k.startsWith('LEFT_'))
+  .map((k) => [
+    (POSE as Record<string, number>)[k]!,
+    (POSE as Record<string, number>)[k.replace('LEFT_', 'RIGHT_')]!,
+  ])
+  .filter((pair): pair is [number, number] => pair[0] !== undefined && pair[1] !== undefined);
 
 /** Box-Muller, so noise is gaussian rather than uniform like `jitter`. */
 function gauss(): number {
@@ -249,6 +319,11 @@ export class PoseSimulator {
    * the deterministic regression figures stay deterministic.
    */
   realism: SimRealism = { ...NO_REALISM };
+
+  /** Latched left/right label swap. See SimRealism.limbSwap. */
+  private swapped = false;
+  /** Slow oscillation driving `lightingDip`. */
+  private lightPhase = 0;
 
   /** Cycles through a scripted demo so the stall has something to show. */
   auto = false;
@@ -285,13 +360,46 @@ export class PoseSimulator {
    */
   private roughen(landmarks: Landmark[]): void {
     const r = this.realism;
-    if (r.noise <= 0 && r.dropout <= 0) return;
+    if (r.noise <= 0 && r.dropout <= 0 && r.limbSwap <= 0 && r.lightingDip <= 0) return;
 
     if (r.noise > 0) {
       for (const l of landmarks) {
         if (!l) continue;
         l.x += gauss() * r.noise;
         l.y += gauss() * r.noise;
+      }
+    }
+
+    // LIGHTING. Scales every landmark's confidence at once, which is how a
+    // room dims — not one limb at a time.
+    this.lightPhase += 0.02;
+    if (r.lightingDip > 0) {
+      const dip = 1 - r.lightingDip * (0.5 + 0.5 * Math.sin(this.lightPhase));
+      for (const l of landmarks) {
+        if (l) l.visibility *= dip;
+      }
+    }
+
+    // LEFT/RIGHT CONFUSION. MediaPipe's sides are inferred and subject-
+    // relative, so a body turning side-on can have them flip for a run of
+    // frames. Latched rather than per-frame: a single-frame flicker is noise,
+    // a sustained swap is what actually happens and what actually breaks
+    // anything tracking a specific limb.
+    if (r.limbSwap > 0) {
+      if (this.swapped) {
+        if (Math.random() < r.limbSwap * 1.5) this.swapped = false;
+      } else if (Math.random() < r.limbSwap) {
+        this.swapped = true;
+      }
+      if (this.swapped) {
+        for (const [a, b] of MIRRORED_PAIRS) {
+          const la = landmarks[a];
+          const lb = landmarks[b];
+          if (la && lb) {
+            landmarks[a] = lb;
+            landmarks[b] = la;
+          }
+        }
       }
     }
 
@@ -337,7 +445,10 @@ export class PoseSimulator {
     const flail = p.motion * h * 0.1 * Math.sin(w * 1.3 + 2.1);
 
     const laneOffset = p.lane * h * 0.34;
-    const cx = p.x + laneOffset + jitterX + swayX;
+    // EDGE BIAS. A body pushed toward the frame edge; landmarks past 0..1 are
+    // MediaPipe extrapolating a limb it cannot see, which is exactly what it
+    // does rather than omitting them.
+    const cx = p.x + laneOffset + jitterX + swayX + this.realism.edgeBias;
     const ground = p.groundY - lift + jitterY + swayY;
 
     const hipY = ground - h * 0.48 + squash * 0.5;

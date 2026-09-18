@@ -740,7 +740,34 @@ export class RhythmGame extends GameBase {
       }
 
       sawHand = true;
+
+      // A SNAPPED BLADE PROVES NOTHING ABOUT WHERE THE HAND HAS BEEN.
+      //
+      // `reacquired` marks the frame after a blade jumped rather than
+      // travelled — a dropout returning, or MediaPipe swapping its left/right
+      // labels when a player turns side-on. The position is now valid, but the
+      // implied motion is fiction, and both landing and re-arming are
+      // judgements about motion.
+      //
+      // MEASURED with label swapping enabled: a player holding both fists
+      // still on the targets scored 251 points across fifteen seconds of not
+      // moving. Snapping the swept segment alone did not stop it, because the
+      // note's own `wasArmed` flag survives from the previous frame and the
+      // snapped position lands inside the ring.
+      // DISARMING STILL RUNS, LANDING DOES NOT.
+      //
+      // The two halves are not symmetric. Disarming says "this hand is inside
+      // the ring", which is a statement about the CURRENT position and is true
+      // whether the blade arrived by travelling or by snapping — and it is the
+      // conservative direction, because it can only withhold a point.
+      // Landing says "this hand swept through the ring", which is a statement
+      // about MOTION, and after a snap that motion is fiction.
+      //
+      // A first attempt skipped the whole iteration and made it worse: a
+      // parked fist then never disarmed its note, stayed armed indefinitely
+      // and scored 207 while standing still even with a clean body.
       if (Math.hypot(blade.x - target.x, blade.y - target.y) <= radius * 1.25) stillOutside = false;
+      if (blade.reacquired) continue;
       if (inWindow && swept <= radius && (wasArmed || blade.active)) landed = true;
     }
 
