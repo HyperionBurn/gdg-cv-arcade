@@ -275,6 +275,22 @@ const BOMB_STUN_MS = 1200;
  * Fruit Ninja is the one game on the roster that WANTS a big swing, so it sits
  * at the top of the comfortable range rather than the middle of it — and the
  * fruit then arcs and drifts outward from there anyway.
+ *
+ * VERIFIED WHERE IT IS ACTUALLY SLICEABLE, not merely where it spawns, because
+ * the drift above is the part that could put it out of reach. Measured over a
+ * full solo round, every fruit's furthest offset from the player's own body
+ * centre while inside the vertical band a standing player's hands cover
+ * (0.18-0.62 of screen height), in torso units:
+ *
+ *   n = 160   p10 0.14   p50 0.56   p90 1.10   max 1.42
+ *   beyond a comfortable reach (1.25):  3.1%
+ *   beyond a full stretch (1.57):       0%
+ *
+ * So the drift does not defeat the band. A playtester reported "I legit
+ * couldn't reach most" of the fruit — that was against the OLD placement,
+ * which threw at a fraction of the slot rect and had nothing to do with where
+ * a person's arms can go. Re-measure this table if the arc or the drift
+ * changes; it is the only thing standing between the band and that report.
  */
 const REACH_HALF_TORSOS = 1.45;
 

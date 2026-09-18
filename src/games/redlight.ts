@@ -415,7 +415,14 @@ export class RedLightGame extends GameBase {
       gameId: 'redlight',
       title: 'RED LIGHT, GREEN LIGHT',
       // Player-facing, so it carries the brand voice: the action in brackets.
-      tagline: '<MOVE ON GREEN, FREEZE ON RED> UP TO 6 PLAYERS',
+      //
+      // "MOVE ON GREEN" WAS THE PROBLEM. Testers read it and started actually
+      // walking — which is the one thing that cannot work here: there is no
+      // floor space at a stall, and stepping toward the camera changes the
+      // body scale every threshold in this game is divided by. The tester who
+      // got it right described what he was doing as "moving my arms like I'm
+      // running without running", and that is the whole interaction. Say so.
+      tagline: '<PUMP YOUR ARMS ON GREEN — FREEZE ON RED> STAY WHERE YOU ARE',
       visionMode: 'pose',
       maxPlayers: LANES,
       roundSeconds: 45,
@@ -1885,7 +1892,11 @@ export class RedLightGame extends GameBase {
     const { ctx, v } = fc;
     const red = this.light === 'red';
     const col = this.stateColor();
-    const word = red ? '<FREEZE>' : '<MOVE>';
+    // '<PUMP>', not '<MOVE>'. The whole confusion at the playtest was people
+    // reading "move" and walking, which cannot work at a stall: there is no
+    // floor space, and stepping toward the camera changes the body scale every
+    // threshold here is divided by.
+    const word = red ? '<FREEZE>' : '<PUMP>';
 
     const cy = vh(v, 32.4);
     // Slams in on the transition, then settles. Bounded at 1.8vh: any more and
@@ -1919,6 +1930,23 @@ export class RedLightGame extends GameBase {
       weight: WEIGHT.extrabold,
       letterSpacing: TRACK.h2,
     });
+
+    // THE FIRST GREEN TEACHES THE ACTION, and only the first.
+    //
+    // The banner alone cannot say what "pump" means to somebody meeting the
+    // game in a queue. A line under it during the opening green — which is
+    // deliberately the longest and most forgiving of the round — costs nothing
+    // and is gone before it can become clutter. After that, the doll, the
+    // light and six other people are the instruction.
+    const anyoneMoved = [...this.racers.values()].some((r) => r.progress > 0.5);
+    if (!red && !anyoneMoved) {
+      drawText(ctx, 'SWING YOUR ARMS — DO NOT WALK', v.width / 2, y + h + vh(v, 3.4), {
+        size: vh(v, 2.6),
+        color: COLORS.ink,
+        weight: 700,
+        letterSpacing: TRACK.body,
+      });
+    }
   }
 
   /**
