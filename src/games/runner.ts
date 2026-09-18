@@ -131,52 +131,67 @@ const SLIDE_LOCKOUT = 0.35;
  * Sideways offset, in torso units, that commits to a side lane — and where the
  * gate lets go again. `LaneDetector`'s own defaults are 0.55/0.30.
  *
- * WHY THIS GAME OVERRIDES THEM. `LaneDetector` measures the shoulder midpoint
- * against a `Baseline` that keeps adapting WHILE THE LANE IS 0, at 0.02 per
- * call — and `updateInput` calls it once per RENDERED frame, so on a 60Hz TV
- * the reference has a time constant of ~0.83s. The baseline is therefore
- * chasing the player during exactly the movement it is supposed to measure,
- * and the peak offset a step produces depends on how FAST it was taken, not
- * just how far. 0.55 is reachable only by a brisk, committed step.
+ * ONE TORSO UNIT IS 51cm OF LATERAL SHOULDER TRAVEL for a 1.7m adult at 3m on
+ * a 16:9 camera, so 0.35 is asking for 17.8cm — about a lean. A tester with a
+ * tape measure reported needing 40-50cm.
  *
- * MEASURED — peak offset for a step of one full lane, realistic body, p10 of
- * 25 trials (the tenth-percentile player, not the median one):
+ * THE GATE WAS NEVER THE PROBLEM; THE REFERENCE WAS. `LaneDetector` measured
+ * the shoulder midpoint against a `Baseline` that kept adapting on every frame
+ * the lane was 0 — a ~0.83s time constant at 60Hz — so the reference chased
+ * the player through the movement it was there to measure, and what reached
+ * the gate was not "how far did they move" but "how far did they move faster
+ * than 0.83 seconds". Lowering `enter` a second time could not have fixed it:
+ * the previous drop, 0.55 -> 0.35, is what the tester was already measuring
+ * against, and the floor underneath is a motionless body's own noise.
  *
- *   taken in 0.5s   0.829      taken in 1.5s   0.524   <- under 0.55
- *   taken in 1.0s   0.657      taken in 2.0s   0.450
+ * MEASURED through the real `PoseTracker`, realistic noise at 3m, p10 of 25:
  *
- *   a 70%-of-a-lane step in 1.0s   0.459        in 1.5s   0.378
- *   a 50%-of-a-lane step in 1.0s   0.341
+ *   peak offset for a shoulder travel of   20cm    25cm    30cm    40cm
+ *     taken in 0.9s                       0.254   0.316   0.470   0.701
+ *     taken in 1.5s                       0.211   0.260   0.309   0.612
  *
- * So at 0.55 a full lane change taken in 1.5s missed 16 times in 20, and a
- * slightly short step taken in 1.0s — which is simply what a person does when
- * they are being watched and not sure the game can see them — missed 20 times
- * in 20. THAT IS THE REPORTED BUG: "runner didn't detect movement". It is not
- * the aspect correction (already fixed in `LaneDetector`); it is the gate
- * sitting above what an ordinary, slightly tentative step can reach.
+ * A 20cm lean read 0.21-0.32 and fired 0 times in 60. `LaneDetector` now holds
+ * its reference still while the body is displaced — see the long note there
+ * for the mechanism and for what it costs — and the SAME 0.35 gate now means
+ * what it says:
  *
- * 0.35 / 0.22, chosen from the table above rather than by feel:
+ *   fire rate, 20cm of travel, 30 seeds x 2 directions, `enter` 0.35
+ *     taken in                0.4s   0.6s   0.9s   1.2s   1.6s   2.0s
+ *     before                     0%     0%     0%     0%     0%     0%
+ *     after                    100%   100%   100%   100%   100%    97%
  *
- *   ENTER 0.35 catches a full lane taken in up to ~2s and a 70% step in up to
- *   ~1.5s, and still rejects a 50% weight-shift (7 of 20 at 1.0s), which is a
- *   shuffle and not a lane change.
+ *   and, unchanged, 10cm fires 0% at every speed — a weight-shift is not a
+ *   lane change. Hostile noise, a shoulders-only LEAN rather than a step, a
+ *   body at 2.2m and a body at 4m all also fire 100% at 20cm.
  *
- *   It is 2.1x the largest lateral reading a MOTIONLESS body produced under
- *   hostile input (max 0.164 torso units over 1200 samples; realistic max
- *   0.079). Re-measured end to end: ZERO false lane changes in 120s of a still
- *   body, realistic and hostile alike — the same zero the old 0.55 scored.
+ * SO BOTH NUMBERS STAY WHERE THEY ARE. 0.35 is 1.20x the worst reading a body
+ * rocking +-8cm on the spot produces under hostile input (0.291), which is the
+ * widest sway this repo documents for a standing person. Past +-10cm of sway
+ * it starts firing — that is the real cost of the fix, and it is why this is
+ * live on the console: `runner.laneEnter` 0.40 buys the +-11cm case back for
+ * 22cm of travel instead of 20cm.
  *
- *   EXIT 0.22 clears that same 0.164 hostile noise floor, so a player who
- *   steps back to the middle reliably re-centres instead of sticking.
- *
- * Verified after the change: 0 misses in 20 at every speed from 0.5s to 2.0s,
- * both directions, realistic and hostile.
- *
- * Live-tunable because the right number belongs to the room and to how far
- * apart the floor tape ends up being.
+ * EXIT 0.22 is unchanged and still clears the still-body noise floor (hostile
+ * max 0.078), so a player who steps back to the middle re-centres.
  */
 const LANE_ENTER = 0.35;
 const LANE_EXIT = 0.22;
+
+/**
+ * Where the lane reference stops following the body, and for how long.
+ *
+ * `holdAt` 0.12 torso (6.1cm) is above anything a standing body produces —
+ * MEASURED, still and hostile, max 0.078 over 120s — and far below `LANE_EXIT`,
+ * so the reference is already held by the time a movement is anywhere near
+ * deciding anything. Raising it to 0.18 dropped a 20cm step from 100% to 85%.
+ *
+ * `holdSec` 2.0 is longer than any deliberate side-step (measured above: a
+ * committed one is 0.4-1.2s) and short enough that a player who simply
+ * re-plants their feet is absorbed in about 3 seconds rather than spending the
+ * rest of the round with an off-centre gate.
+ */
+const LANE_HOLD_AT = 0.12;
+const LANE_HOLD_SEC = 2;
 
 /** Near-miss tuning. Garnish on top of momentum, never the main course. */
 const NEAR_TIME_WINDOW = 0.22; // seconds of margin that still counts as close
@@ -214,7 +229,13 @@ export class RunnerGame extends GameBase {
   private world: RunnerWorld | null = null;
   private worldFailed = false;
 
-  private lanes = new LaneDetector({ enter: LANE_ENTER, exit: LANE_EXIT, laneCount: 3 });
+  private lanes = new LaneDetector({
+    enter: LANE_ENTER,
+    exit: LANE_EXIT,
+    laneCount: 3,
+    holdAt: LANE_HOLD_AT,
+    holdSec: LANE_HOLD_SEC,
+  });
   private vert = new VerticalGestures();
   private gen = new TrackGenerator();
   private rows: TrackRow[] = [];
@@ -311,6 +332,8 @@ export class RunnerGame extends GameBase {
     this.lanes.setTunables({
       enter: tunables.get('runner.laneEnter', LANE_ENTER),
       exit: tunables.get('runner.laneExit', LANE_EXIT),
+      holdAt: tunables.get('runner.laneHoldAt', LANE_HOLD_AT),
+      holdSec: tunables.get('runner.laneHoldSec', LANE_HOLD_SEC),
     });
 
     this.lanes.reset();
@@ -385,7 +408,10 @@ export class RunnerGame extends GameBase {
     const p = players[0];
 
     if (p && p.scale.valid) {
-      const lane = this.lanes.update(p, true);
+      // `fc.now` so the hold timer is in SECONDS rather than in frames. The
+      // detector falls back to assuming 60Hz, which is what its adaptation rate
+      // has always assumed — but this game runs on whatever the TV gives us.
+      const lane = this.lanes.update(p, true, fc.now);
       const changed = this.lanes.changed;
       if (changed !== 0) {
         this.laneTarget = lane;

@@ -720,6 +720,137 @@ tunables.registerAll([
       'one value rather than cutting the game.',
   },
 
+  /* ---- games/runner.ts: the lane gate ---- */
+  {
+    key: 'runner.laneEnter',
+    label: 'LANE ENTER',
+    group: 'RUNNER',
+    min: 0.2,
+    max: 0.8,
+    step: 0.01,
+    default: 0.35,
+    unit: 'torso',
+    description:
+      'Sideways travel that commits to a side lane. One torso unit is about ' +
+      '51cm at 3m, so 0.35 is a 20cm lean. RAISE IT to 0.40 if idle players ' +
+      'sway into lane changes (clean to +-8cm of sway here, +-11cm at 0.40); ' +
+      'lower it and a weight-shift starts counting as a lane.',
+  },
+  {
+    key: 'runner.laneExit',
+    label: 'LANE EXIT',
+    group: 'RUNNER',
+    min: 0.1,
+    max: 0.6,
+    step: 0.01,
+    default: 0.22,
+    unit: 'torso',
+    description:
+      'How far back toward the middle a player must come to leave a side ' +
+      'lane. Must stay well under LANE ENTER or the lane chatters, and above ' +
+      'the still-body noise floor (0.08 hostile) or players stick in a lane.',
+  },
+  {
+    key: 'runner.laneHoldAt',
+    label: 'LANE REFERENCE HOLD',
+    group: 'RUNNER',
+    min: 0.06,
+    max: 0.4,
+    step: 0.01,
+    default: 0.12,
+    unit: 'torso',
+    description:
+      'Offset past which the lane centre stops following the body. THIS IS ' +
+      'THE ONE THAT MADE STEPPING WORK: with it too high the reference chases ' +
+      'the player mid-step and a 20cm lean reads as 0.21. Raising it to 0.18 ' +
+      'dropped a 20cm step from 100% to 85%.',
+  },
+  {
+    key: 'runner.laneHoldSec',
+    label: 'LANE REFERENCE HOLD TIME',
+    group: 'RUNNER',
+    min: 0.5,
+    max: 5,
+    step: 0.1,
+    default: 2,
+    unit: 's',
+    description:
+      'How long the lane centre stays held before it accepts that this is ' +
+      'where the player is standing now. Longer than any deliberate step ' +
+      '(0.4-1.2s measured). Set it to 0 and the reference chases again; set ' +
+      'it very high and a player who re-plants their feet is stuck off-centre.',
+  },
+
+  /* ---- games/sixtyseven.ts: the rep gate ---- */
+  {
+    key: 'sixtyseven.upEnter',
+    label: 'REP SWING UP',
+    group: '67 SPEED',
+    min: 0.04,
+    max: 0.3,
+    step: 0.01,
+    default: 0.12,
+    unit: 'torso',
+    description:
+      'How far the wrist must rise above the middle of its OWN stroke. With ' +
+      'REP SWING DOWN this is the whole anti-cheat: 0.24 torso (~12cm) of ' +
+      'peak-to-peak travel. Raise BOTH to 0.17 if somebody is scoring by ' +
+      'shaking their hands; that costs a shallow overhead pump about a third ' +
+      'of its reps. Lower both and twitching starts to count.',
+  },
+  {
+    key: 'sixtyseven.upExit',
+    label: 'REP SWING UP RELEASE',
+    group: '67 SPEED',
+    min: 0,
+    max: 0.2,
+    step: 0.01,
+    default: 0.05,
+    unit: 'torso',
+    description:
+      'Hysteresis on the up gate. Keep it at least 0.05 below REP SWING UP ' +
+      'or the gate chatters at its boundary and invents reps.',
+  },
+  {
+    key: 'sixtyseven.downEnter',
+    label: 'REP SWING DOWN',
+    group: '67 SPEED',
+    min: 0.04,
+    max: 0.3,
+    step: 0.01,
+    default: 0.12,
+    unit: 'torso',
+    description:
+      'How far the wrist must fall back below the middle of its stroke to ' +
+      're-arm. A stroke is symmetric, so move this WITH REP SWING UP.',
+  },
+  {
+    key: 'sixtyseven.downExit',
+    label: 'REP SWING DOWN RELEASE',
+    group: '67 SPEED',
+    min: 0,
+    max: 0.2,
+    step: 0.01,
+    default: 0.05,
+    unit: 'torso',
+    description:
+      'Hysteresis on the down gate. Same rule as REP SWING UP RELEASE.',
+  },
+  {
+    key: 'sixtyseven.centreRate',
+    label: 'REP CENTRE LEARN RATE',
+    group: '67 SPEED',
+    min: 0.005,
+    max: 0.05,
+    step: 0.001,
+    default: 0.02,
+    description:
+      'How fast each arm learns where the middle of its own pump is. It is a ' +
+      'high-pass corner: too fast and it eats a slow pump, too slow and the ' +
+      'first seconds of a 20-second round score nothing. Almost certainly ' +
+      'leave this alone — reach for the SWING numbers instead.',
+  },
+
   /* ---- operational levers ---- */
   {
     key: 'fx.qualityCap',

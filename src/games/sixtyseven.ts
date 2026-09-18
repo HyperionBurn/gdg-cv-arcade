@@ -47,64 +47,84 @@ import type { FrameContext } from '../shell/screen';
 const DEFAULT_TARGET = 55;
 
 /**
- * WHERE THE REP GATE SITS ON THE BODY. Reported from a human playtest as
- * "they had to 67 at a certain angle".
+ * WHAT A REP COSTS. Two playtests have hit this gate from opposite directions,
+ * and both times the complaint was about a POSITION rather than an effort.
  *
- * The first suspicion was anisotropy — x normalised by frame WIDTH against an
- * isotropic torso unit, the bug already found in three other detectors. IT IS
- * NOT THAT. `ArmPump` compares only Y deltas against `scale.unit`, and
- * `scale.unit` is torso HEIGHT, which a yaw does not change. Driving a rigid
- * yawed body through the real tracker and the real counter (tests/sixtyseven
- * .test.ts, 4Hz for 5s):
+ * First: "they had to 67 at a certain angle." Not anisotropy — `ArmPump`
+ * compares only Y deltas against `scale.unit`, which is torso HEIGHT, and a
+ * rigid yawed body scores 39/39/39/39/39 at 0/30/45/60/75 degrees. It was
+ * height: the gate wanted the wrist 0.12 torso above the shoulder, and a pump
+ * topping out at the chin scored zero. Half of that complaint is occlusion,
+ * which no threshold can fix — turned far enough the far arm drops under the
+ * 0.4 visibility gate and silently halves the score, 39 -> 19 measured, which
+ * is why `drawArmIndicators` grew its third state.
  *
- *   body yaw      0deg   30deg   45deg   60deg   75deg
- *   reps            39      39      39      39      39
+ * Second, and the reason this is now built differently: "that position is like
+ * shoulder width and beyond — I can even do a tpose 67 — some people can 67
+ * very fast with our hands close together."
  *
- * Two things ARE angle-dependent, and neither is a coordinate bug:
+ * THOSE ARE THE SAME BUG. How far apart your hands are is set by how far you
+ * abduct your upper arms, and upper-arm abduction is the only thing that lifts
+ * your wrist above your shoulder — with your elbows at your sides the forearm
+ * is shorter than the upper arm, so the wrist tops out BELOW the shoulder line
+ * however hard you pump. MEASURED, forward kinematics on this repo's own
+ * segment ratios, through the real tracker and the real counter at 4Hz for 5s:
  *
- * 1. HOW HIGH YOU HAVE TO LIFT. The old gate needed the wrist 0.12 torso
- *    ABOVE the shoulder, and the cliff was vertical:
+ *   hands apart at the top   15cm   29cm   42cm   53cm   61cm   67cm
+ *   wrist peak vs shoulder  -0.117 -0.098 -0.043 +0.044 +0.158 +0.291
+ *   reps, old gate               0      0      0     24     37     37
+ *   reps, this gate             33     33     33     33     33     33
  *
- *      wrist peak (torso above shoulder)   -0.05   0.00   0.05   0.10   0.15
- *      reps in 5s, old gate                    0      0      0      0     39
- *      reps in 5s, this gate                   0      0     40     39     39
+ * Shoulder width on that body is 39cm. The cliff sat just outside it, which is
+ * precisely where the tester put it with their hands.
  *
- *    Five percent of a torso — about 2.5cm — between "the game is broken" and
- *    a perfect run. A player whose pump tops out at their chin got nothing,
- *    found one arm angle that worked, and reported exactly that.
+ * SO THE GATE NO LONGER ASKS WHERE. `ArmPump` now learns the middle of each
+ * arm's own stroke and measures the deviation from it; the full argument, and
+ * the proof that no fixed anchor — shoulder OR elbow — can serve both a tight
+ * pump and an overhead one, is on that class in core/gestures.ts.
  *
- * 2. OCCLUSION. Turned far enough, MediaPipe's confidence in the far arm falls
- *    under the 0.4 visibility gate and that arm stops counting, halving the
- *    score with no explanation (39 -> 19 reps, measured). No threshold can fix
- *    that, so `drawArmIndicators` now shows it instead — see `armSeen`.
+ * WHAT IT ASKS INSTEAD IS EFFORT, and it asks for MORE of it than before. The
+ * anti-cheat was always the SWING, `upEnter + downEnter`: 0.18 torso (~9cm)
+ * before, 0.24 torso (~12cm) now, because with the height requirement gone the
+ * swing is carrying it alone. MEASURED, reps in 5s, both gates driven through
+ * the real tracker on the same bodies:
  *
- * THE FIX KEEPS THE ANTI-CHEAT EXACTLY AS STRONG. PLAN.md §3 wants the wrist
- * to cross above the shoulder, and it wants "tiny twitchy hands" rejected. The
- * thing that rejects twitching is the SWING the wrist must travel, which is
- * `upEnter + downEnter` — 0.18 torso before and 0.18 torso after. The whole
- * band simply slides 0.08 torso (~4cm) down the body, so a modest pump crosses
- * it and a twitch still does not:
+ *   swing   what it is                              old gate   this gate
+ *   0.00    standing still, hostile noise                  0           0
+ *   0.07    a 4-degree twitch at 8Hz                       0           0
+ *   0.14    an 8-degree twitch at 8Hz                      0           0
+ *   0.24    a 14-degree shake at 8Hz                       0          20
+ *   0.48    the shallowest real style (overhead)          37          33
+ *   0.50    chest-to-overhead                             37          33
+ *   0.70    elbows tucked, hands together                  0          34
+ *   1.06    wide                                          37          35
  *
- *   wrist peak / trough, torso rel. shoulder      old   new
- *   +0.05 / -0.15   (a small but real pump)         0    39
- *   +0.05 / -0.30                                   0    39
- *   +0.10 / -0.40                                   0    39
- *   +0.02 / -0.02   (a twitch on the shoulder)      0     0
- *   +0.03 / -0.12   (swing 0.15, under the band)    0     0
- *    0.00 / -0.50   (big swing, never above)        0     0
- *   -0.05 / -0.60   (ditto, lower)                  0     0
+ * and the shape of the boundary, by stroke size, held low and narrow where the
+ * old gate scored a flat zero — clean bodies / realistic noise / hostile:
+ *
+ *   swing   0.12   0.16   0.20   0.24   0.30      (an honest 4Hz pump is 33)
+ *   clean      0      0      0      1     73
+ *   realistic  0      0      4     20     65
+ *   hostile    1      4     10     27     54
+ *
+ * The one thing that got EASIER to fake is a hard 12cm shake held anywhere on
+ * the body; the same shake already scored today if you held it at shoulder
+ * height, so the bar has gone up, not down. Raising both enters to 0.17 rejects
+ * it outright and costs the shallow-overhead style about a third of its reps —
+ * that is the trade a marshal has, live, if somebody games it on the day.
  *
  * Live on the operator console, because the right numbers belong to the bodies
  * that turn up on the day and this is the detector a marshal is most likely to
  * have to reach for.
  */
 const REP_GATE = {
-  /** Torso units the wrist must rise ABOVE the shoulder to arm a rep. */
-  upEnter: 0.04,
-  upExit: -0.04,
-  /** Torso units the wrist must drop BELOW the shoulder to re-arm. */
-  downEnter: 0.14,
-  downExit: 0.08,
+  /** Torso units the wrist must rise above the MIDDLE OF ITS OWN STROKE. */
+  upEnter: 0.12,
+  upExit: 0.05,
+  /** Torso units it must fall below that middle again to re-arm. */
+  downEnter: 0.12,
+  downExit: 0.05,
+  centreRate: DEFAULT_REP_TUNABLES.centreRate,
   minRepIntervalMs: DEFAULT_REP_TUNABLES.minRepIntervalMs,
 } as const;
 
@@ -162,6 +182,7 @@ export class SixtySevenGame extends GameBase {
       upExit: tunables.get('sixtyseven.upExit', REP_GATE.upExit),
       downEnter: tunables.get('sixtyseven.downEnter', REP_GATE.downEnter),
       downExit: tunables.get('sixtyseven.downExit', REP_GATE.downExit),
+      centreRate: tunables.get('sixtyseven.centreRate', REP_GATE.centreRate),
       minRepIntervalMs: REP_GATE.minRepIntervalMs,
     };
     for (const c of this.counters) {

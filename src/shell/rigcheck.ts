@@ -58,6 +58,7 @@ import {
 } from '../engine/draw';
 import { COLORS, PLAYER_COLORS, FONTS, SHADOW, STROKE, TRACK, WEIGHT } from './theme';
 import type { Screen, FrameContext } from './screen';
+import { tunables } from '../meta/tunables';
 
 /**
  * Most bodies this screen will ever track at once — the largest option in the
@@ -101,7 +102,25 @@ export class RigCheckScreen implements Screen {
    */
   private reps = RigCheckScreen.perSlot(() => new RepCounter());
   private vertical = RigCheckScreen.perSlot(() => new VerticalGestures());
-  private lanes = RigCheckScreen.perSlot(() => new LaneDetector());
+  /**
+   * Built with the RUNNER's gates, not `LaneDetector`'s library defaults.
+   *
+   * This screen exists to tell an operator what the GAME can see. Reporting a
+   * LANE chip that only lights at 0.55 torso, while the game commits a lane at
+   * 0.35, means the one diagnostic in the app disagrees with the thing it is
+   * diagnosing — and the operator trusts the chip. Read live so a marshal who
+   * moves the slider sees the chip move with it.
+   */
+  private lanes = RigCheckScreen.perSlot(
+    () =>
+      new LaneDetector({
+        enter: tunables.get('runner.laneEnter', 0.35),
+        exit: tunables.get('runner.laneExit', 0.22),
+        holdAt: tunables.get('runner.laneHoldAt', 0.12),
+        holdSec: tunables.get('runner.laneHoldSec', 2),
+        laneCount: 3,
+      })
+  );
 
   private static perSlot<T>(make: () => T): T[] {
     return Array.from({ length: MAX_SLOTS }, make);

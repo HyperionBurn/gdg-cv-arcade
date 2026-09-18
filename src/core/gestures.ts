@@ -103,11 +103,20 @@ export class Baseline {
     this.rate = rate;
   }
 
-  update(sample: number, settled: boolean): number {
+  /**
+   * @param rate optional override for THIS call only, so a caller can slow the
+   *   adaptation down without giving up on it entirely. `LaneDetector` needs
+   *   exactly that: it must stop chasing a player who is mid-step, but it must
+   *   still eventually absorb a player who simply re-planted their feet 15cm
+   *   to the left. A hard freeze does the first and never does the second, and
+   *   a body stuck outside a frozen reference is a body one twitch away from a
+   *   lane change it did not ask for. Omit it and nothing changes.
+   */
+  update(sample: number, settled: boolean, rate = this.rate): number {
     if (this.value === null) {
       this.value = sample;
     } else if (settled) {
-      this.value += (sample - this.value) * this.rate;
+      this.value += (sample - this.value) * rate;
     }
     return this.value;
   }
@@ -145,29 +154,114 @@ function midX(a: Landmark | undefined, b: Landmark | undefined): number | null {
 
 export interface RepTunables {
   /**
-   * How far above the shoulder the wrist must rise to arm a rep, in torso
-   * units. PLAN.md §3: "rep counts only if the wrist crosses above shoulder
-   * AND below elbow — kills the tiny-twitchy-hands exploit."
+   * How far the wrist must rise ABOVE THE MIDDLE OF ITS OWN STROKE to arm a
+   * rep, in torso units, and how far it must fall below it to re-arm. The two
+   * added together are the peak-to-peak SWING a rep costs, which is the whole
+   * anti-cheat — see the note on `ArmPump`.
    */
   upEnter: number;
   upExit: number;
-  /** How far below the elbow the wrist must drop to re-arm. */
   downEnter: number;
   downExit: number;
+  /**
+   * How fast the middle of the stroke is learned, per frame at 60Hz.
+   *
+   * Must be slow compared with a pump — it is a high-pass corner, and a corner
+   * near the pump frequency eats the signal it is measuring — but not so slow
+   * that a 20-second round is over before it has found the middle.
+   *
+   * MEASURED, reps in 5s against the number the motion contains, band 0.12:
+   *
+   *   pump    0.008   0.011   0.016   0.020   0.030   0.040   of
+   *   0.5Hz       4       4       4       5       5       5      5
+   *   1.5Hz      13      13      13      13      13      13     15
+   *   4Hz        33      33      34      35      35      36     40
+   *   6Hz        53      54      54      54      54      54     60
+   *   4Hz shallow-overhead stroke
+   *              23      28      32      33      34      34     40
+   *
+   * The slow end is flat from 0.008 up, so nothing here is eating a pump; the
+   * cost of a SLOW rate is convergence, and it shows up as reps missed in the
+   * first seconds of a round. 0.02 (a 0.83s time constant, the same one
+   * `Baseline` defaults to) is the first value where every style is at its
+   * ceiling, and every cheat below still scores what it scored at 0.008.
+   */
+  centreRate: number;
   /** Ignore reps faster than this (ms). Physically implausible = cheating. */
   minRepIntervalMs: number;
 }
 
+/**
+ * Same numbers the game installs — see the table on `REP_GATE` in
+ * games/sixtyseven.ts. They are duplicated rather than imported because that
+ * module pulls in canvas, audio and the DOM; the value of them matching is that
+ * `shell/rigcheck.ts`, whose entire job is telling an operator what the
+ * detectors can see, reports the gate the game will actually use.
+ */
 export const DEFAULT_REP_TUNABLES: RepTunables = {
   upEnter: 0.12,
-  upExit: 0.04,
-  downEnter: 0.06,
-  downExit: 0.0,
+  upExit: 0.05,
+  downEnter: 0.12,
+  downExit: 0.05,
+  centreRate: 0.02,
   minRepIntervalMs: 60,
 };
 
 type ArmState = 'down' | 'up';
 
+/**
+ * One arm's up/down cycle, measured AGAINST THE MIDDLE OF ITS OWN STROKE.
+ *
+ * WHY NOT AGAINST THE SHOULDER. Reported from a human playtest: 67 tracked
+ * perfectly with the hands a shoulder width apart or wider — "I can even do a
+ * tpose 67" — and scored nothing at all with the hands close together.
+ *
+ * That is not a coordinate bug and it is not occlusion. It is geometry. How far
+ * apart your hands are is set by how far you ABDUCT your upper arms, and upper
+ * arm abduction is also the only thing that lifts your wrist above your
+ * shoulder: with your elbows at your sides the forearm is SHORTER than the
+ * upper arm, so the wrist tops out below the shoulder line no matter how hard
+ * you pump. MEASURED, forward kinematics on this repo's own segment ratios
+ * (S = 0.40 torso, upper arm 0.55, forearm 0.50) through the real tracker and
+ * the real counter, 4Hz for 5s:
+ *
+ *   hands apart at the top   15cm   29cm   42cm   53cm   61cm   67cm
+ *   wrist peak vs shoulder  -0.117 -0.098 -0.043 +0.044 +0.158 +0.291
+ *   reps, shoulder-anchored     0      0      0     24     37     37
+ *
+ * Shoulder width on that body is 39cm. The cliff sits just outside it, which
+ * is exactly where the tester put it.
+ *
+ * AND NO FIXED ANCHOR CAN FIX IT. The two real pumping styles pull the band in
+ * opposite directions, and they overlap by less than the noise:
+ *
+ *                                    wrist top   wrist bottom   swing
+ *   hands together, elbows tucked      -0.134       -0.838      0.70
+ *   chest-to-overhead, elbows low      +0.062       -0.300      0.36
+ *
+ * A shoulder-anchored band has to admit the first one's TOP (so `upEnter` <=
+ * -0.134) and the second one's BOTTOM (so `downEnter` <= 0.226, measured on the
+ * shallowest overhead stroke) — leaving at most 0.09 torso of swing, half of
+ * what the gate asks for today and about three times a single wrist's noise.
+ * Anchoring to the ELBOW instead inverts the problem and is worse: an overhead
+ * pump holds the forearm at a fixed angle, so the wrist sits a CONSTANT 0.250
+ * torso above the elbow for the whole stroke and an elbow-anchored gate scores
+ * a flat zero.
+ *
+ * The styles differ only by a DC offset. So the DC offset goes: `centre` learns
+ * where the middle of this arm's stroke is and the gates run on the deviation
+ * from it. The shoulder is still the raw reference, which is what keeps a jump,
+ * a bob or a player standing up out of the signal; only the part that is
+ * personal to the style is subtracted.
+ *
+ * WHAT STILL REJECTS A CHEAT. Exactly what the old note said rejected one: the
+ * SWING, `upEnter + downEnter`. It is now 0.24 torso (~12cm) rather than 0.18,
+ * because with the height requirement gone the swing is carrying the anti-cheat
+ * on its own. Every real style measured swings 0.48-1.08 torso, so the gate
+ * sits at half the shallowest real pump and about 4.4x a single wrist's hostile
+ * landmark noise. The measured pass/fail distribution is in the note on
+ * `REP_GATE` in games/sixtyseven.ts, which is also where the marshal's lever is.
+ */
 class ArmPump {
   /** Readable so the UI can show the gate the COUNTER is using. */
   state: ArmState = 'down';
@@ -180,6 +274,8 @@ class ArmPump {
   private lastRepTime = -Infinity;
   private upGate: Hysteresis;
   private downGate: Hysteresis;
+  /** The middle of this arm's stroke, in torso units above the shoulder. */
+  private centre = new Baseline();
 
   private tun: RepTunables;
 
@@ -207,31 +303,21 @@ class ArmPump {
   ): boolean {
     if (!vis(wrist) || !vis(shoulder) || !vis(elbow) || unit <= 0) return false;
 
-    // Screen Y grows downward, so "wrist above shoulder" is a positive value here.
+    // Screen Y grows downward, so "wrist above shoulder" is a positive value
+    // here. Shoulder-relative, so nothing the whole body does — a jump, a bob,
+    // a tall player — reaches the gate.
     const aboveShoulder = (shoulder.y - wrist.y) / unit;
 
-    // RE-ARM BELOW THE SHOULDER, NOT BELOW THE ELBOW.
-    //
-    // This used to require `wrist.y - elbow.y > 0.06` — the wrist physically
-    // beneath the elbow. Nobody pumps that way at speed: a fast pump is
-    // bent-armed, hand travelling chest-to-overhead with the elbow below the
-    // hand throughout. The down gate never opened, the arm latched at 'up', and
-    // reps only counted on the occasional full downward extension. That is
-    // exactly the "finnicky" that was reported.
-    //
-    // The simulator could not show it, because its pump swings hip-to-overhead
-    // with the elbow pinned to the midpoint — so the wrist is below the elbow
-    // at every trough BY CONSTRUCTION. "4Hz x 5s = exactly 40 reps" was
-    // validating a motion no human makes: full extension at 4Hz is about 1.2m
-    // of travel per rep.
-    //
-    // Dropping to the shoulder line keeps the anti-cheat intact: the swing from
-    // `downEnter` to `upEnter` is still ~0.42 torso units (~20cm), so
-    // quarter-height twitching still scores zero.
-    const belowShoulder = (wrist.y - shoulder.y) / unit;
+    // ALWAYS ADAPTING, deliberately: unlike `VerticalGestures`, there is no
+    // "settled" state to gate on. A pump is symmetric about its own middle, so
+    // a slow average of it IS the middle; gating the average on the gate's own
+    // state would make it track the half of the stroke the state machine
+    // happened to be in.
+    const centre = this.centre.update(aboveShoulder, true, this.tun.centreRate);
+    const rel = aboveShoulder - centre;
 
-    const isUp = this.upGate.update(aboveShoulder);
-    const isDown = this.downGate.update(belowShoulder);
+    const isUp = this.upGate.update(rel);
+    const isDown = this.downGate.update(-rel);
 
     if (this.state === 'down' && isUp) {
       this.state = 'up';
@@ -250,6 +336,7 @@ class ArmPump {
     this.lastRepTime = 0;
     this.upGate.reset();
     this.downGate.reset();
+    this.centre.reset();
   }
 }
 
@@ -294,6 +381,10 @@ export class RepCounter {
    * comment, is to tell a player whether the problem is their motion or the
    * camera. A readout that can disagree with the thing it is reporting on is
    * worse than no readout.
+   *
+   * It matters more now, not less: "up" is no longer a place on the body a
+   * player could check against their own shoulder, it is the top of their own
+   * stroke. This is the only thing that can honestly report it.
    */
   armUp(side: 'left' | 'right'): boolean {
     return (side === 'left' ? this.left : this.right).state === 'up';
@@ -496,12 +587,26 @@ export interface LaneTunables {
   /** Must come back inside this to return to centre. The gap is the hysteresis. */
   exit: number;
   laneCount: number;
+  /**
+   * Offset, in torso units, past which the centre reference STOPS FOLLOWING
+   * THE BODY. See the note on the class: without it the reference chases the
+   * player through the very movement it is measuring.
+   */
+  holdAt: number;
+  /**
+   * How long, in seconds, the reference is allowed to stay held before it
+   * starts following again. Longer than any deliberate side-step; short enough
+   * that a player who simply re-plants their feet is absorbed.
+   */
+  holdSec: number;
 }
 
 export const DEFAULT_LANE_TUNABLES: LaneTunables = {
   enter: 0.55,
   exit: 0.3,
   laneCount: 3,
+  holdAt: 0.12,
+  holdSec: 2,
 };
 
 /**
@@ -509,11 +614,68 @@ export const DEFAULT_LANE_TUNABLES: LaneTunables = {
  *
  * Calibrates its own centre on the first settled frames, so it does not matter
  * whether the player stands dead centre of the camera — which they never do.
+ *
+ * THE CENTRE REFERENCE HOLDS STILL WHILE THE BODY IS DISPLACED.
+ *
+ * It used to adapt on EVERY frame the lane was 0, at 0.02 a call — a ~0.83s
+ * time constant at 60Hz. So the reference was chasing the player through the
+ * exact movement it exists to measure, and what reached the gate was not "how
+ * far did they move" but "how far did they move FASTER than 0.83 seconds".
+ * A tester with a tape measure found the consequence: 40-50cm of side-step
+ * before Runner would change lane, against a gate nominally set at 17.8cm.
+ *
+ * MEASURED — peak offset, torso units, for a lateral SHOULDER travel through
+ * the real `PoseTracker` at 3m with realistic noise, p10 of 25 trials:
+ *
+ *   travel     0.4s    0.6s    0.9s    1.2s    1.5s    2.0s
+ *    10cm     0.163   0.145   0.131   0.124   0.113   0.098
+ *    20cm     0.317   0.284   0.254   0.231   0.211   0.182
+ *    25cm     0.436   0.385   0.316   0.286   0.260   0.224
+ *    30cm     0.552   0.522   0.470   0.339   0.309   0.266
+ *
+ * 20cm of real travel — a lean, which is what the same tester asked for — read
+ * 0.18-0.32 depending only on how briskly it was taken. Against Runner's
+ * `enter` of 0.35 it fired 0 times in 60 at every speed from 0.4s to 2.0s.
+ *
+ * So the reference now holds still once the body is more than `holdAt` from
+ * it, and resumes only after `holdSec` — long enough to cover any deliberate
+ * step, short enough that somebody who has simply re-planted their feet 15cm
+ * to the left is absorbed within about 3 seconds instead of spending the rest
+ * of the round with an off-centre gate. A hard freeze does the first and never
+ * does the second, which leaves a body one twitch from a lane it did not ask
+ * for; MEASURED, a 15cm re-plant leaves a residual offset of 0.287 that a hard
+ * freeze still holds at 0.290 twenty seconds later and this clears by 3s.
+ *
+ * MEASURED after the change — fire rate, 30 seeds x 2 directions, `enter` 0.35:
+ *
+ *   20cm of shoulder travel taken in   0.4s   0.6s   0.9s   1.2s   1.6s   2.0s
+ *     chasing reference (before)          0%     0%     0%     0%     0%     0%
+ *     held reference (after)            100%   100%   100%   100%   100%    97%
+ *
+ *   and 10cm still fires 0%, at every speed, so a weight-shift is not a lane.
+ *
+ * WHAT IT COSTS. A held reference no longer suppresses slow postural sway.
+ * MEASURED, 6 x 120s of a body ROCKING side to side at 0.35-0.95Hz under
+ * HOSTILE noise, peak offset and false lane changes against `enter` 0.35:
+ *
+ *   rock      +-4cm   +-6cm   +-8cm   +-10cm  +-11cm  +-12cm
+ *   before    0.142   0.186   0.229   0.273   0.295   0.317    0 changes throughout
+ *   after     0.166   0.224   0.291   0.357   0.389   0.430    0, 0, 0, 2, 8, 66
+ *
+ * Clean to +-8cm, which is the widest sway this repo documents for a standing
+ * body (see `admitSpeedTorsos` in core/tracker.ts). Past +-10cm — a 20cm
+ * peak-to-peak sway, which in a three-lane runner is arguably a lane change —
+ * it starts firing. `runner.laneEnter` is live on the operator console: 0.40
+ * buys back the +-11cm case at the price of needing 22cm instead of 20cm.
  */
 export class LaneDetector {
   private centre = new Baseline(0.02);
   private lane = 0;
   private _changed = 0;
+  /** Seconds the body has been more than `holdAt` from the reference. */
+  private heldSec = 0;
+  /** Previous `now`, for dt. Null until a caller passes one. */
+  private lastNow: number | null = null;
 
   private tun: LaneTunables;
 
@@ -529,8 +691,13 @@ export class LaneDetector {
     return this.tun;
   }
 
-  /** @param mirrored display is mirrored, so invert so stepping right goes right */
-  update(player: TrackedPlayer, mirrored = true): number {
+  /**
+   * @param mirrored display is mirrored, so invert so stepping right goes right
+   * @param now      milliseconds, for the `holdSec` timer. Omitted, a call is
+   *   assumed to be one 60Hz frame — which is exactly what the adaptation
+   *   `rate` has always silently assumed, so leaving it out changes nothing.
+   */
+  update(player: TrackedPlayer, mirrored = true, now?: number): number {
     this._changed = 0;
     // RAW, for the same reason as VerticalGestures. MEASURED: a 0.6-unit lane
     // step over 0.6s crosses the gate at 566.7ms raw and 700ms filtered.
@@ -541,7 +708,26 @@ export class LaneDetector {
     const x = midX(lm[POSE.LEFT_SHOULDER], lm[POSE.RIGHT_SHOULDER]);
     if (x === null) return this.lane;
 
-    const base = this.centre.update(x, this.lane === 0);
+    const dt =
+      now === undefined || this.lastNow === null
+        ? 1 / 60
+        : Math.min(0.25, Math.max(0, (now - this.lastNow) / 1000));
+    if (now !== undefined) this.lastNow = now;
+
+    // How far the body is from the reference we are ABOUT to decide whether to
+    // move. Asking before the update is the whole point: a reference that has
+    // already taken a step toward the body cannot tell you the body moved.
+    const heldBase = this.centre.current;
+    const displaced =
+      heldBase === null
+        ? 0
+        : Math.abs(((x - heldBase) * player.scale.aspect) / unit);
+
+    if (displaced >= this.tun.holdAt) this.heldSec += dt;
+    else this.heldSec = 0;
+    const holding = displaced >= this.tun.holdAt && this.heldSec <= this.tun.holdSec;
+
+    const base = this.centre.update(x, this.lane === 0 && !holding);
     // ASPECT-CORRECTED. Landmark x is normalised by frame WIDTH and `unit` is a
     // torso height, i.e. a fraction of frame HEIGHT — so dividing one by the
     // other without scaling x understates every sideways movement by the aspect
@@ -583,6 +769,8 @@ export class LaneDetector {
     this.centre.reset();
     this.lane = 0;
     this._changed = 0;
+    this.heldSec = 0;
+    this.lastNow = null;
   }
 }
 
