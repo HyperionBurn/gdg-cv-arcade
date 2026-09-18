@@ -119,7 +119,12 @@ export class RigCheckScreen implements Screen {
    *
    * On the screen whose entire purpose is knowing what the rig is doing.
    */
-  private poseModel: 'lite' | 'full' = 'lite';
+  /**
+   * Defaults to `full`, which is what the GAMES run — see `poseModelChoice` in
+   * games/base.ts. Checking the rig on `lite` and then playing on `full` tests
+   * the wrong thing.
+   */
+  private poseModel: 'lite' | 'full' | 'heavy' = 'full';
   private numPoses = 2;
 
   /** Last energy per slot, sampled on inference only. See the MOTION readout. */
@@ -166,7 +171,7 @@ export class RigCheckScreen implements Screen {
     // could exercise in development.
     if (!isSimEnabled()) {
       try {
-        await vision.start({ mode: 'pose', numPoses: 2, poseModel: 'lite' });
+        await vision.start({ mode: 'pose', numPoses: 2, poseModel: this.poseModel });
       } catch (err) {
         console.error('[rigcheck] vision.start failed', err);
       }
@@ -212,7 +217,8 @@ export class RigCheckScreen implements Screen {
         <label>Pose model</label>
         <select id="rig-model">
           <option value="lite" ${this.poseModel === 'lite' ? 'selected' : ''}>lite (fast)</option>
-          <option value="full" ${this.poseModel === 'full' ? 'selected' : ''}>full (accurate)</option>
+          <option value="full" ${this.poseModel === 'full' ? 'selected' : ''}>full (default)</option>
+          <option value="heavy" ${this.poseModel === 'heavy' ? 'selected' : ''}>heavy (steadiest)</option>
         </select>
       </div>
       <div class="rig-row">
@@ -251,7 +257,7 @@ export class RigCheckScreen implements Screen {
       void camera.switchTo((e.target as HTMLSelectElement).value);
     });
     this.panel.querySelector<HTMLSelectElement>('#rig-model')?.addEventListener('change', (e) => {
-      this.poseModel = (e.target as HTMLSelectElement).value as 'lite' | 'full';
+      this.poseModel = (e.target as HTMLSelectElement).value as 'lite' | 'full' | 'heavy';
       void vision.setConfig({ poseModel: this.poseModel });
     });
     this.panel.querySelector<HTMLSelectElement>('#rig-players')?.addEventListener('change', (e) => {
