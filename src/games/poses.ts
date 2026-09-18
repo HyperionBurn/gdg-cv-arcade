@@ -288,6 +288,7 @@ function scoreFromCosine(cosine: number): number {
 export function poseSimilarity(player: TrackedPlayer, target: PoseAngles): MatchResult {
   const lms = player.landmarks;
   const unit = player.scale.unit;
+  const aspect = player.scale.aspect;
   if (!player.scale.valid || unit <= 0) return INVALID;
 
   let num = 0;
@@ -303,8 +304,21 @@ export function poseSimilarity(player: TrackedPlayer, target: PoseAngles): Match
     const b = meanPoint(lms, seg.to);
     if (!a || !b) continue;
 
-    // Translation-normalised (a difference) and scale-normalised (÷ unit).
-    const vx = (b.x - a.x) / unit;
+    // Translation-normalised (a difference), scale-normalised (÷ unit) and
+    // ASPECT-corrected.
+    //
+    // Without the aspect term a limb's direction reads more vertical than it
+    // really is — a true 45 degrees measures 29 at 16:9, an error of up to 16
+    // degrees. Horizontal poses (THE T, GOALPOST) and vertical ones
+    // (TOUCHDOWN) are immune; every diagonal pose on the roster loses about a
+    // sixth of its tolerance per limb. A correct pose still passes, but the
+    // live percentage never climbs into the 90s, so the player keeps adjusting
+    // a pose they have already hit — which reads as the game lagging.
+    //
+    // Invisible in the simulator because `applyPose` builds the body from the
+    // same isotropic assumption this scorer used: the two agreed with each
+    // other and both disagreed with a camera.
+    const vx = ((b.x - a.x) * aspect) / unit;
     const vy = (b.y - a.y) / unit;
     const len = Math.hypot(vx, vy);
     if (len < MIN_SEGMENT_UNITS) continue;

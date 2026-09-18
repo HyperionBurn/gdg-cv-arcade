@@ -188,10 +188,29 @@ class ArmPump {
 
     // Screen Y grows downward, so "wrist above shoulder" is a positive value here.
     const aboveShoulder = (shoulder.y - wrist.y) / unit;
-    const belowElbow = (wrist.y - elbow.y) / unit;
+
+    // RE-ARM BELOW THE SHOULDER, NOT BELOW THE ELBOW.
+    //
+    // This used to require `wrist.y - elbow.y > 0.06` — the wrist physically
+    // beneath the elbow. Nobody pumps that way at speed: a fast pump is
+    // bent-armed, hand travelling chest-to-overhead with the elbow below the
+    // hand throughout. The down gate never opened, the arm latched at 'up', and
+    // reps only counted on the occasional full downward extension. That is
+    // exactly the "finnicky" that was reported.
+    //
+    // The simulator could not show it, because its pump swings hip-to-overhead
+    // with the elbow pinned to the midpoint — so the wrist is below the elbow
+    // at every trough BY CONSTRUCTION. "4Hz x 5s = exactly 40 reps" was
+    // validating a motion no human makes: full extension at 4Hz is about 1.2m
+    // of travel per rep.
+    //
+    // Dropping to the shoulder line keeps the anti-cheat intact: the swing from
+    // `downEnter` to `upEnter` is still ~0.42 torso units (~20cm), so
+    // quarter-height twitching still scores zero.
+    const belowShoulder = (wrist.y - shoulder.y) / unit;
 
     const isUp = this.upGate.update(aboveShoulder);
-    const isDown = this.downGate.update(belowElbow);
+    const isDown = this.downGate.update(belowShoulder);
 
     if (this.state === 'down' && isUp) {
       this.state = 'up';
@@ -462,7 +481,17 @@ export class LaneDetector {
     if (x === null) return this.lane;
 
     const base = this.centre.update(x, this.lane === 0);
-    let offset = (x - base) / unit;
+    // ASPECT-CORRECTED. Landmark x is normalised by frame WIDTH and `unit` is a
+    // torso height, i.e. a fraction of frame HEIGHT — so dividing one by the
+    // other without scaling x understates every sideways movement by the aspect
+    // ratio. At 16:9 that is 1.78x: a real 25cm side-step read as 0.31 torso
+    // units against an `enter` of 0.55, so nothing registered until the player
+    // lunged. Reported as "runner didn't detect movement".
+    //
+    // The simulator hid it twice over: it builds an isotropic body in
+    // anisotropic space, and its lane offset is ~2 torso units of step, which
+    // clears even a 1.78x-inflated threshold.
+    let offset = ((x - base) * player.scale.aspect) / unit;
     if (mirrored) offset = -offset;
 
     const prev = this.lane;
@@ -591,8 +620,13 @@ export class TPoseDetector {
 
     const leftFlat = Math.abs(lw.y - ls.y) / unit < this.tolerance;
     const rightFlat = Math.abs(rw.y - rs.y) / unit < this.tolerance;
-    const leftOut = Math.abs(lw.x - ls.x) / unit > this.extension;
-    const rightOut = Math.abs(rw.x - rs.x) / unit > this.extension;
+    // Aspect-corrected for the same reason as LaneDetector. Uncorrected, an
+    // `extension` of 0.7 demanded 1.25 torso units of horizontal arm at 16:9 —
+    // longer than an arm actually is (~1.07), so the T-pose was physically
+    // unreachable and its ring could never complete.
+    const aspect = player.scale.aspect;
+    const leftOut = (Math.abs(lw.x - ls.x) * aspect) / unit > this.extension;
+    const rightOut = (Math.abs(rw.x - rs.x) * aspect) / unit > this.extension;
 
     if (leftFlat && rightFlat && leftOut && rightOut) {
       if (this.heldSince === 0) this.heldSince = now;

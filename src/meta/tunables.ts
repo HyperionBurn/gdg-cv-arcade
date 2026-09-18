@@ -264,7 +264,32 @@ class TunableRegistry {
       spec = this.register(inferSpec(key, fallback));
     }
     const override = this.overrides.get(key);
-    return override !== undefined ? override : spec.default;
+    if (override !== undefined) return override;
+
+    // DRIFT GUARD. A registered spec's default wins over the caller's fallback,
+    // which is correct — the operator console shows and resets to that default,
+    // so it has to be the truth. But it means a constant edited in a game file
+    // silently does nothing if the same key is registered here with the old
+    // value, and that is not hypothetical: `redlight.graceSec` was widened
+    // 0.4 -> 0.55 in the game, documented in the README as being in effect, and
+    // was never actually read, because this registry still said 0.4.
+    //
+    // Nothing enforces agreement, so at least make the disagreement loud.
+    if (
+      import.meta.env.DEV &&
+      fallback !== undefined &&
+      Math.abs(fallback - spec.default) > 1e-9 &&
+      !this.warned.has(key)
+    ) {
+      this.warned.add(key);
+      console.warn(
+        `[tunables] "${key}": call site says ${fallback}, registry default is ` +
+          `${spec.default}. The REGISTRY wins. Reconcile them — the code change ` +
+          `you just made is not in effect.`
+      );
+    }
+
+    return spec.default;
   }
 
   /**
@@ -538,7 +563,7 @@ tunables.registerAll([
     min: 0,
     max: 1.5,
     step: 0.05,
-    default: 0.4,
+    default: 0.55,
     unit: 's',
     description:
       'Nothing is judged for this long after the light turns red. THE feel ' +
@@ -568,7 +593,7 @@ tunables.registerAll([
     min: 0.35,
     max: 0.95,
     step: 0.01,
-    default: 0.72,
+    default: 0.66,
     description:
       'Score a pose must reach to clear the wall. Only 0.07 of headroom over ' +
       'the worst confusable pair, and real jitter pulls scores DOWN — expect ' +

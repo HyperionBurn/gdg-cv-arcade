@@ -15,6 +15,7 @@
  */
 
 import { PoseTracker, type TrackedPlayer } from '../core/tracker';
+import type { FilterPreset } from '../core/filter';
 import { vision } from '../core/vision';
 import { camera } from '../core/camera';
 import { isSimEnabled } from '../core/simulator';
@@ -121,6 +122,21 @@ export interface GameConfig {
    * at impact (20.2vh) with room to spare.
    */
   hudShelf?: boolean;
+  /**
+   * One Euro preset for this game's tracker. Defaults to `body`.
+   *
+   * FOR GAMES WHOSE INPUT IS STOPPING. One Euro widens its cutoff with speed,
+   * so fast motion is tracked with little lag — but as a limb DECELERATES the
+   * cutoff closes back to `minCutoff`, and the `body` preset's 1Hz floor is a
+   * time constant of ~159ms. At 30 samples/sec that is roughly a third of a
+   * second for the skeleton to finish arriving after the arm has already
+   * stopped.
+   *
+   * Every game whose input is motion hides this. Pose Match is the one game
+   * that scores a HELD SHAPE, so its player stops and then watches the match
+   * percentage creep upward for 300ms — reported, accurately, as "very laggy".
+   */
+  filterPreset?: FilterPreset;
 }
 
 /**
@@ -293,6 +309,7 @@ export abstract class GameBase implements Screen {
     this.tracker = new PoseTracker({
       maxPlayers: config.maxPlayers,
       mirrored: true,
+      ...(config.filterPreset ? { filterPreset: config.filterPreset } : {}),
     });
     for (let i = 0; i < config.maxPlayers; i++) this.scores.push(new RollingNumber(10));
   }

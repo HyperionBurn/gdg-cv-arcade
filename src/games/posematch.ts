@@ -228,6 +228,9 @@ export class PoseMatchGame extends GameBase {
       roundSeconds: 60,
       color: GAME_COLORS.posematch,
       supportsVersus: true,
+      // This game scores a HELD SHAPE, so its input is the player STOPPING —
+      // the one case the `body` preset handles worst. See GameConfig.filterPreset.
+      filterPreset: 'poseHold',
       // The wall is an opaque ink plane the width of the screen. Without a
       // shelf the whole HUD spends most of every wall's approach unreadable on
       // top of it. See GameConfig.hudShelf for what else was tried.

@@ -143,8 +143,35 @@ const PROBES: Probe[] = [
   },
   {
     id: 'posematch',
-    play: (s) => s.setPump(2.5, 1),
-    idle: (s) => s.setPump(0),
+    /**
+     * Closed-loop: adopt the pose the wall is actually asking for.
+     *
+     * It used to flail (`setPump(2.5, 1)`) and pass on a score of 1 or 2 —
+     * accidental matches. That check was asserting almost nothing, and it broke
+     * the moment `poseSimilarity` was aspect-corrected, because random flailing
+     * stopped landing on poses by luck. Which is correct behaviour: random
+     * flailing SHOULD score zero.
+     *
+     * Feeding each wall its own angles tests the mechanic instead of the noise,
+     * and it is the only probe on the roster that verifies a game can be WON.
+     */
+    play: (s) => s.setPoseAll(null),
+    idle: (s) => {
+      s.setPoseAll(null);
+      s.setPump(0);
+    },
+    drive: (sim, game, tick, frames) => {
+      const g = game as { slots?: Array<{ wall?: { pose?: { angles?: unknown } } }> } | null;
+      let last: unknown = null;
+      for (let done = 0; done < frames; done++) {
+        const pose = g?.slots?.[0]?.wall?.pose;
+        if (pose && pose !== last) {
+          last = pose;
+          sim.setPoseAll(pose.angles as never);
+        }
+        tick(1);
+      }
+    },
     idleMustBeZero: true,
     warmupFrames: 300,
     playFrames: 900,

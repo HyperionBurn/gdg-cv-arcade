@@ -173,13 +173,32 @@ export class BladeTracker {
       return;
     }
 
-    blade.px = blade.x;
-    blade.py = blade.y;
+    // REACQUIRE CLEANLY. If this blade was hidden last frame — the wrist fell
+    // below `minVisibility` — then `blade.x/y` are wherever the hand was when
+    // it vanished, possibly a long way away. Carrying that forward as `px/py`
+    // makes the next frame a swept segment across the gap: a phantom slash
+    // through anything in between, one frame of enormous `speed`, and `active`
+    // flipping on by itself.
+    //
+    // This is the best candidate for "the right hand feels murky". The dominant
+    // hand is swung harder, so it blurs more, so its `visibility` dips more
+    // often — meaning the hand you use most is the one that misbehaves most.
+    // The simulator cannot reproduce it at all: its landmarks are always
+    // visibility 1.
+    const wasHidden = !blade.visible;
+    blade.px = wasHidden ? p.x : blade.x;
+    blade.py = wasHidden ? p.y : blade.y;
     blade.x = p.x;
     blade.y = p.y;
     blade.slot = slot;
     blade.visible = true;
     blade.lastSeen = now;
+    if (wasHidden) {
+      // A trail bridging the gap would draw the same phantom slash.
+      blade.trail.length = 0;
+      blade.trail.push({ x: p.x, y: p.y });
+      blade.active = false;
+    }
 
     const dx = blade.x - blade.px;
     const dy = blade.y - blade.py;

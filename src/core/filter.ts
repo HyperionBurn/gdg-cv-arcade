@@ -75,6 +75,25 @@ export const FILTER_PRESETS = {
    */
   body: { minCutoff: 1.0, beta: 0.6, dCutoff: 1.0 },
   /**
+   * Pose Match: a body that must SETTLE fast, not travel smoothly.
+   *
+   * One Euro opens its cutoff with speed, so fast motion is cheap; the cost is
+   * paid on DECELERATION, when the cutoff falls back to `minCutoff`. The `body`
+   * preset's 1Hz floor is a time constant of ~159ms, and at 30 samples/sec that
+   * is roughly a third of a second for the skeleton to finish arriving after
+   * the arm has stopped.
+   *
+   * Pose Match is the only game whose input is a HELD SHAPE, so it is the only
+   * one that sits in that settling tail — the player stops, and then watches
+   * the percentage climb for 300ms. It was reported as "very laggy", correctly.
+   *
+   * 3Hz gives tau ~53ms, about 130ms to settle. The price is jitter at rest,
+   * which this game can afford better than any other: `PEAK_DECAY` already
+   * scores a decaying PEAK rather than the instantaneous value, so a wobble
+   * costs nothing while a delay costs the wall.
+   */
+  poseHold: { minCutoff: 3.0, beta: 0.4, dCutoff: 1.0 },
+  /**
    * Skeleton drawing for attract mode. Heavy smoothing — it only has to look
    * nice, and jitter is very visible on a big TV.
    */
