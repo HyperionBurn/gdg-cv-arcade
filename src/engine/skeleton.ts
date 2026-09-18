@@ -213,13 +213,25 @@ export function drawTrackDebug(
   let maxX = 0;
   let minY = 1;
   let maxY = 0;
+  let any = false;
   for (const lm of player.landmarks) {
     if (lm.visibility < 0.3) continue;
+    any = true;
     minX = Math.min(minX, lm.x);
     maxX = Math.max(maxX, lm.x);
     minY = Math.min(minY, lm.y);
     maxY = Math.max(maxY, lm.y);
   }
+
+  // NOTHING CONFIDENT MEANS NOTHING TO DRAW.
+  //
+  // The seeds are deliberately inverted (min starts at 1, max at 0) so the
+  // first real landmark replaces them. If none clears the visibility gate they
+  // survive as-is, and the box becomes the WHOLE FRAME with a negative height
+  // — rendering as "the tracker has found a person the size of the room", on
+  // Rig Check, under precisely the poor-visibility conditions that screen
+  // exists to diagnose.
+  if (!any) return;
 
   const x1 = proj.x(minX);
   const x2 = proj.x(maxX);

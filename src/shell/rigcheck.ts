@@ -78,6 +78,25 @@ export class RigCheckScreen implements Screen {
   private reps = [new RepCounter(), new RepCounter()];
   private vertical = [new VerticalGestures(), new VerticalGestures()];
   private lanes = [new LaneDetector(), new LaneDetector()];
+  /**
+   * The panel's own copy of what it has told the worker.
+   *
+   * `renderPanel()` rewrites `innerHTML` wholesale, so without these the
+   * `selected` attributes reverted to their literals on every redraw — and the
+   * panel redraws whenever Video or Skeleton is toggled. The operator would
+   * switch to the `full` model, toggle the skeleton to look at something, and
+   * the dropdown would silently say `lite` while the worker kept running
+   * `full`. Worse for the player count, which hardcoded `selected` on "2":
+   * picking "2" after a redraw fires no `change` event at all, so it sticks.
+   *
+   * On the screen whose entire purpose is knowing what the rig is doing.
+   */
+  private poseModel: 'lite' | 'full' = 'lite';
+  private numPoses = 2;
+
+  /** Last energy per slot, sampled on inference only. See the MOTION readout. */
+  private energy = [0, 0, 0, 0, 0, 0];
+
   private motion = [new MotionEnergy(), new MotionEnergy()];
   private tpose = new TPoseDetector();
 
@@ -133,16 +152,16 @@ export class RigCheckScreen implements Screen {
       <div class="rig-row">
         <label>Pose model</label>
         <select id="rig-model">
-          <option value="lite">lite (fast)</option>
-          <option value="full">full (accurate)</option>
+          <option value="lite" ${this.poseModel === 'lite' ? 'selected' : ''}>lite (fast)</option>
+          <option value="full" ${this.poseModel === 'full' ? 'selected' : ''}>full (accurate)</option>
         </select>
       </div>
       <div class="rig-row">
         <label>Track up to</label>
         <select id="rig-players">
-          <option value="1">1 player</option>
-          <option value="2" selected>2 players</option>
-          <option value="6">6 players</option>
+          <option value="1" ${this.numPoses === 1 ? 'selected' : ''}>1 player</option>
+          <option value="2" ${this.numPoses === 2 ? 'selected' : ''}>2 players</option>
+          <option value="6" ${this.numPoses === 6 ? 'selected' : ''}>6 players</option>
         </select>
       </div>
       <div class="rig-row">
@@ -173,10 +192,12 @@ export class RigCheckScreen implements Screen {
       void camera.switchTo((e.target as HTMLSelectElement).value);
     });
     this.panel.querySelector<HTMLSelectElement>('#rig-model')?.addEventListener('change', (e) => {
-      void vision.setConfig({ poseModel: (e.target as HTMLSelectElement).value as 'lite' | 'full' });
+      this.poseModel = (e.target as HTMLSelectElement).value as 'lite' | 'full';
+      void vision.setConfig({ poseModel: this.poseModel });
     });
     this.panel.querySelector<HTMLSelectElement>('#rig-players')?.addEventListener('change', (e) => {
       const n = parseInt((e.target as HTMLSelectElement).value, 10);
+      this.numPoses = n;
       this.tracker.setOptions({ maxPlayers: n });
       void vision.setConfig({ numPoses: n });
     });
@@ -327,6 +348,13 @@ export class RigCheckScreen implements Screen {
     const { ctx, v, now } = fc;
     clearFrame(ctx, v);
 
+    // FIRST, not last. This used to be the closing statement of `render`,
+    // after several early returns — including the camera-error one below. So
+    // the side panel's fault banner, the one thing on this screen that NAMES
+    // what is wrong, stayed blank in exactly the situation it was written for:
+    // the canvas saying CAMERA ERROR or hanging on <STARTING CAMERA>.
+    this.updateLiveStats();
+
     const cam = camera.getState();
 
     if (cam.status === 'error') {
@@ -390,7 +418,10 @@ export class RigCheckScreen implements Screen {
         this.lanes[slot]!.update(p, true);
         if (this.lanes[slot]!.changed !== 0) this.flash.lane = now;
 
-        this.motion[slot]!.update(p);
+        // Keep the value. It used to be discarded here and the detector
+        // stepped a SECOND time from the draw path, once per rendered frame —
+        // see `energy` below.
+        this.energy[slot] = this.motion[slot]!.update(p);
       }
     }
 
@@ -402,7 +433,6 @@ export class RigCheckScreen implements Screen {
 
     this.drawFramingVerdict(fc, players.length);
     this.drawGesturePanel(fc, players);
-    this.updateLiveStats();
   }
 
   private drawFramingVerdict(fc: FrameContext, playerCount: number): void {
@@ -554,7 +584,6 @@ export class RigCheckScreen implements Screen {
     const g0 = this.vertical[0]!;
     const l0 = this.lanes[0]!;
     const r0 = this.reps[0]!;
-    const m0 = this.motion[0]!;
 
     chip('JUMP', g0.isAirborne ? 'AIRBORNE' : '—', recent(this.flash.jump) || g0.isAirborne, COLORS.green);
     chip('CROUCH', g0.isCrouching ? 'DOWN' : '—', recent(this.flash.crouch) || g0.isCrouching, COLORS.yellow);
@@ -562,7 +591,22 @@ export class RigCheckScreen implements Screen {
     chip('REPS (67)', `${r0.count}  ${r0.rate.toFixed(1)}/s`, recent(this.flash.rep), COLORS.red);
 
     // Motion energy bar — the Red Light, Green Light signal.
-    const energy = Math.min(1, m0.update(players[0]!) * 12);
+    //
+    // READ, never stepped. `MotionEnergy` diffs consecutive RAW samples over a
+    // short window, so it must be advanced exactly once per INFERENCE. This
+    // line used to call `update()` itself, from the draw path, once per
+    // rendered frame — at 60fps render against ~30fps inference that feeds it
+    // one real sample and one duplicate, halving the reported energy and
+    // making the red threshold essentially untrippable. On the one screen
+    // whose entire job is to tell an operator whether the detector can see
+    // movement.
+    //
+    // Indexed by the PLAYER'S slot rather than a fixed 0, too: `players` is in
+    // insertion order, so with two people in frame the readout was pairing one
+    // person's detector with another person's body — and the two-person
+    // crossover test is exactly what this screen advertises.
+    const readSlot = Math.max(0, Math.min(this.energy.length - 1, players[0]!.slot));
+    const energy = Math.min(1, (this.energy[readSlot] ?? 0) * 12);
     drawText(ctx, 'MOTION', pad, y + rowH * 0.42, {
       size: vh(v, 1.7),
       color: COLORS.muted,
