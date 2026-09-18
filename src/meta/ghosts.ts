@@ -81,8 +81,20 @@ export const SCORING_VERSION: Record<GameId, number> = {
 
 /** Samples per second. 10 Hz + interpolation reads smooth and keeps the budget. */
 export const SAMPLE_HZ = 10;
-/** Hard round cap is 60 s; a little headroom for the results overlap. */
-export const MAX_SECONDS = 64;
+/**
+ * Longest round this can record, in seconds.
+ *
+ * 64 was "60s cap plus headroom for the results overlap", which was right
+ * until `game.roundScale` became an operator lever with a range up to 1.5. A
+ * scaled 60s game runs 90 seconds, so the buffer filled at 64 and the ghost —
+ * the thing the player is racing — visibly froze for the last twenty-six.
+ *
+ * 96 covers the longest round the console can produce (60 x 1.5) with the same
+ * headroom as before. At 10Hz that is 960 score samples, and the pose track is
+ * still bounded independently by MAX_GHOST_CHARS, which is what actually
+ * protects the storage budget.
+ */
+export const MAX_SECONDS = 96;
 export const MAX_SAMPLES = SAMPLE_HZ * MAX_SECONDS;
 /** Per-ghost ceiling, enforced on save. See the budget note above. */
 export const MAX_GHOST_CHARS = 40 * 1024;

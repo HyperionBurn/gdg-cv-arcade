@@ -406,6 +406,11 @@ export abstract class GameBase implements Screen {
     audio.stopMusic();
     this.particles.clear();
     this.popups.clear();
+    // `celebrate()` sets timeScale to 0.35 and eases it back over ~0.4s. A
+    // screen torn down inside that window left slow motion latched, so the
+    // NEXT round on this instance opened in slow motion with no way to
+    // recover. `reset()` existed for exactly this and had no call sites.
+    this.juice.reset();
     // An ImageBitmap holds GPU memory until closed, and a kiosk switches games
     // for hours.
     this.ghostBitmap?.close();

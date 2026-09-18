@@ -71,6 +71,7 @@ const {
   SCORING_VERSION,
   SAMPLE_HZ,
   MAX_GHOST_CHARS,
+  MAX_SECONDS,
   GHOST_JOINTS,
   GHOST_JOINT_COUNT,
   GHOST_CONNECTIONS,
@@ -440,7 +441,11 @@ describe('storage budget', () => {
     assert.ok(recordRun('sixtyseven', 300, 30, { score: (t) => Math.round(t) }));
     const chars = g.localStorage!.getItem(KEY('sixtyseven'))!.length;
     assert.ok(chars < MAX_GHOST_CHARS, `${chars} chars from a 300s run`);
-    assert.ok(ghosts.load('sixtyseven')!.duration <= 64.1);
+    // Against the CONSTANT, not a literal. This read `<= 64.1` and broke the
+    // moment MAX_SECONDS was raised to cover a 1.5x-scaled round — which is a
+    // legitimate change, so the test should have been tracking the cap rather
+    // than a copy of it.
+    assert.ok(ghosts.load('sixtyseven')!.duration <= MAX_SECONDS + 0.1);
   });
 });
 
