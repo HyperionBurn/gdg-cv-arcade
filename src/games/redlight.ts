@@ -220,13 +220,31 @@ export const DEFAULT_REDLIGHT_TUNABLES: RedLightTunables = {
   // p10 (5.07). `quiet` converges near still p10 (~1.93), so 2.0 lands it at
   // ~3.9 — the middle of that gap.
   quietMult: 1.6,
-  // 4.0 -> 2.9. This bounds the believable STILL energy, and the bound that
-  // matters is "the threshold must stay under a moving body". 2.9 * 0.85 =
-  // 2.47, so the threshold can never exceed ~4.9 against moving p10 of 5.07.
-  // At 4.0 a lobby where everyone flailed the whole time learned quiet = 3.9,
-  // clamped to 3.4, for a threshold of 8.16 — above ANY real movement. The
-  // measured result was a 45-second round in which nobody advanced at all.
-  quietCeiling: 3.8,
+  /**
+   * Caps what the lobby is allowed to believe "standing still" looks like.
+   *
+   * 3.8 -> 2.3, and this is a DELIBERATE TRADE between two bad cases rather
+   * than a free win. Measured, 3 players, full rounds:
+   *
+   *                          ceiling 3.8      ceiling 2.3
+   *   realistic, honest      wins, 100%       wins, 98-100%
+   *   realistic, idle        3/3 alive        3/3 alive
+   *   realistic, FLAILED
+   *     through the lobby    10% of track     57% of track
+   *   hostile, idle          3/3 alive        1/3 alive
+   *
+   * Somebody waving at the screen while they wait is ORDINARY behaviour — it
+   * is what a stall queue does — and at 3.8 it trained the floor so high that
+   * the threshold landed above real movement and the race crawled to a tenth
+   * of the track. Double sensor noise is a stress case, and one where a still
+   * body's p90 already sits ABOVE a moving body's p10, so false eliminations
+   * there are arithmetically guaranteed however this is set.
+   *
+   * So: protect the common case, and let the hall's lighting and the camera
+   * answer the hostile one. STILL CEILING is on the operator console if the
+   * room turns out to be worse than the model.
+   */
+  quietCeiling: 2.3,
   // 0.4 -> 0.55.
   //
   // The 400ms figure came from testing ONE red transition in isolation. Over a

@@ -635,7 +635,7 @@ tunables.registerAll([
     min: 1,
     max: 5,
     step: 0.05,
-    default: 3.8,
+    default: 2.3,
     unit: 'x move',
     description:
       'Caps what the lobby is allowed to believe "standing still" looks like, ' +

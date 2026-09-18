@@ -123,8 +123,15 @@ const DRIVE: Record<string, (s: SimLike, game: unknown) => void> = {
   // Flail on green, freeze on red. Mashing through a red light is instant
   // elimination, not play.
   redlight: (s, game) => {
-    const g = game as { light?: string } | null;
-    s.setPump(g?.light === 'green' ? 5 : 0, 1);
+    const g = game as { light?: string; state?: string } | null;
+    // ONLY ONCE THE ROUND IS RUNNING. The light reads 'green' during the lobby
+    // and the countdown too, so driving off it alone pumped hard for the whole
+    // ten-second lobby — and that is exactly when Red Light measures the room's
+    // noise floor. The floor then learned a flailing body, the threshold landed
+    // above real movement, and the race crawled to 10% of the track in a full
+    // round. A person waiting for the countdown is not racing yet.
+    const racing = g?.state === 'playing';
+    s.setPump(racing && g?.light === 'green' ? 5 : 0, 1);
   },
   // Adopt the pose the wall is actually asking for. Random flailing scores
   // zero here, which is the correct behaviour and a useless turn.
