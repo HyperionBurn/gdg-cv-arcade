@@ -143,7 +143,8 @@ Red Light 0.98ms · Pose Match 0.49ms · Fruit Ninja 3.52ms per frame.
 | **Pose Match** | playable 1P/2P, 12 poses |
 | **Runner** | playable, 3D, **conditional — see go/no-go below** |
 | **Rhythm Punch** | playable 1P/2P, generated beat maps |
-| Tournament bracket, ghosts, highlight clips, operator console | done |
+| Ghosts, highlight clips, operator console | done |
+| Tournament bracket | **built but unreachable — see Known gaps** |
 | Photobooth | deferred |
 
 ### Verified in the simulator
@@ -154,7 +155,11 @@ All driven deterministically via `window.__arcade.tick()`:
   quarter-height twitching at the same rate = **0** (anti-cheat holds)
 - **Fruit Ninja**: hands still = **0** (activation gate); swiping sliced 11 with
   halves in flight. 23 unit tests on the slice geometry — area conserved across
-  30 shapes × 12 cut angles, convex across 60 seeds, fast-swipe tunnelling caught
+  30 shapes × 12 cut angles, convex across 60 seeds, fast-swipe tunnelling caught.
+  Incentive matrix, full rounds at a forced 1280×720: **fast+wide 285,
+  medium+wide 165, slow+wide 130, fast+narrow 50, frantic+narrow 45**. Big
+  committed swings win, and mashing *harder* pays *less* — which is the shape it
+  should be
 - **Balloon Pop**: hands down = **0**; hand on an armed balloon = **+66**; hand on
   a balloon below the shoulder line = **+0**
 - **Red Light**: 0 false eliminations in a full 45s round; progress gained only
@@ -178,7 +183,46 @@ All driven deterministically via `window.__arcade.tick()`:
 - **Runner**: **33,958 generated rows across 600 runs, 0 unclearable**; detection
   latency 0.100s ± 0.001; 48 WebGL mount/unmount cycles never leaked a context
 - **Shell**: dwell commits at exactly 1.2s and not before; COMING SOON tiles inert
-  after 4× the dwell; initials entry 6.0s new / 4.3s repeat; auto-accept fires at 16s
+  after 4× the dwell; initials entry 6.0s new / 4.3s repeat; auto-accept fires at 16s.
+  Menu now escapes a present-but-non-gesturing player to attract at **31.7s**
+  (measured); solo Red Light's lobby is **2.63s**, down from a flat 10s
+- **One Euro lag and attenuation**, cross-correlating the filtered wrist against
+  the raw one over 600 frames. This is the number that matters for anything
+  judged in time rather than space:
+
+  | Sweep rate | Lag | Amplitude kept |
+  |---|---|---|
+  | 1.0 Hz | 83 ms | 0.84 |
+  | 2.0 Hz | 67 ms | 0.66 |
+  | 3.5 Hz | 50 ms | 0.46 |
+
+  Beta is doing its job on lag — faster motion is tracked with *less* delay. But
+  attenuation gets worse with speed, so a fast slash's blade tip travels under
+  half the distance the real hand does. That is survivable because the drawn
+  trail and the hit test read the *same* filtered data, so the game stays
+  internally consistent and players aim with the on-screen blade. It is NOT
+  survivable in Rhythm Punch, where judgement is in milliseconds — hence
+  `rhythm.inputLatencySec`.
+
+### Testing hazards
+
+Two things in this repo will hand you a confident wrong answer. Both cost real
+time; neither is a bug.
+
+- **The simulator's neutral arms are RAISED.** A sim body at rest puts its
+  wrists **0.21–0.24 torso units below the shoulder** — roughly chest height. A
+  real person's resting wrist is nearer 1.0. `hover.ts`'s raise gate opens at
+  0.35, so the default sim pose drives a live cursor and will dwell-select a
+  menu tile in a few seconds. That looks exactly like the idle-select bug fixed
+  in `a815650` and is not. To test anything that depends on arms being DOWN,
+  pin them: `simulator.setWristTargetAll('left', {x: 0.40, y: 0.66})` and the
+  same for `'right'`. Remember to `clearWristTargets()` afterwards — pinned
+  wrists override pump and swipe, and will fail the whole smoke sweep.
+- **`import('/src/meta/highlights.ts')` from the dev console is a DIFFERENT
+  module.** Vite appends an HMR timestamp to module URLs it has reloaded, so a
+  bare dynamic import constructs a second instance: `source` null, every counter
+  zero. It reads precisely like "instant replay is dead". The live instances are
+  on `window.__arcade` — use those.
 
 **None of this replaces human playtesting.** It cannot tell us whether a
 threshold is right for a real body under hall lighting. That is what the
@@ -195,6 +239,30 @@ Every one of these is tuned against a noiseless simulator and is a playtest job:
 | `0.66` match threshold | `games/poses.ts` | Only 0.07 headroom over the worst confusable pair (was 0.72; lowered after a game-feel review, because real jitter pulls scores DOWN and the error that actually happens is rejecting a pose the player hit). |
 | `inputLatencySec = 0.067` | `games/rhythm.ts` | **Measured for the One Euro filter alone** — a real camera adds capture and inference, so the true figure on the night is higher, not lower. It is 61% of the ±110 ms perfect window, so this is the single most sensitive timing number in the app. Tune by punching deliberately early and late and checking the grades come out symmetric. |
 | `DEFAULT_CLEARANCE` | `games/runner-world.ts` | The clearability proof is exact at the modelled body and no further: a body 20% slower fails 143 of 200 runs. |
+
+### Known gaps — decisions, not bugs
+
+Found by review and left deliberately. Each needs a call, not a patch.
+
+- **The tournament bracket is unreachable.** `src/meta/tournament.ts` is ~710
+  lines, fully built and covered by 56 tests, and `drawBracket` has exactly one
+  reference in the whole tree: its own definition. No `'tournament'` screen is
+  registered in `main.ts`, and nothing calls `start()` or `addPlayer()`.
+  PLAN.md §4's "opt in via the menu, bracket on the attract screen" was never
+  wired. Either wire it or cut it — but it currently ships as dead weight.
+- **Highlight clips never reach a passer-by.** `attract.ts` imports nothing from
+  `meta/highlights.ts`, so a clip only ever replays on the same player's own
+  results screen, seconds after their own round. PLAN.md §6 wanted them looping
+  on attract to pull foot traffic. Only one clip buffer exists at a time, so
+  this needs a small backlog before it can be built.
+- **Roster redundancy.** Fruit Ninja, Balloon Pop and Rhythm Punch all run on
+  the same blade primitive — three of seven games share one input. The game-feel
+  review's call, if a cut is forced: trim the **Runner** first (already
+  pre-authorised in PLAN.md), because Balloon Pop's zero-coordination floor is a
+  niche nothing else on the roster covers.
+- **Every abandoned initials entry defaults to `AAA`.** A queue that mostly
+  walks away after seeing its score will fill the boards with indistinguishable
+  rows, which undercuts the rivalry the leaderboard exists to create.
 
 ### Runner go/no-go — Sept 21
 
