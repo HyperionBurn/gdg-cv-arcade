@@ -157,11 +157,24 @@ All driven deterministically via `window.__arcade.tick()`:
   30 shapes × 12 cut angles, convex across 60 seeds, fast-swipe tunnelling caught
 - **Balloon Pop**: hands down = **0**; hand on an armed balloon = **+66**; hand on
   a balloon below the shoulder line = **+0**
-- **Red Light**: 0 false eliminations in a full 45s round; freeze at
-  0/350/400/500 ms survives, 600/900/1200 ms is out; progress gained only during
-  green (0.00% change during red); body-scale fair to ~2% across a 1.6× height ratio
+- **Red Light**: 0 false eliminations in a full 45s round; progress gained only
+  during green (0.00% change during red); body-scale fair to ~2% across a 1.6×
+  height ratio. **Reaction time: the survive/eliminate cliff is 400–500 ms over a
+  full round** — an earlier "500 ms survives, 600 ms is out" figure came from
+  single-transition tests and flattered the game, because a round has 10+
+  transitions and you only have to be slow once. `graceSec` was widened 0.4 →
+  0.55 in response; simple visual reaction is ~250 ms *before* recognising the
+  change and stopping a moving body
 - **Pose Match**: all 12 poses score >0.998 when matched; scale/position
-  invariance **5.55e-16** across a 2.19× body-size range; max pose confusion 0.651
+  invariance **5.55e-16** across a 2.19× body-size range; max pose confusion 0.651.
+  Closed-loop, feeding each wall's own angles back to the simulator: **16 of 17
+  walls cleared at 100% accuracy**. Reaction tolerance, delaying the pose after
+  each wall spawns: **0–1500 ms loses nothing, 2500 ms clears 12/17, 3500 ms
+  clears 4/16** — forgiving for a first-timer, punishing only if you dawdle
+- **Rhythm Punch**: the filtered wrist trails the raw one by **4 frames / 67 ms**
+  with amplitude attenuated to **65.5%**, measured by cross-correlation over 600
+  frames of a 2 Hz sweep. Judgement is now shifted back by that latency; the
+  note's drawn position is not, so notes still cross the strike line on the beat
 - **Runner**: **33,958 generated rows across 600 runs, 0 unclearable**; detection
   latency 0.100s ± 0.001; 48 WebGL mount/unmount cycles never leaked a context
 - **Shell**: dwell commits at exactly 1.2s and not before; COMING SOON tiles inert
@@ -179,7 +192,8 @@ Every one of these is tuned against a noiseless simulator and is a playtest job:
 |---|---|---|
 | `REACH_X = 1.7` shoulder widths | `shell/hover.ts` | Too generous → corner tiles need a stretch. Too tight → cursor pins to edges. **Highest-value tune on Sept 19.** |
 | `moveEnter = 0.85` | `games/redlight.ts` | MediaPipe noise at 3m under hall lighting is unknown. Too low → everyone out in 2s, unrecoverable at a stall. |
-| `0.72` match threshold | `games/poses.ts` | Only 0.07 headroom over the worst confusable pair. Real jitter pulls scores down — expect to lower it. |
+| `0.66` match threshold | `games/poses.ts` | Only 0.07 headroom over the worst confusable pair (was 0.72; lowered after a game-feel review, because real jitter pulls scores DOWN and the error that actually happens is rejecting a pose the player hit). |
+| `inputLatencySec = 0.067` | `games/rhythm.ts` | **Measured for the One Euro filter alone** — a real camera adds capture and inference, so the true figure on the night is higher, not lower. It is 61% of the ±110 ms perfect window, so this is the single most sensitive timing number in the app. Tune by punching deliberately early and late and checking the grades come out symmetric. |
 | `DEFAULT_CLEARANCE` | `games/runner-world.ts` | The clearability proof is exact at the modelled body and no further: a body 20% slower fails 143 of 200 runs. |
 
 ### Runner go/no-go — Sept 21

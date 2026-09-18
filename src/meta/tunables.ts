@@ -647,6 +647,28 @@ tunables.registerAll([
       'Multiplier on every round length. Drop to 0.7 when the queue is out ' +
       'the door; raise it if people are not getting a proper go.',
   },
+  /* ---- games/rhythm.ts: the only game judged in milliseconds ---- */
+  {
+    key: 'rhythm.inputLatencySec',
+    label: 'PUNCH LATENCY',
+    group: 'RHYTHM PUNCH',
+    min: 0,
+    max: 0.2,
+    step: 0.005,
+    default: 0.067,
+    unit: 's',
+    description:
+      'How long after a real fist lands the game sees it, and therefore how ' +
+      'far the judgement is shifted back to compensate. MEASURED at 0.067s ' +
+      'for the One Euro filter alone, by cross-correlating the filtered wrist ' +
+      'against the raw one at a 2Hz sweep. A real camera adds capture and ' +
+      'inference on top, so the true figure on the night is HIGHER, not ' +
+      'lower. This matters more than any other timing number here because ' +
+      'the perfect window is only 0.11s wide: uncompensated, a player who ' +
+      'punches dead on the beat spends 61% of it before being judged and ' +
+      'gets GREAT for a PERFECT. Tune it by punching deliberately early and ' +
+      'late and checking the grades come out symmetric.',
+  },
   {
     key: 'game.idleTimeoutSec',
     label: 'IDLE TIMEOUT',

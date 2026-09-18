@@ -95,6 +95,14 @@ import {
   EASE,
 } from '../shell/theme';
 import { GAME_COLORS } from '../meta/games';
+import { tunables } from '../meta/tunables';
+
+/**
+ * Seconds between a real fist arriving and the game seeing it. See `resolve`.
+ * Live-adjustable at the stall as `rhythm.inputLatencySec`; this is the
+ * fallback when the registry has not been touched.
+ */
+const INPUT_LATENCY_SEC = 0.067;
 import type { FrameContext } from '../shell/screen';
 
 /* ------------------------------------------------------------------ */
@@ -642,11 +650,33 @@ export class RhythmGame extends GameBase {
 
   /* ---------------- judgement ---------------- */
 
+  /**
+   * JUDGEMENT ONLY — the note's drawn position still comes from the true beat.
+   *
+   * The fist the game tests is a FILTERED landmark (core/blades.ts, line 142:
+   * a blade tip is a position, and smoothing it is correct — a jittering tip
+   * would be unusable). Smoothing costs time. Cross-correlating the filtered
+   * right wrist against the raw one over 600 frames of a 2Hz sweep puts One
+   * Euro's `handFast` preset 4 frames behind at 60fps: 67ms, with amplitude
+   * attenuated to 65.5%. A real camera adds capture and inference on top.
+   *
+   * 67ms would be noise in any other game here. In this one it is 61% of the
+   * ±110ms perfect window, one-sided: a player punching exactly on the beat is
+   * judged at +67ms, so their perfect window is effectively [-177ms, +43ms] in
+   * their own frame of reference and any normal 50ms of lateness scores GREAT
+   * for what was, with their hand, a PERFECT. Shifting the judgement clock
+   * back by the latency re-centres it on the player rather than on the filter.
+   *
+   * Deliberately NOT applied to the render delta at `drawNotes` — the note must
+   * cross the strike line on the beat the music plays. Only the moment the
+   * game DECIDES moves.
+   */
   private resolve(fc: FrameContext, blades: readonly Blade[]): void {
+    const latency = tunables.get('rhythm.inputLatencySec', INPUT_LATENCY_SEC);
     for (let i = 0; i < this.runtime.length; i++) {
       const rt = this.runtime[i]!;
       const note = this.map.notes[i]!;
-      const delta = note.time - this.songTime;
+      const delta = note.time - this.songTime + latency;
 
       if (delta > APPROACH_SEC) break; // notes are time-sorted
       for (let slot = 0; slot < this.playerCount; slot++) {
