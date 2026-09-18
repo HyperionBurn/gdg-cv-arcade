@@ -230,8 +230,19 @@ class CameraManager {
     this.recovering = true;
     this.emit({ status: 'error', error: 'Camera disconnected — recovering…' });
 
-    for (let attempt = 0; attempt < 5; attempt++) {
-      await new Promise((r) => setTimeout(r, 1000));
+    // KEEP TRYING, FOREVER, SLOWLY.
+    //
+    // This used to give up after five attempts one second apart. A USB camera
+    // knocked out of its socket at 11am then stayed dead for the rest of the
+    // event, and nothing on the TV said so — the attract screen looks exactly
+    // the same with a dead camera as it does with an empty stall, so the
+    // failure reads as "nobody is playing" to everyone including the marshal.
+    //
+    // Five seconds between attempts is cheap, and someone pushing the cable
+    // back in is by far the most likely fix at a stall. `getUserMedia` on an
+    // absent device rejects quickly, so this does not accumulate work.
+    for (let attempt = 0; ; attempt++) {
+      await new Promise((r) => setTimeout(r, attempt < 5 ? 1000 : 5000));
       try {
         await this.start({ deviceId: undefined });
         if (this.state.status === 'live') break;

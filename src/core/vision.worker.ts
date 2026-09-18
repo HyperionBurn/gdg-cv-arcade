@@ -166,7 +166,33 @@ async function createFileset(): ReturnType<typeof FilesetResolver.forVisionTasks
 
 async function createPose(): Promise<void> {
   const fileset = await createFileset();
-  const modelFile = `pose_landmarker_${config.poseModel}.task`;
+  let modelFile = `pose_landmarker_${config.poseModel}.task`;
+
+  // THE MODEL FILE HAS TO BE THERE, and if it is not, say so and fall back.
+  //
+  // Models are fetched by `npm run setup` into /public, and a laptop whose
+  // checkout predates a model being ADDED will not have it — which is exactly
+  // what happened when `heavy` was added: the file was in the build but not on
+  // the dev machine, while the rig check and the POSE MODEL slider both offered
+  // it. The failure is silent and nasty: `createFromOptions` throws, the
+  // landmarker is left null, and the worker keeps emitting frames with ZERO
+  // poses. The stale-vision guard never trips because frames ARE arriving, so
+  // every game just says "STEP INTO THE FRAME" at somebody standing in front of
+  // it, idles back to attract — which reloads `lite` and works — and then dies
+  // again on the next launch. And the choice persists in localStorage.
+  //
+  // A HEAD request costs nothing next to a 5-30MB model download, and the same
+  // check already guards the WASM loader above.
+  const head = await fetch(`${modelsPath}/${modelFile}`, { method: 'HEAD' }).catch(() => null);
+  if (!head || !head.ok) {
+    post({
+      type: 'log',
+      level: 'warn',
+      message: `pose model "${config.poseModel}" is missing (${head?.status ?? 'unreachable'}); using full`,
+    });
+    config.poseModel = 'full';
+    modelFile = 'pose_landmarker_full.task';
+  }
 
   try {
     poseLandmarker = await PoseLandmarker.createFromOptions(fileset, {

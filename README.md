@@ -58,6 +58,74 @@ Sim only: `A` auto-demo · `P` pump · `↑`/`↓` pump rate · `V` 1P/2P · `Sp
 
 The full loop runs itself: **attract → menu → game → results → initials → leaderboard → menu.**
 
+## DAY-OF CARD — print this and tape it to the table
+
+Everything a marshal needs. Nobody running the stall should have to read
+anything else on this page.
+
+### Cold start, in order
+
+1. Plug the camera in **first**, then open the laptop.
+2. Turn **sleep off** and **notifications off**. A notification banner lands on
+   the TV; a sleeping laptop ends the stall.
+3. Terminal: `npm run dev`
+4. Chrome → `http://localhost:5173` → **Allow** camera.
+5. Press **`1`** for RIG CHECK. Stand where a player will stand. Do not move on
+   until the verdict is green and it says a full body is visible.
+6. Press **`0`** for attract, then **`F`** (fullscreen), then **`C`** (hide the
+   mouse pointer).
+
+### If something is wrong
+
+| What you see | What to do |
+|---|---|
+| Red **CAMERA OFFLINE / VISION OFFLINE** bar at the top | Push the USB cable back in. It retries every 5s by itself. If it stays, **F5**. |
+| Nothing responds, screen looks frozen | **F5**, then **F**, then **C**. Fullscreen and the hidden pointer do NOT survive a reload. |
+| Camera permission was refused | Press **F** to leave fullscreen, click the camera icon in Chrome's address bar, allow, then **F5**. |
+| Someone is standing there and it says STAND IN FRAME | They are too far back or cropped. Move them to the tape. Press **`d`** to see why — the `framing` and `headroom` rows say which. |
+| A game is behaving strangely and you need it back | **PANIC** in the operator console (below), or just **F5**. |
+| Camera is dead and the queue is waiting | `http://localhost:5173/?sim=1` runs a demo with no camera. It starts **muted** — press **`M`**. |
+
+### Keys
+
+| Key | Does |
+|---|---|
+| `0` | Attract (the idle screen) |
+| `1` | Rig check |
+| `2`–`8` | Jump to a game |
+| `F` | Fullscreen on/off |
+| `C` | Hide/show the mouse pointer |
+| `M` | Mute/unmute |
+| `d` | Diagnostic overlay — works in the real build, on purpose |
+| `CTRL+SHIFT+` `` ` `` | Operator console (the sliders) |
+
+Number keys only jump screens from attract or the menu. **Mid-round you must
+hold SHIFT**, so a bag on the keyboard cannot end somebody's turn.
+
+### The mouse works too
+
+Move the trackpad and the hand cursor follows the mouse for 2.5 seconds, then
+hands back to the player. A click selects immediately, with no dwell. On the
+initials screen you can just **type** — A–Z, Backspace, Enter.
+
+### The only three sliders worth touching
+
+Open the operator console (`CTRL+SHIFT+` `` ` ``), **STALL CONTROL** group:
+
+- **ROUND LENGTH** — drop it to 0.7 when the queue is long. This is the biggest
+  lever on throughput by a distance.
+- **IDLE TIMEOUT** — how long a deserted game waits before going back to attract.
+- **MIN BODY SIZE** — raise it if people standing in the queue behind the player
+  are being picked up as players.
+
+If Red Light specifically is misbehaving: **MOVE THRESHOLD** (raise it if people
+are eliminated while standing still) and **STOPPING GRACE** (raise it if people
+are caught while visibly already stopping).
+
+**Before the doors open, press RESET ALL TUNING.** Slider changes are saved in
+the browser and survive a reload, so a laptop used for tuning last week will
+otherwise still be running last week's numbers.
+
 ## Rig Check — read this before Sept 18
 
 This is the tool for the camera test in PLAN.md §8, the **first immovable date**.

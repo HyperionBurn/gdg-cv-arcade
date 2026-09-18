@@ -12,7 +12,8 @@ import { setCameraAspect } from './core/tracker';
 import { audio } from './engine/audio';
 import { simulator, isSimEnabled, SIM_ASPECT } from './core/simulator';
 import type { VisionFrame } from './core/types';
-import { resizeCanvas, viewportOf } from './engine/draw';
+import { resizeCanvas, viewportOf, drawText, measureText, vh } from './engine/draw';
+import { COLORS } from './shell/theme';
 import type { FrameContext } from './shell/screen';
 import { router } from './shell/router';
 import { drawDebugOverlay, toggleDebug, watchForDebug } from './shell/debug';
@@ -132,12 +133,70 @@ function step(now: number, dt: number): void {
     console.error('[render]', err);
   }
 
+  // Rig health, on top of whatever is showing.
+  drawRigHealth(fc);
+
   // The debug overlay draws on top of everything, including the screen's own
   // chrome — it is a diagnostic, not part of the design.
   drawDebugOverlay(fc);
 
   // AFTER the frame is drawn — it grabs what is on the canvas.
   highlights.tick(now);
+}
+
+/** When the rig first looked broken, or -1. See `drawRigHealth`. */
+let unhealthySince = -1;
+
+/**
+ * A DEAD CAMERA LOOKS EXACTLY LIKE AN EMPTY STALL.
+ *
+ * Attract draws the same "STAND IN FRAME" invitation whether the camera is
+ * feeding it or not, and every screen correctly treats stale vision as "nobody
+ * here" — so a failed camera or a failed model reads as a quiet afternoon to
+ * everyone, including the marshal, while visitors wave at a TV that is ignoring
+ * them. The only places the truth was visible were the debug overlay and the
+ * operator console, and neither is written down anywhere a marshal would look.
+ *
+ * Three seconds of grace so a routine reconnect does not flash this up, and it
+ * names the one action that fixes almost everything.
+ */
+function drawRigHealth(fc: FrameContext): void {
+  if (SIM) return;
+
+  const cam = camera.getState();
+  const visionErr = vision.getStats().error;
+  const broken = cam.status === 'error' || !!visionErr;
+
+  if (!broken) {
+    unhealthySince = -1;
+    return;
+  }
+  if (unhealthySince < 0) unhealthySince = fc.now;
+  if (fc.now - unhealthySince < 3000) return;
+
+  const { ctx, v } = fc;
+  const pad = vh(v, 1.6);
+  const size = vh(v, 2.4);
+  const text = cam.status === 'error' ? 'CAMERA OFFLINE — PRESS F5' : 'VISION OFFLINE — PRESS F5';
+
+  ctx.save();
+  ctx.shadowBlur = 0;
+  const w = measureText(ctx, text, size, 800) + pad * 2;
+  const h = size + pad * 1.4;
+  const x = v.width / 2 - w / 2;
+  const y = vh(v, 2);
+
+  ctx.fillStyle = COLORS.red;
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = COLORS.ink;
+  ctx.fillRect(x, y + h - vh(v, 0.5), w, vh(v, 0.5));
+  drawText(ctx, text, v.width / 2, y + h / 2, {
+    size,
+    color: COLORS.ink,
+    weight: 800,
+    letterSpacing: '0.04em',
+  });
+  ctx.restore();
 }
 
 function loop(now: number): void {
@@ -241,11 +300,27 @@ window.addEventListener('keydown', (e) => {
   audio.init();
   audio.setMuted(audio.muted);
 
+  // THE INITIALS SCREEN OWNS THE KEYBOARD WHILE IT IS UP.
+  //
+  // It accepts A-Z so a marshal can type a name instead of dwelling three
+  // letters. Every one of these global shortcuts is also a letter, so spelling
+  // anything containing M, D, F or C muted the stall, threw up the debug
+  // overlay, or dropped out of fullscreen and put browser chrome on the TV —
+  // in front of whoever was entering their name.
+  const typing = router.activeId === 'initials';
+
+  // A GAME IN PROGRESS IS SOMEBODY'S TURN. A bag or an elbow on the keyboard
+  // used to end it: bare 0-9 jump straight to another screen. Holding shift
+  // still works, which is what the marshal wants and what the README documents.
   const target = SCREEN_KEYS[e.key];
   if (target) {
+    const mid = router.active?.id !== 'attract' && router.active?.id !== 'menu';
+    if (mid && !e.shiftKey) return;
     void router.go(target);
     return;
   }
+
+  if (typing) return;
 
   switch (e.key.toLowerCase()) {
     case 'f':
