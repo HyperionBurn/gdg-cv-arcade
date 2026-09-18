@@ -83,6 +83,46 @@ function toLandmarks(raw: Array<{ x: number; y: number; z: number; visibility?: 
  * ends with an explicit `globalThis.ModuleFactory = ModuleFactory`. Both builds
  * are already on disk; only this flag was missing.
  */
+/**
+ * The WASM factory, captured once and restored before every task creation.
+ *
+ * MediaPipe expects `globalThis.ModuleFactory` to exist each time it builds a
+ * task. The module loader sets it, but `await import()` is CACHED BY THE MODULE
+ * REGISTRY: the loader's body runs on the first import and never again. Mediapipe
+ * consumes that global while creating, so the SECOND task creation finds it
+ * gone and throws "ModuleFactory not set." — while the first succeeded.
+ *
+ * That is not a hypothetical. `applyConfig` rebuilds the pose landmarker
+ * whenever `numPoses` changes, attract runs 4 and the games run 2 or 6, so the
+ * very first screen transition triggers it about three seconds in. Observed
+ * exactly that way on a real camera: it worked, then died.
+ *
+ * A classic worker would not have this problem, because `importScripts`
+ * re-executes the file on every call. We cannot use one (see vision.ts), so we
+ * keep our own reference and put it back.
+ */
+let moduleFactory: unknown = null;
+
+async function ensureModuleFactory(loaderUrl: string): Promise<void> {
+  const g = globalThis as unknown as { ModuleFactory?: unknown };
+
+  if (moduleFactory === null) {
+    await import(/* @vite-ignore */ loaderUrl);
+    moduleFactory = g.ModuleFactory ?? null;
+    if (moduleFactory === null) {
+      throw new Error(
+        `WASM loader ${loaderUrl} did not define globalThis.ModuleFactory. ` +
+          `That is the signature of the CLASSIC loader being used in a module ` +
+          `worker — forVisionTasks() needs its second argument set to true.`
+      );
+    }
+  }
+
+  // Unconditional: MediaPipe may or may not have cleared it, and putting back
+  // a value that is already there costs nothing.
+  g.ModuleFactory = moduleFactory;
+}
+
 async function createFileset(): ReturnType<typeof FilesetResolver.forVisionTasks> {
   const fileset = await FilesetResolver.forVisionTasks(filesetPath, true);
 
@@ -117,6 +157,9 @@ async function createFileset(): ReturnType<typeof FilesetResolver.forVisionTasks
         `certainly a 404 page from an SPA rewrite.`
     );
   }
+
+  // Must happen before every createFromOptions, not just the first.
+  await ensureModuleFactory(loader);
 
   return fileset;
 }

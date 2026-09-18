@@ -184,6 +184,7 @@ type ArcadeHost = {
   tick(frames?: number, dt?: number): unknown;
   vision: {
     start(config: Record<string, unknown>): Promise<void>;
+    setConfig(patch: Record<string, unknown>): Promise<void>;
     getStats(): { ready: boolean; error: string | null; delegate: string | null };
     dispose(): void;
   };
@@ -220,16 +221,40 @@ async function checkVisionBoots(host: ArcadeHost): Promise<SmokeCheck[]> {
     return [check('vision boots', false, `start() threw: ${String(err)}`)];
   }
 
-  const deadline = performance.now() + VISION_BOOT_TIMEOUT_MS;
-  for (;;) {
-    const s = host.vision.getStats();
-    if (s.error) return [check('vision boots', false, s.error)];
-    if (s.ready) return [check('vision boots', true, `ready on ${s.delegate ?? '?'}`)];
-    if (performance.now() > deadline) {
-      return [check('vision boots', false, `still not ready after ${VISION_BOOT_TIMEOUT_MS}ms`)];
+  const settle = async (label: string): Promise<SmokeCheck | null> => {
+    const deadline = performance.now() + VISION_BOOT_TIMEOUT_MS;
+    for (;;) {
+      const s = host.vision.getStats();
+      if (s.error) return check(label, false, s.error);
+      if (s.ready) return null;
+      if (performance.now() > deadline) {
+        return check(label, false, `still not ready after ${VISION_BOOT_TIMEOUT_MS}ms`);
+      }
+      await new Promise((r) => setTimeout(r, 100));
     }
-    await new Promise((r) => setTimeout(r, 100));
+  };
+
+  const bootFail = await settle('vision boots');
+  if (bootFail) return [bootFail];
+
+  const checks = [check('vision boots', true, `ready on ${host.vision.getStats().delegate ?? '?'}`)];
+
+  // THE SECOND CREATION, which is where it actually broke.
+  //
+  // Booting once proves almost nothing: `applyConfig` tears down and rebuilds
+  // the pose landmarker whenever `numPoses` changes, attract runs 4 and the
+  // games run 2 or 6, so every real session rebuilds within seconds of
+  // starting. The first version of this check only booted once, passed, and
+  // shipped a build that died on the first screen transition.
+  try {
+    await host.vision.setConfig({ numPoses: 6 });
+  } catch (err) {
+    return [...checks, check('vision rebuilds', false, `setConfig threw: ${String(err)}`)];
   }
+
+  const rebuildFail = await settle('vision rebuilds');
+  checks.push(rebuildFail ?? check('vision rebuilds', true, 'survives a numPoses change'));
+  return checks;
 }
 
 function scoreOf(screen: unknown): number {
