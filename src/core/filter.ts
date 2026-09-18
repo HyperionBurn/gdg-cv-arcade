@@ -60,10 +60,22 @@ export const FILTER_PRESETS = {
    */
   handFast: { minCutoff: 1.7, beta: 0.35, dCutoff: 1.0 },
   /**
-   * Hover cursor for the menu. The opposite trade: rock steady when held still
-   * so the dwell timer doesn't wobble off a tile. Lag is fine here.
+   * Hover cursor for the menu and the letter grid.
+   *
+   * Steady when held still so the dwell ring does not wobble off a tile, but it
+   * must still ARRIVE quickly — and those are not in conflict, because that is
+   * precisely what One Euro's speed coefficient is for.
+   *
+   * `beta` was 0.008, which is almost no speed adaptation at all: the cutoff
+   * stayed near its 0.6Hz floor (tau ~265ms) even during a fast reach, so the
+   * cursor lagged a quarter of a second behind the hand and then overshot as it
+   * caught up. Playtest reported it as "sens is low for selecting, might pick
+   * the wrong game" — and a wrong pick costs a whole turn from a queue.
+   *
+   * 0.25 opens the cutoff hard while travelling and drops back to the same
+   * floor at rest, so the hold is as steady as before and the journey is not.
    */
-  handPrecise: { minCutoff: 0.6, beta: 0.008, dCutoff: 1.0 },
+  handPrecise: { minCutoff: 0.6, beta: 0.25, dCutoff: 1.0 },
   /**
    * Body landmarks for gesture detection (jump, crouch, lean).
    *
@@ -113,7 +125,15 @@ export class OneEuro {
   private dx = new LowPass();
   private lastTime: number | null = null;
 
-  constructor(private params: OneEuroParams) {}
+  private params: OneEuroParams;
+
+  // Explicit field rather than a `private params` parameter property: Node's
+  // --test type stripping is strip-only and rejects parameter properties, which
+  // made this module — and everything importing it, including the tracker —
+  // impossible to unit test.
+  constructor(params: OneEuroParams) {
+    this.params = params;
+  }
 
   setParams(p: Partial<OneEuroParams>): void {
     this.params = { ...this.params, ...p };
@@ -158,10 +178,12 @@ export class LandmarkFilter {
   private channels: OneEuro[] = [];
   private params: OneEuroParams;
 
-  constructor(
-    private count: number,
-    preset: FilterPreset | OneEuroParams = 'body'
-  ) {
+  private count: number;
+
+  // See the note on OneEuro's constructor: no parameter properties in this
+  // file, so `node --test` can load it.
+  constructor(count: number, preset: FilterPreset | OneEuroParams = 'body') {
+    this.count = count;
     this.params = typeof preset === 'string' ? { ...FILTER_PRESETS[preset] } : { ...preset };
     this.rebuild();
   }

@@ -66,20 +66,167 @@ import type { FrameContext } from './screen';
  * wrong letter costs one hover of a DEL that is sitting right there.
  */
 export const DWELL = {
-  /** Menu tiles. PLAN.md §6's 1.2s — a wrong pick costs a turn. */
-  deliberate: 1.2,
+  /**
+   * Menu tiles. 1.2 -> 1.5.
+   *
+   * PLAN.md §6 specified 1.2s, and testers reported selection "might be too
+   * fast" while also landing on games they had not chosen. A wrong pick costs
+   * a whole turn from a queue, which is the most expensive mistake the shell
+   * can make, so this one buys the most from the extra 300ms.
+   */
+  deliberate: 1.5,
   /** Faction tiles. Six big targets, and it can be changed next time. */
-  standard: 0.9,
-  /** Letter grid. 28 targets, DEL is adjacent, and the queue is waiting. */
-  fast: 0.7,
+  standard: 1.1,
+  /**
+   * Letter grid. 0.7 -> 0.95.
+   *
+   * 28 targets packed tight with DEL and OK among them: the densest grid in the
+   * app and the easiest place to commit a letter while merely passing over it.
+   * Still the shortest dwell, because a wrong letter costs one hover of a DEL
+   * sitting right there rather than a whole turn.
+   */
+  fast: 0.95,
 } as const;
+
+/* ------------------------------------------------------------------ */
+/* Operator mouse override                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * How long after the last mouse movement the pointer keeps control.
+ *
+ * The mouse TAKES OVER rather than merging, and hands back on its own. A
+ * marshal nudges the trackpad, drives the shell, and two and a half seconds
+ * later the cursor belongs to whoever is standing in front of the camera again
+ * — with no mode to remember, no key to press, and nothing to leave switched on
+ * by accident in front of a queue.
+ */
+const POINTER_HOLD_MS = 2500;
+
+/**
+ * Operator mouse input, shared by every cursor in the app.
+ *
+ * PLAN.md §6 says "no keyboard, no mouse, no operator handoff", and for the
+ * PLAYER that is still true — nobody in the queue touches the laptop. But the
+ * marshal running the stall has to be able to back out of a stuck screen, pick
+ * a game to demo, or fix a typo'd name without walking into frame and waving at
+ * their own TV. Requested directly after the first playtest.
+ *
+ * A click commits immediately: an operator who is already pointing at a button
+ * should not have to hold still for 1.2 seconds to press it.
+ */
+const pointer = {
+  /** Normalised 0..1 across the canvas. */
+  x: 0.5,
+  y: 0.5,
+  /** `performance.now()` of the last movement. */
+  movedAt: -Infinity,
+  /** Set by mousedown, consumed by the first cursor that acts on it. */
+  clickPending: false,
+  installed: false,
+};
+
+/** True while the mouse is driving. */
+function pointerActive(): boolean {
+  return performance.now() - pointer.movedAt < POINTER_HOLD_MS;
+}
+
+/**
+ * Attach the listeners once, lazily, on the first cursor built.
+ *
+ * On `window` rather than the canvas so a click anywhere counts, and passive so
+ * it can never delay a frame.
+ */
+function installPointer(): void {
+  if (pointer.installed || typeof window === 'undefined') return;
+  pointer.installed = true;
+
+  const update = (e: MouseEvent): void => {
+    const canvas = document.querySelector('canvas');
+    const r = canvas?.getBoundingClientRect();
+    const w = r?.width || window.innerWidth;
+    const h = r?.height || window.innerHeight;
+    const left = r?.left ?? 0;
+    const top = r?.top ?? 0;
+    pointer.x = clamp01((e.clientX - left) / Math.max(1, w));
+    pointer.y = clamp01((e.clientY - top) / Math.max(1, h));
+    pointer.movedAt = performance.now();
+  };
+
+  window.addEventListener('mousemove', update, { passive: true });
+  window.addEventListener('mousedown', (e) => {
+    update(e);
+    pointer.clickPending = true;
+  });
+}
+
+/**
+ * Live multiplier on every dwell time. 1 is the authored feel.
+ *
+ * See `HoverCursor.dwellTime` for why this is a scale rather than a number of
+ * seconds: the grids differ by design, and an absolute override flattens them.
+ */
+function dwellScale(): number {
+  return tunables.get('hover.dwellScale', 1);
+}
 
 /** Half-width of the reach box, in shoulder widths. ~91% of full extension. */
 const REACH_X = 1.7;
-/** Reach above the shoulder line, in torso heights. */
-const REACH_UP = 1.15;
-/** Reach below the shoulder line. Arms at rest park the cursor off the tiles. */
-const REACH_DOWN = 1.05;
+/**
+ * Reach above the shoulder line, in torso heights.
+ *
+ * 1.15 -> 1.0, from a playtest report: "when I reach up I get height
+ * restricted, the pointer doesn't fully go with my hand, it stays a little
+ * below."
+ *
+ * 1.15 is not an arbitrary number — it is the ANATOMICAL MAXIMUM. Standard
+ * proportions put shoulder-to-wrist at ~0.332 of stature and shoulder-to-hip
+ * (this file's torso unit) at ~0.288, so a fully extended arm straight
+ * overhead reaches 0.332/0.288 = 1.15 torso units above the shoulder line and
+ * not one millimetre further. Mapping that to the top of the screen means the
+ * top pixel costs a locked-out overhead stretch, and every comfortable reach
+ * lands short — exactly as reported. Reaching also ELEVATES the shoulder
+ * girdle, which shrinks the measured offset further.
+ *
+ * `REACH_X` was already set to ~91% of full extension for precisely this
+ * reason; the vertical axis never got the same treatment. 1.0 is ~87%.
+ */
+const REACH_UP = 1.0;
+
+/**
+ * Smallest vertical reach the cursor will ever map the screen to.
+ *
+ * `REACH_UP` shrinks to fit the camera's real headroom (see `sample`), and
+ * without a floor a badly tilted camera would collapse it toward zero, turning
+ * a centimetre of wrist movement into half the screen. Below this the framing
+ * is the thing to fix, not the gain.
+ */
+const REACH_UP_FLOOR = 0.7;
+
+/**
+ * Torso units of margin kept between the top of the frame and the top of the
+ * reach box, so the cursor reaches the top of the screen just BEFORE the wrist
+ * leaves the picture rather than just after.
+ */
+const HEADROOM_MARGIN = 0.12;
+/**
+ * Reach below the shoulder line, in torso heights.
+ *
+ * 1.05 -> 0.6, and this one was a latent bug rather than a feel preference.
+ *
+ * The cursor is only live while the hand is RAISED, and the raise gate lets go
+ * at `RAISE_GATE_EXIT` = 0.6 torso units below the shoulder. So 0.6 is the
+ * largest downward offset that can ever be observed with a live cursor — and
+ * at 1.05 the bottom of the screen was mapped to 1.05, a position at which the
+ * cursor has already switched itself off. Measured: everything below
+ * (0.6 + 1.15) / 2.2 = 0.795 of screen height was physically unreachable, i.e.
+ * the bottom FIFTH of the display, including the lower edge of the bottom row
+ * of menu tiles.
+ *
+ * Matching this to the gate makes the whole screen reachable and nothing else
+ * changes: an arm at rest still sits at ~1.0, well outside the gate.
+ */
+const REACH_DOWN = 0.6;
 
 /**
  * How much higher the other wrist must be before the cursor swaps hands, in
@@ -298,11 +445,29 @@ export class HoverCursor {
   private commitX = 0;
   private commitY = 0;
 
-  constructor(private dwell: number = DWELL.deliberate) {}
+  private dwell: number;
 
-  /** Live dwell time, so queue pressure can be traded against misclicks. */
+  constructor(dwell: number = DWELL.deliberate) {
+    this.dwell = dwell;
+    installPointer();
+  }
+
+  /**
+   * Live dwell time, so queue pressure can be traded against misclicks.
+   *
+   * A SCALE, not an absolute. It used to be `get('hover.dwellDeliberate',
+   * this.dwell)` — but a registered tunable's default beats the caller's
+   * fallback, so the registry's 1.2s was returned for EVERY cursor regardless
+   * of what it was constructed with. The letter grid asks for 0.7s and its
+   * targets carry that explicitly, so keys still committed on time, but the
+   * cancel drain divides by this number and was running 40% slow on the one
+   * grid where people most often change their mind.
+   *
+   * One knob that multiplies every dwell is also what the operator actually
+   * wants at the stall: "the queue is long, make all of this faster".
+   */
   private get dwellTime(): number {
-    return tunables.get('hover.dwellDeliberate', this.dwell);
+    return this.dwell * dwellScale();
   }
 
   setDwell(seconds: number): void {
@@ -430,8 +595,29 @@ export class HoverCursor {
 
     let committed: string | null = null;
 
-    if (canFill && hovered) {
-      const dwell = hovered.dwell ?? this.dwellTime;
+    // AN OPERATOR CLICK COMMITS AT ONCE, with no dwell.
+    //
+    // Consumed here whether or not it lands on a target, so a click on empty
+    // space cannot queue itself up and fire later on whatever the cursor
+    // happens to be over — including a game tile, in front of a queue.
+    if (pointer.clickPending) {
+      pointer.clickPending = false;
+      if (hovered && !locked) {
+        this.progress = 0;
+        this.dwellTicks = 0;
+        this.latchedId = hovered.id;
+        committed = hovered.id;
+        this.commitAt = fc.time;
+        this.commitX = x;
+        this.commitY = y;
+        audio.play('select');
+      }
+    }
+
+    if (!committed && canFill && hovered) {
+      // A target's own dwell is scaled too, so the operator's one knob reaches
+      // the letter grid and the faction tiles as well as the menu.
+      const dwell = hovered.dwell !== undefined ? hovered.dwell * dwellScale() : this.dwellTime;
       this.progress += fc.dt / Math.max(0.05, dwell);
 
       // Three ticks across the fill, climbing in pitch, then `select` lands on
@@ -490,6 +676,15 @@ export class HoverCursor {
       };
     }
 
+    // THE MOUSE WINS WHILE IT IS MOVING. Unfiltered: a mouse is already a
+    // precise pointing device, and running it through a smoother built to
+    // steady a waving arm at three metres would only make it feel broken.
+    if (pointerActive()) {
+      this.fx.reset();
+      this.fy.reset();
+      return { x: pointer.x, y: pointer.y };
+    }
+
     if (!player) return null;
 
     const lm = player.landmarks;
@@ -535,7 +730,15 @@ export class HoverCursor {
 
     const scx = (ls.x + rs.x) / 2;
     const scy = (ls.y + rs.y) / 2;
-    const spanX = Math.max(scale.shoulderWidth, 0.03);
+    // SHOULDER WIDTH COLLAPSES WITH cos(yaw), so a player glancing sideways
+    // gets a twitchier cursor on the one control everybody uses to pick a game.
+    // MEASURED: 0.2094 face-on, 0.0716 at 70deg — 2.9x more sensitive — and
+    // already 1.4x at a casual 45deg glance.
+    //
+    // Floored with the rotation-stable torso unit. 0.80 is the MEASURED face-on
+    // shoulderWidth/torsoHeight ratio, so a square-on player sees no change at
+    // all and a turned one stops accelerating.
+    const spanX = Math.max(scale.shoulderWidth, scale.unit * 0.8, 0.03);
 
     // MIRRORED: the subject's right hand is at a lower camera x and must land
     // on the right of the TV, so the horizontal offset is negated.
@@ -563,8 +766,32 @@ export class HoverCursor {
     this.raised = this.raised ? dy < RAISE_GATE_EXIT : dy < RAISE_GATE_ENTER;
     if (!this.raised) return null;
 
+    // THE REACH BOX SHRINKS TO FIT THE CAMERA'S ACTUAL HEADROOM.
+    //
+    // A laptop camera — which is what this will mostly run on — sits low and
+    // close. It frames the body nicely and leaves almost nothing above the
+    // head, so a raised wrist exits the top of the picture, its landmark pins
+    // to y = 0, and the cursor stops climbing however far the hand keeps going.
+    // Reported from a playtest as "when I reach up I get height restricted, the
+    // pointer stays a little below my hand", on a rig cropped at the knees.
+    //
+    // No fixed `reachUp` can fix that, because the limit is the frame rather
+    // than the arm: if there are only 0.8 torso units above the shoulder line,
+    // then dy can never read below -0.8 and the top of a box built for -1.0 is
+    // unreachable by construction. So measure the room that is actually there
+    // and map the screen to THAT, leaving a small margin so the cursor tops out
+    // just before the wrist disappears.
+    //
+    // On a well-placed camera there is more headroom than `reachUp` needs and
+    // this changes nothing at all.
+    const headroom = scy / spanY;
+    const effectiveUp = Math.max(
+      REACH_UP_FLOOR,
+      Math.min(reachUp, headroom - HEADROOM_MARGIN)
+    );
+
     const rawX = 0.5 - dx / (2 * reachX);
-    const rawY = (dy + reachUp) / (reachUp + reachDown);
+    const rawY = (dy + effectiveUp) / (effectiveUp + reachDown);
 
     // Clamp with headroom BEFORE filtering so the filter has somewhere to
     // settle at the edges, then hard-clamp after so edge targets stay hittable.
