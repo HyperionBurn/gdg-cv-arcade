@@ -376,7 +376,16 @@ class AudioEngine {
     this.musicEnabled = true;
     this.musicStep = 0;
 
+    // ANCHOR THE RAMP AT THE CURRENT VALUE FIRST, exactly as `stopMusic` does.
+    //
+    // `linearRampToValueAtTime` interpolates from the PREVIOUS automation
+    // event, not from wherever the parameter happens to be. With no anchor,
+    // round two of the day ramps from an event minutes in the past that has
+    // long since completed — so the audible value at `now` is already 0.25 and
+    // the fade-in simply does not happen. It worked exactly once, in dev, on
+    // the first play after a reload.
     this.musicGain.gain.cancelScheduledValues(this.now());
+    this.musicGain.gain.setValueAtTime(this.musicGain.gain.value, this.now());
     this.musicGain.gain.linearRampToValueAtTime(0.25, this.now() + 1.2);
 
     const scale = [261.63, 293.66, 329.63, 392.0, 440.0]; // C major pentatonic

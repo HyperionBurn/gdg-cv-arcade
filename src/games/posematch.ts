@@ -47,7 +47,7 @@ import type { TrackedPlayer } from '../core/tracker';
 import { GameBase, type SlotRect } from './base';
 import {
   POSES,
-  PASS_THRESHOLD,
+  passThreshold,
   matchColor,
   matchLabel,
   pickPose,
@@ -387,7 +387,7 @@ export class PoseMatchGame extends GameBase {
   }
 
   private resolveWall(fc: FrameContext, slot: number, state: SlotState, wall: WallState): void {
-    const cleared = wall.best >= PASS_THRESHOLD;
+    const cleared = wall.best >= passThreshold();
     wall.resolved = cleared ? 'clear' : 'fail';
     wall.since = 0;
 
@@ -410,11 +410,11 @@ export class PoseMatchGame extends GameBase {
       // Weight the impact by HOW WELL they hit it. This was flat, so a 66%
       // scrape-through landed with exactly the same force as a 99% clean match
       // — even though the percentage is already on screen and already drives
-      // the pitch. `best` runs from PASS_THRESHOLD to 1, so normalise across
+      // the pitch. `best` runs from the pass threshold to 1, so normalise across
       // that range rather than 0..1, where everything would bunch up at the top.
       const quality = Math.min(
         1,
-        Math.max(0, (wall.best - PASS_THRESHOLD) / Math.max(0.01, 1 - PASS_THRESHOLD))
+        Math.max(0, (wall.best - passThreshold()) / Math.max(0.01, 1 - passThreshold()))
       );
       this.juice.shake(0.18 + 0.16 * quality);
       this.juice.hitStop(Math.round(38 + 30 * quality));
@@ -730,7 +730,7 @@ export class PoseMatchGame extends GameBase {
     // and snaps to green only on a pass, so "you are through" is a state change
     // rather than a shade. Slot colour + green is two brand colours, never
     // three, and never both at once.
-    const through = wall.live >= PASS_THRESHOLD;
+    const through = wall.live >= passThreshold();
     drawPoseSilhouette(bctx, wall.pose.angles, {
       cx,
       cy,
@@ -841,8 +841,9 @@ export class PoseMatchGame extends GameBase {
     ctx.lineWidth = vh(v, STROKE.base);
     ctx.setLineDash([vh(v, 0.7), vh(v, 0.55)]);
     ctx.beginPath();
-    ctx.moveTo(barX + barW * PASS_THRESHOLD, barY - vh(v, 1.4));
-    ctx.lineTo(barX + barW * PASS_THRESHOLD, barY + barH + vh(v, 1.4));
+    const pass = passThreshold();
+    ctx.moveTo(barX + barW * pass, barY - vh(v, 1.4));
+    ctx.lineTo(barX + barW * pass, barY + barH + vh(v, 1.4));
     ctx.stroke();
     ctx.restore();
 
@@ -973,7 +974,7 @@ export class PoseMatchGame extends GameBase {
       progress: this.rampProgress(),
       travelTimeNow: this.travelTimeNow(),
       playerCount: this.playerCount,
-      passThreshold: PASS_THRESHOLD,
+      passThreshold: passThreshold(),
       slots: this.slots.slice(0, Math.max(1, this.playerCount)).map((s) => ({
         cleared: s.cleared,
         faced: s.faced,
