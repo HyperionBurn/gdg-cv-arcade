@@ -277,6 +277,13 @@ if (import.meta.env.DEV) {
     vision,
     audio,
     simulator,
+    // The REAL instance. A dev-console `import('/src/meta/highlights.ts')`
+    // does not reach it: Vite appends an HMR timestamp to module URLs it has
+    // reloaded, so a bare import resolves to a SECOND, freshly-constructed
+    // module — one whose `source` is null and whose counters are all zero.
+    // That looks exactly like "instant replay is dead" and is not. Reach it
+    // through here instead.
+    highlights,
     get screen() {
       return router.active;
     },

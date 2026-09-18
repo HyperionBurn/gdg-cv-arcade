@@ -279,6 +279,8 @@ export abstract class GameBase implements Screen {
   private ghostRaceLost = false;
   /** Continuous seconds with nobody in frame, during results only. */
   private resultsEmptyTime = 0;
+  /** stateTime at which the results panel first drew. -1 until it has. */
+  private panelStart = -1;
   private frameBudgetStrikes = 0;
   /**
    * The best previous solo run, replayed alongside the live player.
@@ -377,6 +379,13 @@ export abstract class GameBase implements Screen {
     }
     if (state === 'results') {
       this.resultsEmptyTime = 0;
+      this.panelStart = -1;
+      // Gameplay popups do not belong on the summary. A 67 Speed milestone
+      // ("200") was caught floating directly over the final score ("203") —
+      // the last rep of a round fires a popup with ~0.9s of life left, and the
+      // results screen arrives well inside that. It was always wrong and the
+      // new paper knockout made it unmissable.
+      this.popups.clear();
       audio.stopMusic();
       this.finaliseResults();
     }
@@ -809,14 +818,17 @@ export abstract class GameBase implements Screen {
     // turn length has to be predictable.
     //
     // One loop, and the advance check below runs unconditionally.
-    const replaying =
-      highlights.isPlaying ||
-      (this.stateTime < 0.2 && highlights.hasClip() && highlights.play(fc.now, 1));
-    const showedReplay = replaying && highlights.render(fc);
-
     const t = ramp(this.stateTime, 0.5);
     const versus = this.playerCount === 2 && !this.config.partyMode;
 
+    // BACKDROP FIRST, THEN THE REPLAY ON TOP OF IT.
+    //
+    // These were the other way round: the replay was rendered and then this
+    // full-screen paper rect was painted straight over it, reaching full alpha
+    // at 0.5s. So a replay was visible for half a second and then erased — and
+    // because `showedReplay` also suppresses the results panel, what remained
+    // for the rest of the clip was a blank sheet of paper. The one reward in
+    // the app for a top-five run showed nothing at all.
     ctx.save();
     // Opaque paper, faded in by alpha on the whole layer rather than a
     // see-through fill — DESIGN.md forbids transparent colour.
@@ -826,9 +838,19 @@ export abstract class GameBase implements Screen {
     ctx.globalAlpha = 1;
     ctx.restore();
 
+    const replaying =
+      highlights.isPlaying ||
+      (this.stateTime < 0.2 && highlights.hasClip() && highlights.play(fc.now, 1));
+    const showedReplay = replaying && highlights.render(fc);
+
     if (!showedReplay) {
-      if (versus) this.drawVersusResults(fc, t);
-      else this.drawSoloResults(fc, t);
+      // Fade keyed to when the PANEL starts, not when results did. After a
+      // replay finishes mid-window `stateTime` is already well past 0.5, so the
+      // panel would otherwise snap in at full opacity with no entrance at all.
+      if (this.panelStart < 0) this.panelStart = this.stateTime;
+      const pt = ramp(this.stateTime - this.panelStart, 0.5);
+      if (versus) this.drawVersusResults(fc, pt);
+      else this.drawSoloResults(fc, pt);
     }
 
     // Nobody left to read it? Then stop holding the screen.
@@ -1039,8 +1061,11 @@ export abstract class GameBase implements Screen {
       // not wins"), was visible only during each game's first ten plays and
       // then switched itself off for the rest of the event.
       if (rank.pointsToNext !== null) {
+        // A gap you could close on the next go is the whole point; say it
+        // louder. Mirrors the `close` treatment on the live chase line.
+        const near = rank.pointsToNext <= 10;
         drawText(ctx, `${rank.pointsToNext} OFF THE BOARD`, v.width / 2, y, {
-          size: vh(v, 4.4),
+          size: vh(v, near ? 5.4 : 4.4),
           color: COLORS.ink,
           shadow: vh(v, SHADOW.base),
           shadowColor: COLORS.yellow,
