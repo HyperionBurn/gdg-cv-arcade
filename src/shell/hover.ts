@@ -146,6 +146,49 @@ const EXIT_PAD_VH = 1.6;
  */
 const REACQUIRE_GRACE = 0.14;
 
+/**
+ * How long the cursor tolerates losing the wrist before it gives up the dwell.
+ *
+ * WITHOUT THIS, A REAL CAMERA CANNOT SELECT A GAME. `sample()` returns null
+ * whenever wrist visibility dips under `WRIST_MIN_VISIBILITY`, and the null
+ * path used to reset `progress` to 0 AND restamp `acquiredAt`, which imposes a
+ * further `SETTLE_GRACE_SEC` before filling may resume. So each momentary
+ * dropout cost the full dwell plus 0.45s.
+ *
+ * MEASURED against a simulated body with realistic wrist dropouts: a player
+ * holding a steady hand on a tile for ten seconds reached 17% dwell and NEVER
+ * committed, against ~2s to commit with a clean body. This is the app's only
+ * input device.
+ *
+ * The simulator could not show it until today — `lm()` defaults visibility to
+ * 1 and every call site took the default, so no landmark had ever been
+ * anything but perfectly visible.
+ *
+ * 0.3s is comfortably longer than the few-frame dropouts MediaPipe produces at
+ * 3m, and far shorter than the time it takes to lower an arm and mean it.
+ */
+const LOST_GRACE_SEC = 0.3;
+
+/**
+ * How long the pointing hand may be missing before the cursor considers
+ * following the OTHER hand.
+ *
+ * The hand-swap hysteresis (`HAND_SWAP_MARGIN`) governs a deliberate swap —
+ * raise the other arm higher and the cursor moves across. But a DROPOUT
+ * bypassed it entirely: `if (!rightOk) this.side = 'left'` switched on a
+ * single missing frame.
+ *
+ * The other hand is, by definition, the one the player is NOT pointing with —
+ * it is down by their side. So one dropped frame teleported the cursor from
+ * the tile to the bottom of the screen and cancelled the dwell.
+ *
+ * MEASURED with realistic dropouts before this: the cursor wandered over
+ * 388x616 px of a 519x932 canvas while the player held a hand perfectly
+ * still, and the dwell never passed 17%. Only 6 frames in 420 were actually
+ * "no hand" — the rest was the cursor ping-ponging between two hands.
+ */
+const SIDE_SWAP_GRACE_SEC = 0.35;
+
 /** Progress bleeds off this many times faster than it fills. */
 const CANCEL_SPEED = 3;
 
@@ -241,6 +284,11 @@ export class HoverCursor {
    */
   private dwellTicks = 0;
 
+  /** When the wrist was lost, or -1 while it is held. See LOST_GRACE_SEC. */
+  private lostSince = -1;
+  /** When the POINTING hand went missing. See SIDE_SWAP_GRACE_SEC. */
+  private sideLostSince = -1;
+
   private graceId: string | null = null;
   private graceAt = -1;
   private graceProgress = 0;
@@ -294,8 +342,16 @@ export class HoverCursor {
     const point = this.sample(player, fc.time);
 
     if (!point) {
-      // Losing the player must cancel cleanly. A dwell that survives the
-      // player walking away would fire at whoever steps in next.
+      // A BRIEF dropout is not the player leaving. Hold everything as it was
+      // and report the cursor as still present, so the ring does not visibly
+      // collapse and refill on every flicker. See LOST_GRACE_SEC.
+      if (this.lostSince < 0) this.lostSince = fc.time;
+      if (this.state.present && fc.time - this.lostSince < LOST_GRACE_SEC) {
+        return this.state;
+      }
+
+      // Genuinely gone. Cancel cleanly: a dwell that survived the player
+      // walking away would fire at whoever steps in next.
       this.hoveredId = null;
       this.progress = 0;
       this.latchedId = null;
@@ -303,8 +359,14 @@ export class HoverCursor {
       return this.state;
     }
 
+    // Back within the grace window — carry on as if nothing happened. In
+    // particular do NOT restamp `acquiredAt`, which would re-impose the settle
+    // grace and make a flickering wrist permanently unable to select.
+    const hadBriefDropout = this.lostSince >= 0 && this.state.present;
+    this.lostSince = -1;
+
     // Transition from absent to present starts the settle grace.
-    if (!this.state.present || this.needsResettle) {
+    if ((!this.state.present && !hadBriefDropout) || this.needsResettle) {
       this.needsResettle = false;
       this.acquiredAt = fc.time;
       this.progress = 0;
@@ -447,9 +509,22 @@ export class HoverCursor {
     // Pick the raised hand, with hysteresis. Y grows downward, so "higher"
     // is the smaller value.
     const spanY = Math.max(scale.unit, 0.04);
-    if (!leftOk) this.side = 'right';
-    else if (!rightOk) this.side = 'left';
-    else if (left && right) {
+
+    // The hand we are already pointing with, dropping out. Hold rather than
+    // jump — see SIDE_SWAP_GRACE_SEC. Returning null here is deliberate: the
+    // caller's LOST_GRACE_SEC then preserves the dwell through the gap.
+    const activeOk = this.side === 'left' ? leftOk : rightOk;
+    const otherOk = this.side === 'left' ? rightOk : leftOk;
+    if (!activeOk) {
+      if (this.sideLostSince < 0) this.sideLostSince = time;
+      if (!otherOk || time - this.sideLostSince < SIDE_SWAP_GRACE_SEC) return null;
+      this.swapTo(this.side === 'left' ? 'right' : 'left');
+      this.sideLostSince = -1;
+    } else {
+      this.sideLostSince = -1;
+    }
+
+    if (left && right && leftOk && rightOk) {
       const diff = (right.y - left.y) / spanY; // >0 when the left wrist is higher
       if (this.side === 'right' && diff > HAND_SWAP_MARGIN) this.swapTo('left');
       else if (this.side === 'left' && -diff > HAND_SWAP_MARGIN) this.swapTo('right');
