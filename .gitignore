@@ -28,3 +28,5 @@ Thumbs.db
 # Local overrides
 .env
 .env.local
+
+.vercel

@@ -158,6 +158,9 @@ export class RigCheckScreen implements Screen {
       <div class="rig-stat"><span>inference</span><b id="rig-fps">—</b></div>
       <div class="rig-stat"><span>latency</span><b id="rig-lat">—</b></div>
       <div class="rig-stat"><span>dropped</span><b id="rig-drop">—</b></div>
+      <div class="rig-stat"><span>camera</span><b id="rig-cam">—</b></div>
+      <div class="rig-stat"><span>vision</span><b id="rig-ready">—</b></div>
+      <div class="rig-fault" id="rig-fault"></div>
       <hr>
       <div class="rig-note">
         Stand back until <b>FULL BODY</b> shows green, then mark the floor with tape.
@@ -195,12 +198,45 @@ export class RigCheckScreen implements Screen {
   private updateLiveStats(): void {
     if (!this.panel) return;
     const s = vision.getStats();
+    const cam = camera.getState();
     const fps = this.panel.querySelector('#rig-fps');
     const lat = this.panel.querySelector('#rig-lat');
     const drop = this.panel.querySelector('#rig-drop');
     if (fps) fps.textContent = `${s.inferenceFps.toFixed(0)} fps / ${s.inferenceMs.toFixed(0)}ms`;
     if (lat) lat.textContent = `${s.latencyMs.toFixed(0)}ms`;
     if (drop) drop.textContent = String(s.dropped);
+
+    // THE WHOLE POINT OF A DIAGNOSTIC SCREEN IS THAT IT NAMES THE FAULT.
+    //
+    // This panel showed delegate, fps, latency and dropped — every one of which
+    // reads "—" or "0" whether the vision worker failed to load a model, the
+    // camera never went live, or the player is simply standing out of frame.
+    // Three completely different problems, one indistinguishable readout, and
+    // the canvas behind it just says NO PLAYER DETECTED. `stats.error` was
+    // being collected and never shown anywhere.
+    const camEl = this.panel.querySelector('#rig-cam');
+    const readyEl = this.panel.querySelector('#rig-ready');
+    const fault = this.panel.querySelector('#rig-fault');
+    if (camEl) camEl.textContent = camera.isLive() ? `live ${cam.width}×${cam.height}` : cam.status;
+    if (readyEl) readyEl.textContent = s.ready ? `ready (${s.delegate ?? '?'})` : 'NOT READY';
+
+    if (fault) {
+      // Ordered by what has to be true first: no camera means the fps reading
+      // is meaningless, and no worker means framing advice is premature.
+      const msg = cam.error
+        ? `CAMERA: ${cam.error}`
+        : !camera.isLive()
+          ? `CAMERA: ${cam.status} — no frames are being captured`
+          : s.error
+            ? `VISION: ${s.error}`
+            : !s.ready
+              ? 'VISION: worker has not finished loading the model'
+              : s.inferenceFps < 1
+                ? 'VISION: model loaded but no frames are coming back'
+                : (s.warning ?? '');
+      fault.textContent = msg;
+      (fault as HTMLElement).style.display = msg ? 'block' : 'none';
+    }
   }
 
   /**
