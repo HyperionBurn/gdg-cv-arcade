@@ -15,34 +15,16 @@
  */
 
 import { LandmarkFilter, type FilterPreset } from './filter';
-import { POSE, POSE_LANDMARK_COUNT, type Landmark, type RawPose } from './types';
+import { POSE_LANDMARK_COUNT, type Landmark, type RawPose } from './types';
+import {
+  selectCandidates,
+  computeScale,
+  computeConfidence,
+  dist,
+  type BodyScale,
+} from './candidates';
 
-export interface BodyScale {
-  /** Shoulder-to-shoulder distance in normalised frame units. */
-  shoulderWidth: number;
-  /** Shoulder-centre to hip-centre distance. More rotation-stable than width. */
-  torsoHeight: number;
-  /**
-   * The canonical "one body unit" every gesture threshold is expressed in.
-   *
-   * PLAN.md §2: "A 5'2" player and a 6'4" player produce wildly different pixel
-   * deltas for the same jump." A threshold of 0.25 means "a quarter of a torso",
-   * which means the same thing for both of them.
-   */
-  unit: number;
-  valid: boolean;
-  /**
-   * The aspect ratio these measurements were taken in.
-   *
-   * Carried on the scale so that ANY consumer measuring a horizontal landmark
-   * distance can correct it the same way the tracker did. Without it, code
-   * outside this file divides a raw normalised-x difference by an
-   * aspect-corrected width and gets a ratio that is wrong by exactly the
-   * aspect — which is a subtler bug than the original, because both halves
-   * look individually reasonable.
-   */
-  aspect: number;
-}
+export type { BodyScale } from './candidates';
 
 export interface TrackedPlayer {
   /** Stable for the lifetime of this human being in frame. */
@@ -85,6 +67,32 @@ export interface TrackerOptions {
   matchRadius: number;
   /** Ignore detections smaller than this bbox area — background bystanders. */
   minArea: number;
+  /**
+   * Mean torso-landmark visibility a detection must reach to count as a person.
+   *
+   * MediaPipe is asked for up to six poses and will happily return low-quality
+   * extras to fill the quota. They arrive as complete skeletons with plausible
+   * geometry and poor visibility, so nothing upstream rejects them.
+   */
+  minConfidence: number;
+  /**
+   * Two detections whose centroids are closer than this many TORSO UNITS are
+   * treated as the same body, and only the larger survives.
+   *
+   * WHY THIS EXISTS: with `numPoses: 6`, MediaPipe regularly returns several
+   * overlapping skeletons for ONE person. Nothing deduplicated them, so Red
+   * Light — the only game that asks for six — read a single player as four,
+   * gave them four lanes, and eliminated them four times. Reported from the
+   * first real-camera session.
+   *
+   * 0.55 is chosen to separate the two cases with margin rather than to be
+   * clever. Duplicate detections of one body sit essentially on top of each
+   * other, under ~0.2 torso units apart. Two real people standing side by side
+   * are at least a shoulder width apart, which is ~1.0-1.6 torso units. Raising
+   * this toward 1.0 starts merging real players standing close together, which
+   * is a worse failure than an occasional ghost.
+   */
+  dedupeTorsos: number;
   /** Display is mirrored, so slot ordering has to be flipped to match. */
   mirrored: boolean;
   filterPreset: FilterPreset;
@@ -117,6 +125,8 @@ export const DEFAULT_TRACKER_OPTIONS: TrackerOptions = {
   maxMissingFrames: 15,
   matchRadius: 0.25,
   minArea: 0.02,
+  minConfidence: 0.45,
+  dedupeTorsos: 0.55,
   mirrored: true,
   filterPreset: 'body',
   aspect: 16 / 9,
@@ -124,102 +134,6 @@ export const DEFAULT_TRACKER_OPTIONS: TrackerOptions = {
 
 interface InternalTrack extends TrackedPlayer {
   filter: LandmarkFilter;
-}
-
-const TORSO = [
-  POSE.LEFT_SHOULDER,
-  POSE.RIGHT_SHOULDER,
-  POSE.LEFT_HIP,
-  POSE.RIGHT_HIP,
-] as const;
-
-/**
- * Distance in ISOTROPIC units.
- *
- * Landmark x is normalised by frame width and y by frame height, so x must be
- * scaled by the aspect ratio before the two can be combined. The result is in
- * "fractions of frame height", which is also the unit the renderer thinks in.
- */
-function dist(ax: number, ay: number, bx: number, by: number, aspect: number): number {
-  const dx = (ax - bx) * aspect;
-  const dy = ay - by;
-  return Math.sqrt(dx * dx + dy * dy);
-}
-
-function midpoint(a: Landmark | undefined, b: Landmark | undefined): { x: number; y: number } | null {
-  if (!a || !b) return null;
-  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-}
-
-/** Torso centroid — far more stable than a whole-skeleton mean, which swings
- *  wildly whenever an arm or leg drops out of frame. */
-function computeCentroid(lms: Landmark[]): { x: number; y: number } {
-  let sx = 0;
-  let sy = 0;
-  let n = 0;
-  for (const idx of TORSO) {
-    const lm = lms[idx];
-    if (lm && lm.visibility > 0.3) {
-      sx += lm.x;
-      sy += lm.y;
-      n++;
-    }
-  }
-  if (n === 0) return { x: 0.5, y: 0.5 };
-  return { x: sx / n, y: sy / n };
-}
-
-function computeArea(lms: Landmark[]): number {
-  let minX = 1;
-  let maxX = 0;
-  let minY = 1;
-  let maxY = 0;
-  let any = false;
-  for (const lm of lms) {
-    if (lm.visibility < 0.3) continue;
-    any = true;
-    if (lm.x < minX) minX = lm.x;
-    if (lm.x > maxX) maxX = lm.x;
-    if (lm.y < minY) minY = lm.y;
-    if (lm.y > maxY) maxY = lm.y;
-  }
-  return any ? (maxX - minX) * (maxY - minY) : 0;
-}
-
-function computeScale(lms: Landmark[], aspect: number): BodyScale {
-  const ls = lms[POSE.LEFT_SHOULDER];
-  const rs = lms[POSE.RIGHT_SHOULDER];
-  const lh = lms[POSE.LEFT_HIP];
-  const rh = lms[POSE.RIGHT_HIP];
-
-  const shoulderWidth = ls && rs ? dist(ls.x, ls.y, rs.x, rs.y, aspect) : 0;
-
-  const shoulderMid = midpoint(ls, rs);
-  const hipMid = midpoint(lh, rh);
-  const torsoHeight =
-    shoulderMid && hipMid
-      ? dist(shoulderMid.x, shoulderMid.y, hipMid.x, hipMid.y, aspect)
-      : 0;
-
-  // Torso height is the preferred unit: it barely changes when someone turns,
-  // whereas shoulder width collapses toward zero in profile. Fall back to a
-  // scaled shoulder width only when hips aren't visible (seated, cropped frame).
-  let unit = torsoHeight;
-  if (unit < 0.04) unit = shoulderWidth * 1.4;
-
-  return {
-    shoulderWidth,
-    torsoHeight,
-    unit,
-    valid: unit > 0.04,
-    aspect,
-  };
-}
-
-function computeConfidence(lms: Landmark[]): number {
-  let sum = 0;
-  for (const idx of TORSO) sum += lms[idx]?.visibility ?? 0;
-  return sum / TORSO.length;
 }
 
 export class PoseTracker {
@@ -252,17 +166,13 @@ export class PoseTracker {
     // 1. Reject anything too small to be a player standing in the zone. This is
     //    the crowd-rejection mechanism from PLAN.md §9 — people queueing behind
     //    the player are further away, therefore smaller.
-    const candidates = poses
-      .map((p) => ({
-        pose: p,
-        centroid: computeCentroid(p.landmarks),
-        area: computeArea(p.landmarks),
-      }))
-      .filter((c) => c.area >= this.opts.minArea);
-
-    // 2. Keep only the largest N — nearest to camera wins.
-    candidates.sort((a, b) => b.area - a.area);
-    const chosen = candidates.slice(0, this.opts.maxPlayers);
+    const chosen = selectCandidates(poses, {
+      maxPlayers: this.opts.maxPlayers,
+      minArea: this.opts.minArea,
+      minConfidence: this.opts.minConfidence,
+      dedupeTorsos: this.opts.dedupeTorsos,
+      aspect: this.opts.aspect,
+    });
 
     // 3. Greedy nearest-centroid matching. O(n*m), and n,m <= 6 here, so the
     //    Hungarian algorithm would be ceremony for no gain.

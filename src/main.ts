@@ -14,6 +14,7 @@ import type { VisionFrame } from './core/types';
 import { resizeCanvas, viewportOf } from './engine/draw';
 import type { FrameContext } from './shell/screen';
 import { router } from './shell/router';
+import { drawDebugOverlay, toggleDebug, watchForDebug } from './shell/debug';
 import { RigCheckScreen } from './shell/rigcheck';
 import { installOperatorConsole } from './shell/operator';
 import { highlights } from './meta/highlights';
@@ -67,6 +68,9 @@ installOperatorConsole();
 // amortised per rendered frame, and it throttles itself off the frame-budget
 // watchdog via GameBase.
 highlights.attach(canvas);
+
+// Route vision faults into the debug log before anything else can swallow them.
+watchForDebug();
 router.register('rigcheck', () => new RigCheckScreen());
 router.register('attract', () => new AttractScreen());
 router.register('menu', () => new MenuScreen());
@@ -101,6 +105,10 @@ function step(now: number, dt: number): void {
     // that stays black is unrecoverable without someone who can read a console.
     console.error('[render]', err);
   }
+
+  // The debug overlay draws on top of everything, including the screen's own
+  // chrome — it is a diagnostic, not part of the design.
+  drawDebugOverlay(fc);
 
   // AFTER the frame is drawn — it grabs what is on the canvas.
   highlights.tick(now);
@@ -223,6 +231,10 @@ window.addEventListener('keydown', (e) => {
       break;
     case 'm':
       audio.setMuted(!audio.muted);
+      break;
+    case 'd':
+      // Works in production too. See shell/debug.ts for why.
+      toggleDebug();
       break;
   }
 
