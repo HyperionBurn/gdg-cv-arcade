@@ -243,6 +243,19 @@ export class FruitNinjaGame extends GameBase {
     for (const blade of blades) {
       if (!blade.active) continue;
 
+      // SOLO ROUNDS SCORE INTO SLOT 0, WHOEVER THE TRACKER THINKS YOU ARE.
+      //
+      // The tracker re-sorts slots by screen position every frame while
+      // `playerCount` stays frozen for the round, so a bystander standing to
+      // the player's left silently makes the PLAYER slot 1. Every slice then
+      // credited `points[1]`, which nothing displays, while `scoreFor(0)` — the
+      // number on screen and the one submitted to the leaderboard — sat still.
+      // The player is cutting fruit, watching halves fly, and scoring zero.
+      //
+      // Same root cause as the Balloon Pop arm-line bug: a solo game must not
+      // index anything by a slot that can move underneath it.
+      const slot = this.playerCount > 1 ? blade.slot : 0;
+
       // Everything this blade cut in THIS frame — a single fast swipe through
       // three fruit must register as a 3-chain, not three separate slices.
       const cutThisSwipe: Body[] = [];
@@ -261,13 +274,13 @@ export class FruitNinjaGame extends GameBase {
         this.bodies.splice(i, 1);
         cutThisSwipe.push(b);
 
-        if (b.kind === 'bomb') this.detonate(fc, b, blade.slot);
+        if (b.kind === 'bomb') this.detonate(fc, b, slot);
         else this.sliceFruit(fc, b, world, p1, p2);
       }
 
       if (cutThisSwipe.length > 0) {
         const fruit = cutThisSwipe.filter((b) => b.kind === 'fruit');
-        if (fruit.length > 0) this.awardSlice(fc, blade.slot, fruit, blade);
+        if (fruit.length > 0) this.awardSlice(fc, slot, fruit, blade);
       }
     }
   }
@@ -616,7 +629,13 @@ export class FruitNinjaGame extends GameBase {
       // and it is the only thing left of the old blurred yellow glow.
       const pulse = 1 + Math.sin(fc.time * 14) * 0.06;
       ctx.save();
-      ctx.translate(rect.centerX, vh(v, 27));
+      // BELOW the HUD band, not through it. At 27vh this 4.6vh pill spans
+      // 24.7-29.3 and the chase line sits at 26 — so the live "thing to beat",
+      // which PLAN.md §2 calls the whole addiction mechanic, was covered by
+      // the combo badge exactly when the player was doing well enough to earn
+      // one. Anchored to `hudBottom()` so it tracks the band rather than
+      // duplicating a number that has already drifted once.
+      ctx.translate(rect.centerX, this.hudBottom(v) + vh(v, 3.2));
       ctx.scale(pulse, pulse);
       this.numberPill(ctx, v, 0, 0, `COMBO x${combo}`, vh(v, 4.6), COLORS.yellow);
       ctx.restore();

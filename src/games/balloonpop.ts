@@ -477,7 +477,16 @@ export class BalloonPopGame extends GameBase {
 
     if (streak >= 3) {
       // Yellow action pill, straight: it carries a number, so it never tilts.
-      this.numberPill(ctx, v, rect.centerX, vh(v, 27), `${streak} STREAK`, vh(v, 4.6), COLORS.yellow);
+      // Below the HUD band — at 27vh this covered the chase line at 26.
+      this.numberPill(
+        ctx,
+        v,
+        rect.centerX,
+        this.hudBottom(v) + vh(v, 3.2),
+        `${streak} STREAK`,
+        vh(v, 4.6),
+        COLORS.yellow
+      );
     }
 
     drawTabularNumber(ctx, `${this.popped[slot] ?? 0} POPPED`, rect.centerX, v.height - vh(v, 3), {

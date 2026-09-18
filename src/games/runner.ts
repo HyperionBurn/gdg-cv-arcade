@@ -980,7 +980,10 @@ export class RunnerGame extends GameBase {
       this.drawTargetMarker(
         fc,
         rect.centerX,
-        vh(fc.v, 27),
+        // Below the HUD band. At 27vh this 3.2vh sticker overlapped the chase
+        // line at 26 — covering the live "thing to beat" with a second copy of
+        // roughly the same information.
+        this.hudBottom(fc.v) + vh(fc.v, 2.6),
         `${preview.pointsToNext}m TO #${preview.nextRank}`
       );
     }
