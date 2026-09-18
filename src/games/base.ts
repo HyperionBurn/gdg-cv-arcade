@@ -24,7 +24,7 @@ import { Juice, RollingNumber, PopupLayer } from '../engine/juice';
 import { ParticleSystem, BURST } from '../engine/particles';
 import { audio } from '../engine/audio';
 import { clearFrame, drawText, vh, progressBar, roundRect, graphPaper } from '../engine/draw';
-import { COLORS, PLAYER_COLORS, FONTS, EASE, SHADOW, STROKE } from '../shell/theme';
+import { COLORS, PLAYER_COLORS, FONTS, EASE, SHADOW, STROKE, textColor } from '../shell/theme';
 import { leaderboard, type GameId, type RankResult } from '../meta/leaderboard';
 import { tunables } from '../meta/tunables';
 import { ghosts, drawGhost, type GhostPlayback } from '../meta/ghosts';
@@ -806,11 +806,13 @@ export abstract class GameBase implements Screen {
 
       drawText(ctx, `PLAYER ${slot + 1}`, cx, v.height * 0.26, {
         size: vh(v, 2.4),
-        color: won ? color : COLORS.muted,
         font: FONTS.body,
         weight: 600,
         letterSpacing: '0.2em',
         alpha: t,
+        ...(won
+          ? this.playerTextStyle(color, vh(v, SHADOW.base))
+          : { color: COLORS.muted }),
       });
 
       ctx.save();
@@ -969,6 +971,35 @@ export abstract class GameBase implements Screen {
     return this.config.hudShelf ? HUD_SHELF : HUD_FULL;
   }
 
+  /**
+   * A player's identity colour, made safe for LETTERFORMS on paper.
+   *
+   * `PLAYER_COLORS[0]` is yellow, which is 1.7:1 on paper — the brand kit's
+   * one hard colour rule, and simply gone at 3m. Every versus game routes its
+   * score through here, so in a two-player round player one's score was yellow
+   * text on white: the single most important number on their half of the
+   * screen, invisible from the queue. The versus results screen had it too, on
+   * the WINNER's name specifically, since the loser's is muted.
+   *
+   * The fix is the brand's own, already used on the record-pace line below:
+   * ink letterforms with the identity colour as the hard shadow. Legibility
+   * comes from ink, identity survives in the shadow, and nothing turns into a
+   * generic black number. Colours that already pass (blue, green, red, ink)
+   * are returned untouched with the default ink shadow.
+   */
+  private playerTextStyle(
+    preferred: string,
+    shadow: number
+  ): { color: string; shadow: number; shadowColor?: string } {
+    const safe = textColor(preferred);
+    // The shadow is what carries the identity in the fallback case, so it is
+    // NOT optional here — `drawText` skips the shadow pass entirely when the
+    // offset is absent, which would have left a plain ink number.
+    return safe === preferred
+      ? { color: safe, shadow }
+      : { color: safe, shadow, shadowColor: preferred };
+  }
+
   private drawHud(fc: FrameContext): void {
     const { ctx, v } = fc;
     const m = this.hudMetrics();
@@ -1029,9 +1060,8 @@ export abstract class GameBase implements Screen {
 
       drawText(ctx, this.primaryStat(slot), rect.centerX, vh(v, m.statY), {
         size: vh(v, m.statSize),
-        color,
-        shadow: vh(v, SHADOW.base),
-              });
+        ...this.playerTextStyle(color, vh(v, SHADOW.base)),
+      });
       drawText(ctx, this.primaryLabel(), rect.centerX, vh(v, m.labelY), {
         size: vh(v, m.labelSize),
         color: COLORS.muted,

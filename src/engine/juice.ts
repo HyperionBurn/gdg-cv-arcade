@@ -334,6 +334,30 @@ export class PopupLayer {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
+      // PAPER KNOCKOUT, then the hard ink shadow, then the glyphs.
+      //
+      // A popup is the one piece of text in this app that does not get to
+      // choose its background: it spawns at the point of impact, and
+      // `floorY` can push it further onto whatever is there. 67 Speed is the
+      // proof — `<NEW BEST!>` and every 10-rep milestone are ink, they land on
+      // the rep bar, and that bar turns INK for the yellow player once they
+      // pass the record. The biggest celebration in the game rendered as
+      // nothing, for one of the two players, exactly when it mattered most.
+      // Fruit Ninja's `<2 CHAIN!>` over a dark fruit and Rhythm's judgement
+      // words over a note are the same shape of problem.
+      //
+      // So the glyphs carry their own background with them. A paper stroke is
+      // two flat colours and two draw calls — no blur, no plate, no layout
+      // change — and it costs nothing on a paper background, where it is
+      // invisible by definition. `miter` would spike on tight corners at this
+      // weight, hence round joins.
+      ctx.lineJoin = 'round';
+      ctx.miterLimit = 2;
+      ctx.lineWidth = p.size * 0.17;
+      ctx.strokeStyle = COLORS.paper;
+      ctx.strokeText(p.text, 0, p.size * 0.07);
+      ctx.strokeText(p.text, 0, 0);
+
       // Hard ink shadow straight down, not a blur. This ran `shadowBlur = 14`
       // on every popup on every frame, which is the exact pattern that cost
       // 92.8ms/frame in attract mode.
