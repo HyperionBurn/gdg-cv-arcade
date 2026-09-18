@@ -1,0 +1,13 @@
+# The 55MB of models, WASM and fonts are NOT uploaded — `npm run setup` runs as
+# part of the Vercel build command and reproduces them there. See vercel.json.
+#
+# Uploading them instead would work, but it sends 55MB over the wire on every
+# deploy to rebuild something the build box can fetch in seconds.
+public/models
+public/wasm
+public/fonts
+
+node_modules
+dist
+.git
+scratchpad
