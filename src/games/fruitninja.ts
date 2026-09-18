@@ -23,6 +23,7 @@
  */
 
 import { BladeTracker, drawBladeTrail, type Blade } from '../core/blades';
+import { POSE } from '../core/types';
 import type { TrackedPlayer } from '../core/tracker';
 import { GameBase, type SlotRect } from './base';
 import {
@@ -81,6 +82,30 @@ const GRAVITY = 1.55;
 const COMBO_WINDOW_MS = 700;
 /** Seconds removed by a bomb. See the note on bombs below. */
 const BOMB_TIME_PENALTY = 8;
+
+/**
+ * Ceiling on the TOTAL seconds one round may lose to bombs.
+ *
+ * The time penalty exists, in this file's own words, because it "keeps the
+ * round length predictable for the queue (which was the reason for the timer in
+ * the first place)". Uncapped it does the exact opposite. MEASURED, five full
+ * 45-second solo rounds played by the simulator's swipe:
+ *
+ *   bombs hit      9      5      3      4      4
+ *   round lasted  19.0s  21.5s  22.0s  23.5s  17.5s
+ *
+ * Under half the advertised turn, every time, and the variation between turns
+ * is larger than the turn that is left. Someone who steps up, swings through
+ * four bombs and is handed back to the queue after seventeen seconds has not
+ * had a go — and PLAN.md §11 asks for failure that is funny, not failure that
+ * takes the turn away.
+ *
+ * 12s is a quarter of the round: the first bomb still bites a full eight
+ * seconds, which is the laugh, and the floor under a turn is 33 of the 45
+ * seconds no matter how badly it goes. Past the cap a bomb still costs the
+ * combo and still costs BOMB_STUN_MS of dead blades, so it never becomes free.
+ */
+const BOMB_TIME_BUDGET_SEC = 12;
 /** Seconds a juice splat survives. It fades out at the end — see drawSplats. */
 const SPLAT_DECAY = 0.4;
 /** Hard ceiling on splats. Paper has to stay the majority of the screen. */
@@ -95,6 +120,164 @@ const MAX_SPLATS = 16;
  */
 const FRUIT_COLORS = [COLORS.red, COLORS.yellow, COLORS.green, COLORS.blue] as const;
 
+/**
+ * SOLO: keep the locked body while its TORSO is still at least this fraction of
+ * the nearest body's. See `inPlay`.
+ *
+ * TORSO HEIGHT, NOT BOUNDING-BOX AREA. `scale.unit` is the only measurement
+ * here that means "how far away is this person"; a bbox also grows when the
+ * arms come out, so ranking by area hands a solo round to whoever is WAVING
+ * HARDEST rather than to whoever is nearest. MEASURED, two identical bodies at
+ * the same distance, one motionless and one swiping (180 frames, realistic
+ * noise):
+ *
+ *                       scale.unit          bbox area
+ *   motionless player   0.2158              0.0998
+ *   swiping bystander   0.2156              0.2157   <- 2.16x, same distance
+ *
+ * The first version of this lock used `area` and therefore picked the
+ * bystander every time, which is worse than the bug it was fixing.
+ *
+ * `unit` is also far quieter: ±0.9% over the same 180 frames. A bystander
+ * standing one step further back measures 0.76 of the player. 0.9 sits well
+ * clear of the noise and well clear of a genuinely nearer body, so the lock
+ * only ever moves when someone has really taken the front.
+ */
+const SOLO_LOCK_KEEP = 0.9;
+
+/**
+ * Wrists must be at least this far apart (torso units) for the left/right
+ * exchange test to mean anything — with the hands together the question is
+ * undefined and the answer does not matter. Matches `BladeTracker`'s own gate.
+ */
+const SWAP_APART_TORSOS = 0.35;
+
+/**
+ * How far the apparent wrist displacement must SPIKE above this body's own
+ * recent displacement before an exchange is believed.
+ *
+ * WITHOUT THIS THE TEST FIRES ON ORDINARY SWIPING. Both fists sweeping in
+ * antiphase cross each other twice per cycle, and on the frame where the
+ * separation happens to be about twice the per-frame step, each wrist lands
+ * almost exactly where the other one was — which is algebraically
+ * indistinguishable from a label swap. MEASURED against the simulator's own
+ * latch flag as ground truth, 1200 frames per row:
+ *
+ *   condition          real flips   exchange test fires   of those, FALSE
+ *   idle                    10               10                 0
+ *   pump 1.4Hz              10               10                 0
+ *   pump 4.5Hz               2                2                 0
+ *   swipe 2.2Hz              3               27                25
+ *   hostile idle             7                7                 0
+ *   hostile swipe 2.2Hz      9               28                22
+ *
+ * 47 false positives, all of them during exactly the motion this game is made
+ * of — and each one costs a quarter-second of blade. So the test also has to
+ * see the displacement SPIKE: a real exchange makes both wrists appear to jump
+ * the whole distance between them at once, where a crossing sweep is just the
+ * speed they were already travelling at.
+ *
+ *   stay / recent-baseline    false positives      real exchanges
+ *   idle                      -                    116 - 223
+ *   pump 1.4Hz                -                    10.8 - 22.6
+ *   swipe 2.2Hz               1.09 - 1.77          10.2, 10.9  (one at 0.46)
+ *   hostile swipe             max 2.02             8.2 - 11.7  (three at ~2)
+ *
+ * 3.0 is an order of magnitude clear of every false positive measured (max
+ * 2.02) and keeps 37 of the 41 real exchanges. The four it gives up all happen
+ * mid-swipe, where the player is already swinging and a phantom sweep is worth
+ * about what their own swing was worth anyway — the exploit that matters is
+ * the motionless one, and there detection is 17 of 17.
+ */
+const SWAP_STAY_SPIKE = 3;
+
+/**
+ * Seconds of blade output discarded after MediaPipe exchanges this body's
+ * left/right labels.
+ *
+ * THE BUG THIS EXISTS FOR, AND WHY IT IS NOT FIXED WHERE IT BELONGS.
+ *
+ * `BladeTracker.labelsExchanged` already tries to catch a label swap — but it
+ * compares `player.landmarks`, which is the ONE EURO FILTERED array. On the
+ * frame the labels exchange the filtered wrist has barely moved, so the test
+ * can never fire, and the blade instead GLIDES across the body as the filter
+ * catches up. MEASURED, one swap event, 60fps, `body` preset:
+ *
+ *   frame   raw x   filtered x   blade speed (screen-heights/s)   reacquired
+ *   58      0.557   0.557        0.007                            no
+ *   59      0.443   0.542        1.540                            no      <- swap
+ *   60      0.443   0.530        1.314                            no
+ *   ...
+ *   71      0.443   0.467        0.292                            no
+ *   72      0.444   0.464        0.254                            no      <- inert
+ *
+ * Thirteen consecutive frames (0.22s) of a fast, "genuine", never-reacquired
+ * blade sweeping a cutting segment clean across the player's body. Over a
+ * 15s round that scored 45 POINTS FROM A MOTIONLESS PLAYER with nothing but
+ * `limbSwap` enabled (0/5/10/15/45 across trials), and 73-239 in Rhythm Punch.
+ * `labelsExchanged` fired 0 times in 900 such frames.
+ *
+ * The real fix is six lines in core/blades.ts (read `player.raw` there, and
+ * hold the reacquire until the filter has settled) and is reported to the lead.
+ * This is the same test done from the game, on RAW landmarks, where it works.
+ * It costs nothing once blades.ts is fixed — it simply stops firing.
+ *
+ * 0.25s covers the measured 0.22s settle with a frame to spare. One Euro's
+ * convergence is set by its time constant (~0.16s at the `body` preset's 1Hz
+ * floor), not by the frame rate, so this holds at 30fps too.
+ */
+const SWAP_SETTLE_SEC = 0.25;
+
+/**
+ * Milliseconds a slot's blades are dead after that slot eats a bomb.
+ *
+ * THE PENALTY THAT IS ALWAYS PAID, and in versus the only one. The clock is
+ * SHARED between the two halves, so `timeLeft -= 8` took eight seconds of
+ * scoring away from the opponent for a mistake they did not make — measured
+ * over full 2P rounds, three bombs on one side cut 24s off a 45s round for
+ * both players. Confirmed fixed: 2 bombs on slot 0 now cost the shared clock
+ * 0.0s.
+ *
+ * It is also what stops a bomb becoming free in solo once BOMB_TIME_BUDGET_SEC
+ * is spent.
+ *
+ * 1.2s is long enough to be visibly a penalty and to read from the queue, and
+ * short enough that it is the joke rather than the end of the turn — roughly
+ * one and a half fruit arcs at the end-of-round spawn rate.
+ */
+const BOMB_STUN_MS = 1200;
+
+/**
+ * Half the width of the band fruit is thrown through, in TORSO UNITS either
+ * side of the player's own body centre.
+ *
+ * FRUIT USED TO BE THROWN AT A FRACTION OF THE SLOT RECT, which is a piece of
+ * screen and has nothing to do with where a person's arms can go. Nobody stands
+ * dead centre of their half — and in versus, two people politely leaving each
+ * other room both stand off-centre, in the SAME direction relative to their own
+ * half.
+ *
+ * MEASURED, 2P, both bodies pushed off-centre by the simulator's `edgeBias`
+ * (6 rounds each, 10s, identical play on both sides):
+ *
+ *   spawn relative to      fruit sliced, slot 0   slot 1
+ *   the slot rect          13.0                   6.6     <- 2x, same input
+ *   the slot rect, edgeBias disabled
+ *                          11.2                   11.3
+ *
+ * So the 2x gap was entirely "one player happened to be standing nearer the
+ * middle of their own half". That is not a skill difference, and in a versus
+ * game shown side by side on a TV it is the only thing the crowd is judging.
+ *
+ * 1.45 torso units is between a comfortable reach (~1.25, the figure Rhythm
+ * Punch uses for its outer targets) and a full stretch (shoulder half-width
+ * ~0.5 plus an arm of ~1.07 = ~1.57, from the T-pose note in core/gestures.ts).
+ * Fruit Ninja is the one game on the roster that WANTS a big swing, so it sits
+ * at the top of the comfortable range rather than the middle of it — and the
+ * fruit then arcs and drifts outward from there anyway.
+ */
+const REACH_HALF_TORSOS = 1.45;
+
 export class FruitNinjaGame extends GameBase {
   private blades = new BladeTracker();
   private bodies: Body[] = [];
@@ -108,6 +291,25 @@ export class FruitNinjaGame extends GameBase {
 
   private spawnTimer = 0;
   private seed = 1;
+  private stunUntil = [0, 0];
+  /** Seconds this round has already lost to bombs. See BOMB_TIME_BUDGET_SEC. */
+  private bombSeconds = 0;
+  /** Screen-space body centre and torso size per slot. See REACH_HALF_TORSOS. */
+  private bodyX: Array<number | null> = [null, null];
+  private bodyUnit = [0, 0];
+
+  /** Tracker id of the body this solo round belongs to. See `inPlay`. */
+  private soloLock = -1;
+  /**
+   * Previous frame's RAW wrists plus this body's recent per-frame displacement
+   * baseline, per tracker id. `step < 0` means "not seeded yet".
+   */
+  private rawWrists = new Map<
+    number,
+    { lx: number; ly: number; rx: number; ry: number; step: number }
+  >();
+  /** `fc.now` until which this body's blades are fiction. See `bladeBodies`. */
+  private swapUntil = new Map<number, number>();
 
   constructor() {
     super({
@@ -132,6 +334,16 @@ export class FruitNinjaGame extends GameBase {
     this.bombsHit = [0, 0];
     this.spawnTimer = 0.6;
     this.seed = 1;
+    this.stunUntil = [0, 0];
+    this.bombSeconds = 0;
+    this.bodyX = [null, null];
+    this.bodyUnit = [0, 0];
+    // Per-round, not per-mount: a second round must not inherit the first
+    // round's locked body, its stale raw wrists or a stun that never expired.
+    // Latched state surviving `onStart` is this codebase's recurring bug class.
+    this.soloLock = -1;
+    this.rawWrists.clear();
+    this.swapUntil.clear();
     this.blades.reset();
   }
 
@@ -143,13 +355,149 @@ export class FruitNinjaGame extends GameBase {
     return 'SCORE';
   }
 
+  /* ---------------- whose body is this? ---------------- */
+
+  /**
+   * THE BODIES A SOLO ROUND IS ALLOWED TO BE PLAYED BY: exactly one.
+   *
+   * `playerCount` is frozen when the round starts, but the TRACKER keeps
+   * running at `maxPlayers` — so a friend leaning into frame mid-round is a
+   * second confirmed `TrackedPlayer` in a round that still believes it is solo.
+   * Every one of the four games on this track then read input from BOTH bodies.
+   *
+   * MEASURED, player standing completely still while a bystander plays for 10s:
+   *   Fruit Ninja 45, Balloon Pop 42, Rhythm Punch 72, 67 Speed 178.
+   *
+   * 67 Speed is the worst of those because both bodies drove the same
+   * `RepCounter`: its solo control scored 91 for the same play, so the
+   * interleaving nearly DOUBLED the count. At a club fair somebody standing
+   * behind the player waving is a certainty, and "my score went up while I was
+   * standing still" is indistinguishable from a broken game.
+   *
+   * Locking to the NEAREST body — biggest torso — is the same rule the
+   * crowd-rejection gate is built on: nearest to the camera is the person
+   * actually playing. See SOLO_LOCK_KEEP for why it is torso and not bbox.
+   */
+  private inPlay(players: TrackedPlayer[]): TrackedPlayer[] {
+    if (players.length <= 1) {
+      this.soloLock = players[0]?.id ?? -1;
+      return players;
+    }
+
+    // ONE BODY PER SLOT, the NEAREST one — biggest torso, not biggest bbox.
+    // See SOLO_LOCK_KEEP. In a solo round every body maps to slot 0, so this
+    // reduces to "the player, not the person behind them"; in versus it also
+    // covers the transient where the tracker has two bodies reporting the same
+    // slot, which credits one half's input to both.
+    const best = new Map<number, TrackedPlayer>();
+    for (const p of players) {
+      const slot = this.slotOf(p);
+      const held = best.get(slot);
+      if (!held || p.scale.unit > held.scale.unit) best.set(slot, p);
+    }
+
+    // Hysteresis on the solo lock, for the same reason every gate in
+    // core/gestures.ts has one: two people at the same distance measure within
+    // a percent of each other and a bare comparison hands the round back and
+    // forth 30 times a second, which reads as the game ignoring you. Ties go to
+    // whoever the tracker saw first, which is the person who started the round.
+    if (this.playerCount === 1) {
+      const top = best.get(0)!;
+      const held = players.find((p) => p.id === this.soloLock);
+      if (held && held.scale.unit >= top.scale.unit * SOLO_LOCK_KEEP) best.set(0, held);
+      this.soloLock = best.get(0)!.id;
+    }
+
+    return [...best.values()];
+  }
+
+  /**
+   * Of those, the ones whose blades are not currently fiction.
+   *
+   * See SWAP_SETTLE_SEC. A body dropped here simply is not passed to
+   * `BladeTracker.update`, which is the supported way to say "this hand is not
+   * observable right now": its blades go invisible, so nothing scores off them
+   * and nothing draws them in a place the hand is not, and when the body comes
+   * back the tracker's own `wasHidden` path snaps cleanly instead of sweeping
+   * the gap.
+   */
+  private bladeBodies(players: TrackedPlayer[], now: number): TrackedPlayer[] {
+    const live = new Set<number>();
+    const out: TrackedPlayer[] = [];
+
+    for (const p of players) {
+      live.add(p.id);
+      const lw = p.raw[POSE.LEFT_WRIST];
+      const rw = p.raw[POSE.RIGHT_WRIST];
+      const unit = p.scale.unit;
+
+      if (lw && rw && unit > 0) {
+        const prev = this.rawWrists.get(p.id);
+        let step = prev?.step ?? -1;
+
+        if (prev) {
+          // Isotropic: landmark x is normalised by frame WIDTH and y by HEIGHT,
+          // so x has to be scaled by the aspect before the two can be combined
+          // or compared against a torso height. (ARCHITECTURE.md; the same
+          // correction LaneDetector and TPoseDetector needed.)
+          const a = p.scale.aspect;
+          const d = (ax: number, ay: number, bx: number, by: number): number =>
+            Math.hypot((ax - bx) * a, ay - by) / unit;
+
+          const apart = d(prev.lx, prev.ly, prev.rx, prev.ry);
+          const stay = d(lw.x, lw.y, prev.lx, prev.ly) + d(rw.x, rw.y, prev.rx, prev.ry);
+          const swap = d(lw.x, lw.y, prev.rx, prev.ry) + d(rw.x, rw.y, prev.lx, prev.ly);
+
+          const exchanged =
+            step >= 0 &&
+            apart >= SWAP_APART_TORSOS &&
+            swap < stay * 0.5 &&
+            stay >= Math.max(1e-3, step) * SWAP_STAY_SPIKE;
+
+          if (exchanged) this.swapUntil.set(p.id, now + SWAP_SETTLE_SEC * 1000);
+
+          // The baseline deliberately EXCLUDES the spike frame. Folding a swap
+          // into it lifts it by an order of magnitude, and the next swap a
+          // second later would then be measured against the last one and go
+          // unnoticed. ~10-frame time constant: long enough to be a baseline,
+          // short enough to follow a player winding up.
+          if (step < 0) step = stay;
+          else if (!exchanged) step = step * 0.9 + stay * 0.1;
+        }
+
+        this.rawWrists.set(p.id, { lx: lw.x, ly: lw.y, rx: rw.x, ry: rw.y, step });
+      }
+
+      if (now >= (this.swapUntil.get(p.id) ?? 0)) out.push(p);
+    }
+
+    // A kiosk runs for hours; ids never repeat, so these maps would grow for
+    // the whole event.
+    for (const id of this.rawWrists.keys()) {
+      if (!live.has(id)) {
+        this.rawWrists.delete(id);
+        this.swapUntil.delete(id);
+      }
+    }
+
+    return out;
+  }
+
+  /** The slot a blade or body scores into. Solo is ALWAYS slot 0 — see below. */
+  private slotOf(of: { slot: number }): number {
+    return this.playerCount > 1 ? Math.max(0, Math.min(1, of.slot)) : 0;
+  }
+
   /* ---------------- simulation ---------------- */
 
   protected onTick(fc: FrameContext, players: TrackedPlayer[], dt: number): void {
     if (!this.proj) return;
 
+    const mine = this.inPlay(players);
     const project = (nx: number, ny: number) => this.proj!.point({ x: nx, y: ny });
-    const blades = this.blades.update(players, project, dt, fc.now);
+    const blades = this.blades.update(this.bladeBodies(mine, fc.now), project, dt, fc.now);
+
+    this.updateAnchors(mine);
 
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0) {
@@ -171,6 +519,63 @@ export class FruitNinjaGame extends GameBase {
     }
   }
 
+  /**
+   * Where each slot's player is standing, smoothed, in screen pixels.
+   *
+   * Heavily eased for the same reason Rhythm Punch eases its lane anchor: a
+   * throw line that twitches with tracking noise scatters fruit unpredictably,
+   * and the player has no way to tell that from bad luck.
+   */
+  private updateAnchors(players: readonly TrackedPlayer[]): void {
+    if (!this.proj) return;
+    for (const p of players) {
+      const ls = p.landmarks[POSE.LEFT_SHOULDER];
+      const rs = p.landmarks[POSE.RIGHT_SHOULDER];
+      if (!ls || !rs || !p.scale.valid) continue;
+
+      const slot = this.slotOf(p);
+      const cx = this.proj.x((ls.x + rs.x) / 2);
+      const unit = this.proj.len(p.scale.unit);
+
+      const heldX = this.bodyX[slot] ?? null;
+      this.bodyX[slot] = heldX === null ? cx : heldX + (cx - heldX) * 0.1;
+      const heldU = this.bodyUnit[slot] || unit;
+      this.bodyUnit[slot] = heldU + (unit - heldU) * 0.1;
+    }
+  }
+
+  /**
+   * The horizontal band this slot's fruit is thrown through, in screen pixels.
+   * Centred on the body when one is anchored, always clamped inside the slot.
+   * See REACH_HALF_TORSOS.
+   */
+  private reachBand(slot: number, rect: SlotRect, radius: number): { min: number; max: number } {
+    const lo = rect.x + radius;
+    const hi = rect.x + rect.width - radius;
+
+    const cx = this.bodyX[slot] ?? null;
+    const unit = this.bodyUnit[slot] ?? 0;
+    if (cx === null || unit <= 0) {
+      return { min: rect.x + rect.width * 0.18, max: rect.x + rect.width * 0.82 };
+    }
+
+    const half = unit * REACH_HALF_TORSOS;
+    // Shift rather than shrink at the edge of a slot, so a player standing off
+    // to one side still gets a full spread — all of it on the side they can
+    // reach.
+    let min = cx - half;
+    let max = cx + half;
+    if (min < lo) {
+      max = Math.min(hi, max + (lo - min));
+      min = lo;
+    }
+    if (max > hi) {
+      min = Math.max(lo, min - (max - hi));
+      max = hi;
+    }
+    return { min: Math.min(min, max), max: Math.max(min, max) };
+  }
+
   private spawn(fc: FrameContext): void {
     const { v } = fc;
     for (let slot = 0; slot < this.playerCount; slot++) {
@@ -186,7 +591,10 @@ export class FruitNinjaGame extends GameBase {
         const isBomb = Math.random() < bombChance;
         const radius = v.height * (isBomb ? 0.045 : 0.05 + Math.random() * 0.022);
 
-        const x = rect.x + rect.width * (0.18 + Math.random() * 0.64);
+        // Thrown through the PLAYER's reach, not through a fraction of the
+        // slot — see REACH_HALF_TORSOS.
+        const band = this.reachBand(slot, rect, radius);
+        const x = band.min + Math.random() * (band.max - band.min);
         const y = v.height + radius * 2;
 
         // Aim the arc so the apex lands in the upper-middle of the slot: that
@@ -194,8 +602,12 @@ export class FruitNinjaGame extends GameBase {
         const apex = v.height * (0.2 + Math.random() * 0.16);
         const rise = y - apex;
         const vy = -Math.sqrt(2 * GRAVITY * v.height * rise) / v.height;
-        const towardCentre = (rect.centerX - x) / rect.width;
-        const vx = (towardCentre * 0.45 + (Math.random() - 0.5) * 0.28) * v.height * 0.55;
+        // Drift back toward the player, not toward the middle of their half.
+        // The two are the same thing only for someone standing dead centre of
+        // their slot, which nobody does.
+        const home = this.bodyX[slot] ?? rect.centerX;
+        const towardHome = (home - x) / rect.width;
+        const vx = (towardHome * 0.45 + (Math.random() - 0.5) * 0.28) * v.height * 0.55;
 
         this.bodies.push({
           kind: isBomb ? 'bomb' : 'fruit',
@@ -259,7 +671,11 @@ export class FruitNinjaGame extends GameBase {
       //
       // Same root cause as the Balloon Pop arm-line bug: a solo game must not
       // index anything by a slot that can move underneath it.
-      const slot = this.playerCount > 1 ? blade.slot : 0;
+      const slot = this.slotOf(blade);
+
+      // Blades are dead for a moment after this slot eats a bomb. See
+      // BOMB_STUN_MS — the versus penalty, which costs the opponent nothing.
+      if (fc.now < (this.stunUntil[slot] ?? 0)) continue;
 
       // Everything this blade cut in THIS frame — a single fast swipe through
       // three fruit must register as a 3-chain, not three separate slices.
@@ -269,7 +685,7 @@ export class FruitNinjaGame extends GameBase {
         const b = this.bodies[i]!;
         if (b.isHalf) continue;
         // In versus, you can only cut your own half's fruit.
-        if (this.playerCount > 1 && b.slot !== blade.slot) continue;
+        if (this.playerCount > 1 && b.slot !== slot) continue;
 
         const world = transformPolygon(b.poly, b.x, b.y, b.angle);
         const p1 = { x: blade.px, y: blade.py };
@@ -357,13 +773,31 @@ export class FruitNinjaGame extends GameBase {
    * biggest laugh in the game rather than the end of it.
    *
    * PLAN.md §11: "failure should be funny, never punishing."
+   *
+   * IN VERSUS THE CLOCK IS NOT YOURS TO SPEND. `timeLeft` is one shared round
+   * clock, so the time penalty was charged to BOTH players — measured, three
+   * bombs on one side took 24s off a 45s round for the opponent as well, for a
+   * mistake they did not make. There the penalty is a per-slot blade stun
+   * instead: same joke, same lost combo, and it lands only on the person who
+   * swung at a bomb. See BOMB_STUN_MS.
    */
   private detonate(fc: FrameContext, b: Body, slot: number): void {
     const { v } = fc;
     this.bombsHit[slot] = (this.bombsHit[slot] ?? 0) + 1;
     this.combo[slot] = 0;
 
-    this.timeLeft = Math.max(0.6, this.timeLeft - BOMB_TIME_PENALTY);
+    // Always. In versus it is the whole penalty; in solo it is what keeps a
+    // bomb costing something after the clock budget is gone.
+    this.stunUntil[slot] = fc.now + BOMB_STUN_MS;
+
+    const spend =
+      this.playerCount > 1
+        ? 0
+        : Math.min(BOMB_TIME_PENALTY, BOMB_TIME_BUDGET_SEC - this.bombSeconds);
+    if (spend > 0) {
+      this.bombSeconds += spend;
+      this.timeLeft = Math.max(0.6, this.timeLeft - spend);
+    }
 
     audio.play('bomb');
     this.juice.shake(0.75);
@@ -398,7 +832,14 @@ export class FruitNinjaGame extends GameBase {
       drag: 0.9,
     });
 
-    this.popups.spawn(`-${BOMB_TIME_PENALTY}s`, b.x, b.y, COLORS.red, vh(v, 6), 1.2);
+    this.popups.spawn(
+      spend > 0 ? `-${Math.round(spend)}s` : '<BLADES OUT!>',
+      b.x,
+      b.y,
+      COLORS.red,
+      vh(v, spend > 0 ? 6 : 4.4),
+      1.2
+    );
   }
 
   private awardSlice(fc: FrameContext, slot: number, fruit: Body[], blade: Blade): void {
@@ -444,9 +885,26 @@ export class FruitNinjaGame extends GameBase {
     // Every popup is ink. PopupLayer still blurs its own fill (engine/juice.ts,
     // not ours), and flat yellow type on white paper is the one brand pairing
     // that disappears at three metres.
+    // THE CHAIN IS THE THING PEOPLE CAME FOR. Playtest: "they love combo
+    // chains." So the ESCALATION is what gets the budget — every extra fruit in
+    // one swipe has to look and sound bigger than the last, from the back of
+    // the queue, without anyone reading a number.
+    //
+    // The SCORING IS DELIBERATELY UNTOUCHED. It was measured and argued for
+    // above, the leaderboard is live across two days, and there is nothing
+    // wrong with it — what was missing is that a 2-chain and a 5-chain got the
+    // same word, the same size and the same flash.
     if (chain > 1) {
-      this.popups.spawn(`<${chain} CHAIN!>`, cx, cy - vh(v, 4), COLORS.ink, vh(v, 5), 1.1);
-      this.juice.flash(COLORS.yellow, 0.16, 6);
+      // A word beats a number at 3m: you read "TRIPLE" in one glance, where
+      // "3 CHAIN" is two tokens and a unit.
+      const CHAIN_WORDS = ['', '', '<DOUBLE!>', '<TRIPLE!>', '<QUAD!>', '<FIVE!>'];
+      const word = CHAIN_WORDS[chain] ?? `<${chain} CHAIN!>`;
+      const big = Math.min(chain, 6);
+      this.popups.spawn(word, cx, cy - vh(v, 4), COLORS.ink, vh(v, 4.2 + big * 0.7), 1.1 + big * 0.06);
+      this.juice.flash(COLORS.yellow, 0.1 + big * 0.05, 6);
+      // Past a triple it stops being a slice and becomes an event: confetti in
+      // all four brand colours, the app's own "that was special" gesture.
+      if (chain >= 3) this.celebrateAt(cx, cy);
     }
     if (combo >= 3) {
       this.popups.spawn(`x${combo}`, blade.x, blade.y - vh(v, 3), COLORS.ink, vh(v, 3.6));
@@ -627,8 +1085,24 @@ export class FruitNinjaGame extends GameBase {
     const { ctx, v } = fc;
     const combo = this.combo[slot] ?? 0;
     const sliced = this.sliced[slot] ?? 0;
+    const stunned = fc.now < (this.stunUntil[slot] ?? 0);
 
-    if (combo >= 2) {
+    // A dead blade with no explanation reads as a broken game, which is the one
+    // thing a stall cannot afford. Red, where the combo pill would be, so the
+    // player is already looking at it.
+    if (stunned) {
+      this.numberPill(
+        ctx,
+        v,
+        rect.centerX,
+        this.hudBottom(v) + vh(v, 3.2),
+        'BLADES OUT',
+        vh(v, 4.6),
+        COLORS.red
+      );
+    }
+
+    if (!stunned && combo >= 2) {
       // A yellow action pill, straight — it carries a number, so DESIGN.md
       // says it does not tilt. The scale pulse is motion, not a colour change,
       // and it is the only thing left of the old blurred yellow glow.

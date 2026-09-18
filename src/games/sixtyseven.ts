@@ -21,7 +21,8 @@
  * which was three colours and two gradients in one object.
  */
 
-import { RepCounter } from '../core/gestures';
+import { RepCounter, DEFAULT_REP_TUNABLES } from '../core/gestures';
+import { POSE } from '../core/types';
 import type { TrackedPlayer } from '../core/tracker';
 import { GameBase, type SlotRect } from './base';
 import { BURST } from '../engine/particles';
@@ -39,13 +40,90 @@ import type { Viewport } from '../engine/draw';
 import { COLORS, PLAYER_COLORS, FONTS, SHADOW, STROKE, TRACK, WEIGHT } from '../shell/theme';
 import { GAME_COLORS } from '../meta/games';
 import { leaderboard } from '../meta/leaderboard';
+import { tunables } from '../meta/tunables';
 import type { FrameContext } from '../shell/screen';
 
 /** Fallback bar target before anyone has set a record. */
 const DEFAULT_TARGET = 55;
 
+/**
+ * WHERE THE REP GATE SITS ON THE BODY. Reported from a human playtest as
+ * "they had to 67 at a certain angle".
+ *
+ * The first suspicion was anisotropy — x normalised by frame WIDTH against an
+ * isotropic torso unit, the bug already found in three other detectors. IT IS
+ * NOT THAT. `ArmPump` compares only Y deltas against `scale.unit`, and
+ * `scale.unit` is torso HEIGHT, which a yaw does not change. Driving a rigid
+ * yawed body through the real tracker and the real counter (tests/sixtyseven
+ * .test.ts, 4Hz for 5s):
+ *
+ *   body yaw      0deg   30deg   45deg   60deg   75deg
+ *   reps            39      39      39      39      39
+ *
+ * Two things ARE angle-dependent, and neither is a coordinate bug:
+ *
+ * 1. HOW HIGH YOU HAVE TO LIFT. The old gate needed the wrist 0.12 torso
+ *    ABOVE the shoulder, and the cliff was vertical:
+ *
+ *      wrist peak (torso above shoulder)   -0.05   0.00   0.05   0.10   0.15
+ *      reps in 5s, old gate                    0      0      0      0     39
+ *      reps in 5s, this gate                   0      0     40     39     39
+ *
+ *    Five percent of a torso — about 2.5cm — between "the game is broken" and
+ *    a perfect run. A player whose pump tops out at their chin got nothing,
+ *    found one arm angle that worked, and reported exactly that.
+ *
+ * 2. OCCLUSION. Turned far enough, MediaPipe's confidence in the far arm falls
+ *    under the 0.4 visibility gate and that arm stops counting, halving the
+ *    score with no explanation (39 -> 19 reps, measured). No threshold can fix
+ *    that, so `drawArmIndicators` now shows it instead — see `armSeen`.
+ *
+ * THE FIX KEEPS THE ANTI-CHEAT EXACTLY AS STRONG. PLAN.md §3 wants the wrist
+ * to cross above the shoulder, and it wants "tiny twitchy hands" rejected. The
+ * thing that rejects twitching is the SWING the wrist must travel, which is
+ * `upEnter + downEnter` — 0.18 torso before and 0.18 torso after. The whole
+ * band simply slides 0.08 torso (~4cm) down the body, so a modest pump crosses
+ * it and a twitch still does not:
+ *
+ *   wrist peak / trough, torso rel. shoulder      old   new
+ *   +0.05 / -0.15   (a small but real pump)         0    39
+ *   +0.05 / -0.30                                   0    39
+ *   +0.10 / -0.40                                   0    39
+ *   +0.02 / -0.02   (a twitch on the shoulder)      0     0
+ *   +0.03 / -0.12   (swing 0.15, under the band)    0     0
+ *    0.00 / -0.50   (big swing, never above)        0     0
+ *   -0.05 / -0.60   (ditto, lower)                  0     0
+ *
+ * Live on the operator console, because the right numbers belong to the bodies
+ * that turn up on the day and this is the detector a marshal is most likely to
+ * have to reach for.
+ */
+const REP_GATE = {
+  /** Torso units the wrist must rise ABOVE the shoulder to arm a rep. */
+  upEnter: 0.04,
+  upExit: -0.04,
+  /** Torso units the wrist must drop BELOW the shoulder to re-arm. */
+  downEnter: 0.14,
+  downExit: 0.08,
+  minRepIntervalMs: DEFAULT_REP_TUNABLES.minRepIntervalMs,
+} as const;
+
+/**
+ * Seconds an arm may be unseen before the HUD says so.
+ *
+ * Long enough that an ordinary blur between frames is not a warning, short
+ * enough that a player who has turned too far finds out within one pump.
+ */
+const ARM_LOST_SEC = 0.8;
+
+/** Visibility below which a landmark does not count. Matches core/gestures.ts. */
+const MIN_VISIBILITY = 0.4;
+
 /** Reps per second above which the rate readout becomes a yellow action pill. */
 const FAST_RATE = 4;
+
+/** See the identical constant and its derivation in games/fruitninja.ts. */
+const SOLO_LOCK_KEEP = 0.9;
 
 export class SixtySevenGame extends GameBase {
   private counters: RepCounter[] = [new RepCounter(), new RepCounter()];
@@ -53,6 +131,15 @@ export class SixtySevenGame extends GameBase {
   /** Per-slot bar overshoot, for the springy fill. */
   private barPulse = [0, 0];
   private lastRepAt = [0, 0];
+  /** Tracker id of the body this solo round belongs to. See `inPlay`. */
+  private soloLock = -1;
+  /** The bodies `onTick` accepted, so `onRender` draws the same arms. */
+  private shown: TrackedPlayer[] = [];
+  /** `fc.now` each arm was last actually visible, per slot. See ARM_LOST_SEC. */
+  private armSeenAt = [
+    { left: 0, right: 0 },
+    { left: 0, right: 0 },
+  ];
 
   constructor() {
     super({
@@ -68,9 +155,28 @@ export class SixtySevenGame extends GameBase {
   }
 
   protected onStart(): void {
-    for (const c of this.counters) c.reset();
+    // Re-read every round, so a marshal moving a slider between plays takes
+    // effect on the next turn rather than on the next reload. See REP_GATE.
+    const gate = {
+      upEnter: tunables.get('sixtyseven.upEnter', REP_GATE.upEnter),
+      upExit: tunables.get('sixtyseven.upExit', REP_GATE.upExit),
+      downEnter: tunables.get('sixtyseven.downEnter', REP_GATE.downEnter),
+      downExit: tunables.get('sixtyseven.downExit', REP_GATE.downExit),
+      minRepIntervalMs: REP_GATE.minRepIntervalMs,
+    };
+    for (const c of this.counters) {
+      c.reset();
+      c.setTunables(gate);
+    }
     this.barPulse = [0, 0];
     this.lastRepAt = [0, 0];
+    // Per-round: a second round must not inherit the first round's locked body.
+    this.soloLock = -1;
+    this.shown = [];
+    this.armSeenAt = [
+      { left: 0, right: 0 },
+      { left: 0, right: 0 },
+    ];
 
     const best = leaderboard.getBest('sixtyseven');
     this.target = best ? Math.max(best.score, 10) : DEFAULT_TARGET;
@@ -88,11 +194,117 @@ export class SixtySevenGame extends GameBase {
     return 'REPS';
   }
 
-  protected onTick(fc: FrameContext, players: TrackedPlayer[], dt: number): void {
+  /** The slot a body counts into. Solo is always slot 0. */
+  private slotOf(of: { slot: number }): number {
+    return this.playerCount > 1 ? Math.max(0, Math.min(1, of.slot)) : 0;
+  }
+
+  /**
+   * Can the camera see all three landmarks this arm's rep gate needs?
+   *
+   * RAW, and the same three landmarks and the same threshold `ArmPump` itself
+   * tests — the indicator exists to report on the counter, so anything it
+   * measures differently is worse than not measuring it at all. (That is the
+   * mistake the `armUp` note in core/gestures.ts already documents.)
+   */
+  private armVisible(p: TrackedPlayer, side: 'left' | 'right'): boolean {
+    const idx =
+      side === 'left'
+        ? [POSE.LEFT_WRIST, POSE.LEFT_SHOULDER, POSE.LEFT_ELBOW]
+        : [POSE.RIGHT_WRIST, POSE.RIGHT_SHOULDER, POSE.RIGHT_ELBOW];
+    for (const i of idx) {
+      const lm = p.raw[i];
+      if (!lm || lm.visibility < MIN_VISIBILITY) return false;
+    }
+    return true;
+  }
+
+  /** Has this arm been out of sight long enough to be worth saying so? */
+  private armLost(slot: number, side: 'left' | 'right', now: number): boolean {
+    const seen = this.armSeenAt[slot];
+    if (!seen) return false;
+    const at = seen[side];
+    return at > 0 && now - at > ARM_LOST_SEC * 1000;
+  }
+
+  /**
+   * ONE BODY PER COUNTER — and in a solo round, that means one body in total.
+   *
+   * `playerCount` freezes when the round starts; the tracker keeps running at
+   * `maxPlayers`. So a friend leaning into frame mid-round became a second
+   * confirmed `TrackedPlayer` that ALSO mapped to slot 0, and `counters[0]` was
+   * then fed two different bodies per frame — an `ArmPump` state machine
+   * receiving alternating samples from an oscillating wrist and a still one,
+   * which manufactures transitions that neither body made.
+   *
+   * MEASURED, 10s of pumping at 4.5Hz:
+   *   one body, solo                                    91 reps   (= 9.0/s, exact)
+   *   player MOTIONLESS + a bystander pumping          178 reps
+   *   player pumping + a motionless bystander          194 reps   (vs 135 expected)
+   *
+   * So a bystander could nearly double your score, or score for you while you
+   * stood still. At a club fair somebody standing behind the player is not an
+   * edge case, it is the default.
+   *
+   * Biggest TORSO wins — "nearest to the camera", the same measurement the
+   * tracker's own bystander gate uses. Deliberately not bounding-box area: a
+   * bbox also grows when the arms come out, so ranking by it hands the round to
+   * whoever is waving hardest. Measured numbers in games/fruitninja.ts.
+   */
+  private inPlay(players: TrackedPlayer[]): TrackedPlayer[] {
+    if (players.length <= 1) {
+      this.soloLock = players[0]?.id ?? -1;
+      return players;
+    }
+    const best = new Map<number, TrackedPlayer>();
     for (const p of players) {
-      const slot = this.playerCount > 1 ? Math.max(0, Math.min(1, p.slot)) : 0;
+      const slot = this.slotOf(p);
+      const held = best.get(slot);
+      if (!held || p.scale.unit > held.scale.unit) best.set(slot, p);
+    }
+    // Hysteresis: two bodies at the same distance measure within a few percent
+    // of each other, and a bare comparison would hand the round back and forth
+    // 30 times a second.
+    if (this.playerCount === 1) {
+      const top = best.get(0)!;
+      const held = players.find((p) => p.id === this.soloLock);
+      if (held && held.scale.unit >= top.scale.unit * SOLO_LOCK_KEEP) best.set(0, held);
+      this.soloLock = best.get(0)!.id;
+    }
+    return [...best.values()];
+  }
+
+  protected onTick(fc: FrameContext, players: TrackedPlayer[], dt: number): void {
+    // The springy bar overshoot decays on the CLOCK, not on how many bodies are
+    // in frame. It used to sit inside the per-player loop, so a slot whose
+    // player had stepped out kept its overshoot frozen on screen for the rest
+    // of the round.
+    for (let slot = 0; slot < this.counters.length; slot++) {
+      this.barPulse[slot] = Math.max(0, (this.barPulse[slot] ?? 0) - dt * 5);
+    }
+
+    this.shown = this.inPlay(players);
+
+    for (const p of this.shown) {
+      const slot = this.slotOf(p);
       const counter = this.counters[slot];
       if (!counter) continue;
+
+      // WHICH ARMS THE CAMERA CAN ACTUALLY SEE. A turned player loses the far
+      // arm below the visibility gate and silently scores half — measured at
+      // 39 reps down to 19. Nothing on screen said so, which is how it became
+      // "you have to 67 at a certain angle".
+      const seen = this.armSeenAt[slot];
+      if (seen) {
+        // Seed both clocks from the first frame this body is counted, NOT from
+        // zero. An arm that has never been seen at all — the player who steps
+        // up already turned, which is the whole case this exists for — would
+        // otherwise sit at 0 forever and never be reported as lost.
+        if (seen.left === 0) seen.left = fc.now;
+        if (seen.right === 0) seen.right = fc.now;
+        if (this.armVisible(p, 'left')) seen.left = fc.now;
+        if (this.armVisible(p, 'right')) seen.right = fc.now;
+      }
 
       const gained = counter.update(p, fc.now);
 
@@ -138,20 +350,19 @@ export class SixtySevenGame extends GameBase {
           );
         }
       }
-
-      this.barPulse[slot] = Math.max(0, (this.barPulse[slot] ?? 0) - dt * 5);
     }
   }
 
-  protected onRender(fc: FrameContext, players: TrackedPlayer[]): void {
+  protected onRender(fc: FrameContext, _players: TrackedPlayer[]): void {
     for (let slot = 0; slot < this.playerCount; slot++) {
       const rect = this.slotRect(fc.v, slot);
       this.drawBar(fc, slot, rect);
     }
-    for (const p of players) {
-      const slot = this.playerCount > 1 ? Math.max(0, Math.min(1, p.slot)) : 0;
-      this.drawArmIndicators(fc, p, slot);
-    }
+    // THE SAME BODIES THE COUNTER ACCEPTED. Drawing a set the scorer rejected
+    // would put two overlapping pairs of arm dots in one place and report on a
+    // body that is not being counted — and these dots exist precisely to tell a
+    // player whether the problem is their motion or the camera.
+    for (const p of this.shown) this.drawArmIndicators(fc, p, this.slotOf(p));
   }
 
   /**
@@ -325,10 +536,18 @@ export class SixtySevenGame extends GameBase {
    * registering has no idea whether the problem is their motion or the camera
    * — and at a stall nobody is there to explain it.
    *
-   * Each dot is a sticker with two flat states: an empty muted outline when the
-   * arm is down, a filled brand-colour sticker with an ink outline and a hard
-   * shadow when it is up. The old version faded a glow in and out, which is
-   * both a blur and a tint of a brand colour.
+   * Each dot is a sticker with THREE flat states, never a ramp: an empty muted
+   * outline when the arm is down, a filled brand-colour sticker with an ink
+   * outline and a hard shadow when it is up, and a red dashed ring when the
+   * camera cannot see that arm at all.
+   *
+   * THE THIRD STATE IS THE ONE THAT MATTERS. Turned far enough, MediaPipe's
+   * confidence in the far arm drops under the 0.4 visibility gate and that arm
+   * simply stops counting — measured, a clean 39-rep run becomes 19. Before
+   * this, the dot for a lost arm sat frozen in whatever state it was last in,
+   * which is the most misleading thing it could possibly have done: it says
+   * "your arm is down" when the truth is "I cannot see your arm". Reported from
+   * a playtest as having to "67 at a certain angle".
    */
   private drawArmIndicators(fc: FrameContext, _player: TrackedPlayer, slot: number): void {
     const { ctx, v } = fc;
@@ -355,12 +574,16 @@ export class SixtySevenGame extends GameBase {
       { side: 'right', dx: spacing },
     ];
 
+    let anyLost = false;
+
     for (let i = 0; i < arms.length; i++) {
       const arm = arms[i]!;
       // Ask the COUNTER, rather than running a second, different test on
       // filtered landmarks. See RepCounter.armUp.
-      const up = counter.armUp(arm.side);
+      const lost = this.armLost(slot, arm.side, fc.now);
+      const up = !lost && counter.armUp(arm.side);
       const cx = rect.centerX + arm.dx;
+      if (lost) anyLost = true;
 
       ctx.save();
       ctx.shadowBlur = 0;
@@ -377,13 +600,32 @@ export class SixtySevenGame extends GameBase {
       ctx.arc(cx, y, r, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.strokeStyle = up ? COLORS.ink : COLORS.muted;
-      ctx.lineWidth = up ? stroke : vh(v, STROKE.thin);
+      if (lost) ctx.setLineDash([vh(v, 0.8), vh(v, 0.6)]);
+      ctx.strokeStyle = lost ? COLORS.red : up ? COLORS.ink : COLORS.muted;
+      ctx.lineWidth = lost || up ? stroke : vh(v, STROKE.thin);
       ctx.beginPath();
       ctx.arc(cx, y, r, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
     }
-  }
 
+    // SAY WHAT TO DO ABOUT IT. A dashed dot tells a player something is wrong;
+    // it does not tell them the fix, and nobody at a stall is there to explain
+    // that turning back toward the camera is what brings the other arm back.
+    //
+    // BELOW the dots, not above them. Above puts it straight through the live
+    // rate readout, which sits at the foot of the bar — measured on a 1280x720
+    // TV: the rate pill centres at 0.816H and the dots at 0.880H, so there is
+    // no clear strip between them. Underneath is empty in this game.
+    if (anyLost && this.state === 'playing') {
+      labelPill(ctx, v, rect.centerX, y + vh(v, 5.2), '<FACE THE CAMERA>', vh(v, 3.6), {
+        fill: COLORS.red,
+        outline: COLORS.ink,
+        outlineWidth: vh(v, STROKE.base),
+        shadow: vh(v, SHADOW.base),
+        color: COLORS.paper,
+        weight: WEIGHT.black,
+      });
+    }
+  }
 }

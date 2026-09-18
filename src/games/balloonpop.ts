@@ -87,6 +87,85 @@ const ARM_FALLBACK = 0.55;
 
 const BALLOON_COLORS = [COLORS.blue, COLORS.red, COLORS.green, COLORS.yellow] as const;
 
+/**
+ * Half the width of the band balloons rise through, in TORSO UNITS either side
+ * of the player's own body centre.
+ *
+ * THIS GAME PROMISES "reachable without stretching". It was not keeping that
+ * promise on a television.
+ *
+ * Balloons used to spawn across the middle 70% of the SLOT RECT, which is a
+ * fraction of the screen and has nothing to do with where a person's hands can
+ * go. MEASURED at 1280x720 with the simulator's 3m framing (torso = 0.216 of
+ * frame height, so one torso unit = 156 screen px):
+ *
+ *   spawn band, screen-relative (0.15-0.85 of 1280)      896 px
+ *   a player's FULL stretched reach, both arms            ~490 px
+ *   the sim player's relaxed pumping arc                  ~230 px
+ *
+ * So roughly 45% of balloons were outside the reach of someone standing with
+ * their feet planted, and a player who stood slightly off-centre lost more on
+ * one side. The fix is the one this codebase applies to every other threshold:
+ * make it body-relative. 1.25 torso units matches Rhythm Punch's
+ * LANE_HALF_TORSOS, which was chosen for exactly this question — its outer
+ * targets sit at ~1.0 and are described as reachable without a lunge.
+ *
+ * Still clamped inside the slot, so a player standing at the very edge of frame
+ * does not get balloons drawn off-screen.
+ */
+const REACH_HALF_TORSOS = 1.25;
+
+/** See the identical constants and the full derivation in games/fruitninja.ts. */
+const SOLO_LOCK_KEEP = 0.9;
+const SWAP_APART_TORSOS = 0.35;
+const SWAP_SETTLE_SEC = 0.25;
+const SWAP_STAY_SPIKE = 3;
+
+/**
+ * A HAND THAT NEVER MOVES IS NOT PLAYING.
+ *
+ * This game deliberately has no activation speed — "a hand resting in the right
+ * place still pops" is the whole accessibility decision and it stays. But with
+ * the arming line as the ONLY gate, the winning strategy was to raise both
+ * hands into the balloon stream and then do absolutely nothing.
+ *
+ * MEASURED, both wrists pinned above the shoulder line for 15s, no motion at
+ * all: 64 / 84 / 180 points clean, 126 / 128 / 200 realistic — against 166 for
+ * ten seconds of actually reaching for balloons. Parking BEAT playing. A
+ * leaderboard that rewards holding still is not a leaderboard.
+ *
+ * So the gate is ENGAGEMENT, not speed: the hand must have moved at some point
+ * recently, not at the instant of contact. Reach for a balloon and stop dead on
+ * it and it still pops, which is the promise; hold a pose for fifteen seconds
+ * and the field goes inert.
+ *
+ * MEASURED blade speed, screen-heights/sec, steady state (first 150 frames of
+ * settling excluded, 1000+ samples per row):
+ *
+ *   condition                                p50     p90     p99     max
+ *   parked hands, clean                      0       0       0       0
+ *   parked hands, realistic                  0.037   0.074   0.111   0.169
+ *   parked hands, HOSTILE                    0.071   0.154   0.225   0.292
+ *   gentle play (0.5Hz, 45% reach), real     0.154   0.249   1.512   2.086
+ *   normal play (1.4Hz), realistic           0.696   1.071   1.392   3.252
+ *
+ * 0.35 sits above the hostile parked MAXIMUM (0.292) and far below anything a
+ * deliberate reach produces — gentle play clears it on every stroke. It is a
+ * fraction of screen height per second, like every other speed in this app, so
+ * it means the same thing on a laptop and on a 55" TV.
+ */
+const ENGAGE_SPEED = 0.35;
+
+/**
+ * How long a hand stays "engaged" after its last real movement, in ms.
+ *
+ * This is the accessibility budget. A balloon rises at 0.15-0.26 screen-heights
+ * per second through a hit radius of ~0.06, so it is inside a resting hand for
+ * roughly 0.5s: 1.2s means reach-and-hold always works, twice over. It is also
+ * short enough that a parked hand collects nothing after the first second.
+ */
+const ENGAGE_WINDOW_MS = 1200;
+
 export class BalloonPopGame extends GameBase {
   private blades = new BladeTracker({
     // Touch, not swipe. Zero activation speed is the entire accessibility
@@ -103,6 +182,19 @@ export class BalloonPopGame extends GameBase {
   private spawnTimer = 0;
   /** Screen-space Y above which balloons are live, per slot. */
   private armLine = [0, 0];
+  /** Screen-space body centre and torso size per slot. See REACH_HALF_TORSOS. */
+  private bodyX: Array<number | null> = [null, null];
+  private bodyUnit = [0, 0];
+
+  /** Tracker id of the body this solo round belongs to. */
+  private soloLock = -1;
+  private rawWrists = new Map<
+    number,
+    { lx: number; ly: number; rx: number; ry: number; step: number }
+  >();
+  private swapUntil = new Map<number, number>();
+  /** `fc.now` of each blade's last real movement. See ENGAGE_SPEED. */
+  private engagedAt = new Map<string, number>();
 
   constructor() {
     super({
@@ -124,6 +216,15 @@ export class BalloonPopGame extends GameBase {
     this.streak = [0, 0];
     this.spawnTimer = 0.2;
     this.armLine = [0, 0];
+    this.bodyX = [null, null];
+    this.bodyUnit = [0, 0];
+    // Per-round. A second round must not inherit the first round's locked body
+    // or a stale engagement stamp — latched state across rounds is this
+    // codebase's recurring bug class.
+    this.soloLock = -1;
+    this.rawWrists.clear();
+    this.swapUntil.clear();
+    this.engagedAt.clear();
     this.blades.reset();
   }
 
@@ -135,14 +236,131 @@ export class BalloonPopGame extends GameBase {
     return 'SCORE';
   }
 
+  /* ---------------- whose body is this? ---------------- */
+
+  /**
+   * A SOLO ROUND IS PLAYED BY ONE BODY: the nearest one.
+   *
+   * `playerCount` freezes at the start of the round; the tracker does not. A
+   * friend leaning into frame mid-round is a second confirmed player, and this
+   * game was reading input from both. MEASURED, player motionless while a
+   * bystander played for 10s: 42 points appeared on the player's score.
+   *
+   * Full derivation of SOLO_LOCK_KEEP, and the same helper, in fruitninja.ts.
+   */
+  private inPlay(players: TrackedPlayer[]): TrackedPlayer[] {
+    if (players.length <= 1) {
+      this.soloLock = players[0]?.id ?? -1;
+      return players;
+    }
+    const best = new Map<number, TrackedPlayer>();
+    for (const p of players) {
+      const slot = this.slotOf(p);
+      const held = best.get(slot);
+      if (!held || p.scale.unit > held.scale.unit) best.set(slot, p);
+    }
+    if (this.playerCount === 1) {
+      const top = best.get(0)!;
+      const held = players.find((p) => p.id === this.soloLock);
+      if (held && held.scale.unit >= top.scale.unit * SOLO_LOCK_KEEP) best.set(0, held);
+      this.soloLock = best.get(0)!.id;
+    }
+    return [...best.values()];
+  }
+
+  /**
+   * Drops a body whose left/right labels have just exchanged, until the One
+   * Euro filter has finished sliding the wrists across to their new places.
+   *
+   * See SWAP_SETTLE_SEC in fruitninja.ts for the measured frame-by-frame trace
+   * and for why `BladeTracker`'s own version of this test cannot fire.
+   */
+  private bladeBodies(players: TrackedPlayer[], now: number): TrackedPlayer[] {
+    const live = new Set<number>();
+    const out: TrackedPlayer[] = [];
+
+    for (const p of players) {
+      live.add(p.id);
+      const lw = p.raw[POSE.LEFT_WRIST];
+      const rw = p.raw[POSE.RIGHT_WRIST];
+      const unit = p.scale.unit;
+
+      if (lw && rw && unit > 0) {
+        const prev = this.rawWrists.get(p.id);
+        let step = prev?.step ?? -1;
+
+        if (prev) {
+          // Isotropic: landmark x is normalised by frame WIDTH and y by HEIGHT,
+          // so x has to be scaled by the aspect before the two can be combined
+          // or compared against a torso height. (ARCHITECTURE.md; the same
+          // correction LaneDetector and TPoseDetector needed.)
+          const a = p.scale.aspect;
+          const d = (ax: number, ay: number, bx: number, by: number): number =>
+            Math.hypot((ax - bx) * a, ay - by) / unit;
+
+          const apart = d(prev.lx, prev.ly, prev.rx, prev.ry);
+          const stay = d(lw.x, lw.y, prev.lx, prev.ly) + d(rw.x, rw.y, prev.rx, prev.ry);
+          const swap = d(lw.x, lw.y, prev.rx, prev.ry) + d(rw.x, rw.y, prev.lx, prev.ly);
+
+          const exchanged =
+            step >= 0 &&
+            apart >= SWAP_APART_TORSOS &&
+            swap < stay * 0.5 &&
+            stay >= Math.max(1e-3, step) * SWAP_STAY_SPIKE;
+
+          if (exchanged) this.swapUntil.set(p.id, now + SWAP_SETTLE_SEC * 1000);
+
+          // The baseline deliberately EXCLUDES the spike frame. Folding a swap
+          // into it lifts it by an order of magnitude, and the next swap a
+          // second later would then be measured against the last one and go
+          // unnoticed. ~10-frame time constant: long enough to be a baseline,
+          // short enough to follow a player winding up.
+          if (step < 0) step = stay;
+          else if (!exchanged) step = step * 0.9 + stay * 0.1;
+        }
+
+        this.rawWrists.set(p.id, { lx: lw.x, ly: lw.y, rx: rw.x, ry: rw.y, step });
+      }
+
+      if (now >= (this.swapUntil.get(p.id) ?? 0)) out.push(p);
+    }
+
+    // A kiosk runs for hours; ids never repeat, so these maps would grow for
+    // the whole event.
+    for (const id of this.rawWrists.keys()) {
+      if (!live.has(id)) {
+        this.rawWrists.delete(id);
+        this.swapUntil.delete(id);
+      }
+    }
+
+    return out;
+  }
+
+  /**
+   * The slot a blade or body belongs to. SOLO IS ALWAYS SLOT 0.
+   *
+   * This is the other half of the bug `updateArmLines` already documents. The
+   * arm line was fixed to follow the player's real slot, but `resolvePops` went
+   * on crediting `pop(..., blade.slot)` — so the moment a bystander made the
+   * player slot 1, every pop landed in `points[1]`, which nothing displays and
+   * nothing submits. MEASURED: 52 of a 88-point run vanished into slot 1 while
+   * the HUD showed 36.
+   */
+  private slotOf(of: { slot: number }): number {
+    return this.playerCount > 1 ? Math.max(0, Math.min(1, of.slot)) : 0;
+  }
+
   protected onTick(fc: FrameContext, players: TrackedPlayer[], dt: number): void {
     if (!this.proj) return;
     const { v } = fc;
 
+    const mine = this.inPlay(players);
     const project = (nx: number, ny: number) => this.proj!.point({ x: nx, y: ny });
-    const blades = this.blades.update(players, project, dt, fc.now);
+    const blades = this.blades.update(this.bladeBodies(mine, fc.now), project, dt, fc.now);
 
-    this.updateArmLines(players, v.height);
+    this.updateEngagement(blades, v.height, fc.now);
+    this.updateArmLines(mine, v.height);
 
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0) {
@@ -190,11 +408,14 @@ export class BalloonPopGame extends GameBase {
         const golden = Math.random() < 0.12;
         const r = v.height * (golden ? 0.035 : 0.045 + Math.random() * 0.018);
 
+        // Spawn inside the player's own reach, not inside a fraction of the
+        // screen — see REACH_HALF_TORSOS. Edge spawns force a stretch, and
+        // stretching in front of a crowd is exactly what this game exists to
+        // avoid.
+        const band = this.reachBand(slot, rect, r);
+
         this.balloons.push({
-          // Spawn across the middle 70% so balloons rise through the zone where
-          // hands naturally are. Edge spawns force a stretch, and stretching in
-          // front of a crowd is exactly what this game exists to avoid.
-          x: rect.x + rect.width * (0.15 + Math.random() * 0.7),
+          x: band.min + Math.random() * (band.max - band.min),
           y: v.height + r * 2,
           vx: (Math.random() - 0.5) * v.height * 0.05,
           vy: -v.height * (golden ? 0.26 : 0.15 + Math.random() * 0.06),
@@ -207,6 +428,41 @@ export class BalloonPopGame extends GameBase {
         });
       }
     }
+  }
+
+  /**
+   * The horizontal band this slot's balloons rise through, in screen pixels.
+   *
+   * Centred on the body when one is tracked, and always clamped inside the slot
+   * so nothing spawns half off the screen or across the versus divider. Falls
+   * back to the old screen-relative band before anybody is anchored, which is
+   * only ever the first frame or two of a round.
+   */
+  private reachBand(slot: number, rect: SlotRect, radius: number): { min: number; max: number } {
+    const lo = rect.x + radius;
+    const hi = rect.x + rect.width - radius;
+
+    const cx = this.bodyX[slot] ?? null;
+    const unit = this.bodyUnit[slot] ?? 0;
+    if (cx === null || unit <= 0) {
+      return { min: rect.x + rect.width * 0.15, max: rect.x + rect.width * 0.85 };
+    }
+
+    const half = unit * REACH_HALF_TORSOS;
+    // Shift rather than shrink when the body is near the edge of its slot: a
+    // player standing off to one side should still get a full-width spread of
+    // balloons, just all on the side they can actually reach.
+    let min = cx - half;
+    let max = cx + half;
+    if (min < lo) {
+      max = Math.min(hi, max + (lo - min));
+      min = lo;
+    }
+    if (max > hi) {
+      min = Math.max(lo, min - (max - hi));
+      max = hi;
+    }
+    return { min: Math.min(min, max), max: Math.max(min, max) };
   }
 
   /**
@@ -227,22 +483,36 @@ export class BalloonPopGame extends GameBase {
    * player is swiping at bright, live-looking balloons that cannot be hit.
    *
    * At a club fair a friend leaning into frame is a certainty.
+   *
+   * NOW INDEXED BY `slotOf`, which is the SAME mapping the pop path uses. The
+   * two disagreeing is exactly what the note above describes; one of them being
+   * right was never enough.
    */
   private updateArmLines(players: readonly TrackedPlayer[], screenH: number): void {
     for (const p of players) {
-      const slot = Math.max(0, Math.min(this.armLine.length - 1, p.slot));
+      const slot = this.slotOf(p);
       if (!this.proj) continue;
       const ls = p.landmarks[POSE.LEFT_SHOULDER];
       const rs = p.landmarks[POSE.RIGHT_SHOULDER];
       if (!ls || !rs) continue;
 
+      const unit = this.proj.len(p.scale.unit);
       const shoulderY = this.proj.y((ls.y + rs.y) / 2);
-      const forgiveness = this.proj.len(p.scale.unit) * ARM_OFFSET_TORSOS;
+      const forgiveness = unit * ARM_OFFSET_TORSOS;
       // Ease toward the target so a momentary tracking wobble doesn't make the
       // whole field flicker between armed and dead.
       const target = shoulderY + forgiveness;
       const cur = this.armLine[slot] || target;
       this.armLine[slot] = cur + (target - cur) * 0.15;
+
+      // Where this body actually is, for REACH_HALF_TORSOS. Smoothed on the
+      // same easing as the arm line, for the same reason: a spawn band that
+      // twitches with tracking noise would scatter balloons unpredictably.
+      const cx = this.proj.x((ls.x + rs.x) / 2);
+      const heldX = this.bodyX[slot] ?? null;
+      this.bodyX[slot] = heldX === null ? cx : heldX + (cx - heldX) * 0.15;
+      const heldU = this.bodyUnit[slot] || unit;
+      this.bodyUnit[slot] = heldU + (unit - heldU) * 0.15;
     }
 
     // Any slot nobody occupies keeps the fallback rather than 0, so a stale or
@@ -252,21 +522,49 @@ export class BalloonPopGame extends GameBase {
     }
   }
 
+  /**
+   * Stamps each blade's last real movement. See ENGAGE_SPEED.
+   *
+   * Speed, not position: a hand that is somewhere different from where it was
+   * is the only evidence available that a person is taking part. Recorded for
+   * every blade every frame, and read as a WINDOW at the moment of contact, so
+   * this is not a speed gate — the hand may be perfectly still when it pops.
+   */
+  private updateEngagement(blades: Blade[], screenH: number, now: number): void {
+    for (const blade of blades) {
+      if (blade.reacquired) continue;
+      if (blade.speed / Math.max(1, screenH) >= ENGAGE_SPEED) this.engagedAt.set(blade.id, now);
+    }
+    // Retire stamps for hands that have left, so a kiosk running all evening
+    // does not accumulate one entry per person who ever played.
+    if (this.engagedAt.size > 8) {
+      for (const [id, at] of this.engagedAt) {
+        if (now - at > ENGAGE_WINDOW_MS * 4) this.engagedAt.delete(id);
+      }
+    }
+  }
+
   private resolvePops(fc: FrameContext, blades: Blade[]): void {
     for (const blade of blades) {
       // Same reason as Fruit Ninja: a snapped blade's position is valid but the
       // motion implied by it is not, and a pop is a statement about a hand
       // having arrived somewhere.
       if (blade.reacquired) continue;
+
+      // Parked hands collect nothing. See ENGAGE_SPEED for the measured table
+      // and for why this does NOT break "a resting hand still pops".
+      if (fc.now - (this.engagedAt.get(blade.id) ?? -Infinity) > ENGAGE_WINDOW_MS) continue;
+
+      const slot = this.slotOf(blade);
       for (let i = this.balloons.length - 1; i >= 0; i--) {
         const b = this.balloons[i]!;
-        if (this.playerCount > 1 && b.slot !== blade.slot) continue;
+        if (this.playerCount > 1 && b.slot !== slot) continue;
         // Still below the player's shoulder line — see ARM_OFFSET_TORSOS.
         // `||`, not `??`, and the SAME fallback the draw uses: an armLine of 0
         // is not a line at the top of the screen, it is an unwritten entry, and
         // the two paths disagreeing is what made balloons look armed while
         // being unhittable.
-        if (b.y > (this.armLine[blade.slot] || fc.v.height * ARM_FALLBACK)) continue;
+        if (b.y > (this.armLine[slot] || fc.v.height * ARM_FALLBACK)) continue;
 
         // Generous hit radius. This game is about inclusion, not precision, and
         // a near miss that reads as a hit is far better here than the reverse.
@@ -277,7 +575,7 @@ export class BalloonPopGame extends GameBase {
         if (d > hitR) continue;
 
         this.balloons.splice(i, 1);
-        this.pop(fc, b, blade.slot);
+        this.pop(fc, b, slot);
       }
     }
   }
@@ -330,9 +628,17 @@ export class BalloonPopGame extends GameBase {
     // Hands are stickers too — a flat brand-colour disc with an ink outline, a
     // hard shadow and a paper centre. It reads as "reach out and touch" the way
     // the old translucent glowing orb did, without the blur or the tint.
+    //
+    // A hand that has not moved for ENGAGE_WINDOW_MS goes flat muted grey —
+    // the same two-state treatment the balloons themselves use for the arming
+    // line, and for the same reason: a hand that cannot pop anything must not
+    // look like one that can. This is what stops the engagement gate reading as
+    // "the game stopped working".
     for (const blade of this.blades.all) {
-      const color = this.playerCount > 1 ? PLAYER_COLORS[blade.slot]! : COLORS.blue;
-      this.drawHand(ctx, v, blade.x, blade.y, color);
+      const slot = this.slotOf(blade);
+      const live = fc.now - (this.engagedAt.get(blade.id) ?? -Infinity) <= ENGAGE_WINDOW_MS;
+      const color = this.playerCount > 1 ? PLAYER_COLORS[slot]! : COLORS.blue;
+      this.drawHand(ctx, v, blade.x, blade.y, live ? color : COLORS.muted, live);
     }
   }
 
@@ -341,25 +647,30 @@ export class BalloonPopGame extends GameBase {
     v: Viewport,
     x: number,
     y: number,
-    color: string
+    color: string,
+    live = true
   ): void {
     const r = vh(v, 2.6);
-    const drop = vh(v, SHADOW.base);
+    // Flat on the page when it cannot pop anything — the same treatment an
+    // un-armed balloon gets, and the same one `rankedRow` gives an empty place.
+    const drop = live ? vh(v, SHADOW.base) : 0;
 
     ctx.save();
     ctx.shadowBlur = 0;
 
-    ctx.fillStyle = COLORS.ink;
-    ctx.beginPath();
-    ctx.arc(x, y + drop, r, 0, Math.PI * 2);
-    ctx.fill();
+    if (drop > 0) {
+      ctx.fillStyle = COLORS.ink;
+      ctx.beginPath();
+      ctx.arc(x, y + drop, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.strokeStyle = COLORS.ink;
+    ctx.strokeStyle = live ? COLORS.ink : COLORS.muted;
     ctx.lineWidth = vh(v, STROKE.base);
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);

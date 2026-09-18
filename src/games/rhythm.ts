@@ -152,6 +152,12 @@ const COMBO_CAP = 30;
 const MAX_SLOTS = 2;
 const TAU = Math.PI * 2;
 
+/** See the identical constants and the full derivation in games/fruitninja.ts. */
+const SOLO_LOCK_KEEP = 0.9;
+const SWAP_APART_TORSOS = 0.35;
+const SWAP_SETTLE_SEC = 0.25;
+const SWAP_STAY_SPIKE = 3;
+
 /**
  * Hand colours are FIXED — they never become player colours, even in versus.
  *
@@ -403,6 +409,16 @@ export class RhythmGame extends GameBase {
   private barFlash = 0;
   private musicHandedOff = false;
 
+  /** Tracker id of the body this solo round belongs to. See `inPlay`. */
+  private soloLock = -1;
+  /** Previous frame's RAW wrists, per tracker id. See `bladeBodies`. */
+  private rawWrists = new Map<
+    number,
+    { lx: number; ly: number; rx: number; ry: number; step: number }
+  >();
+  /** `fc.now` until which this body's blades are fiction. See `bladeBodies`. */
+  private swapUntil = new Map<number, number>();
+
   constructor() {
     super({
       gameId: 'rhythm',
@@ -460,6 +476,12 @@ export class RhythmGame extends GameBase {
     this.beatFlash = 0;
     this.barFlash = 0;
     this.musicHandedOff = false;
+    // Per-round. A second round must not inherit the first round's locked body,
+    // its stale raw wrists, or a swap window that never closed — latched state
+    // across rounds is this codebase's recurring bug class.
+    this.soloLock = -1;
+    this.rawWrists.clear();
+    this.swapUntil.clear();
     this.blades.reset();
     void playerCount;
   }
@@ -506,13 +528,14 @@ export class RhythmGame extends GameBase {
       this.onBeat(index);
     }
 
+    const mine = this.inPlay(players);
     const project = (nx: number, ny: number) => this.proj!.point({ x: nx, y: ny });
-    const blades = this.blades.update(players, project, dt, fc.now);
+    const blades = this.blades.update(this.bladeBodies(mine, fc.now), project, dt, fc.now);
 
-    this.updateAnchors(fc, players);
+    this.updateAnchors(fc, mine);
 
     for (let slot = 0; slot < this.playerCount; slot++) {
-      const player = this.playerFor(players, slot);
+      const player = this.playerFor(mine, slot);
       if (player) this.vert[slot]?.update(player, fc.now);
 
       const s = this.slots[slot];
@@ -543,7 +566,145 @@ export class RhythmGame extends GameBase {
     audio.playBeat(index, progress);
   }
 
-  /** The tracked player driving a given slot. In 1P, whoever is in frame. */
+  /* ---------------- whose body is this? ---------------- */
+
+  /** The slot a blade or body plays for. Solo is always slot 0. */
+  private slotOf(of: { slot: number }): number {
+    return this.playerCount > 1 ? Math.max(0, Math.min(1, of.slot)) : 0;
+  }
+
+  /**
+   * ONE BODY PER LANE — and in a solo round, one body in total.
+   *
+   * `playerCount` freezes when the round starts; the tracker keeps running at
+   * `maxPlayers`. A friend leaning into frame mid-round is therefore a second
+   * confirmed player, and since the solo path deliberately does not filter
+   * blades by slot ("whoever the tracker thinks you are"), THEIR fists were
+   * punching this player's notes.
+   *
+   * MEASURED, player standing completely still while a bystander played for
+   * 10s: 72 points on the player's score. It also made `playerFor` and the
+   * blade source disagree — the lane anchored to one body while the punches
+   * came from either.
+   *
+   * Biggest TORSO wins — "nearest to the camera", the same measurement the
+   * tracker's own bystander gate uses. Deliberately not bounding-box area: a
+   * bbox also grows when the arms come out, so ranking by it hands the round to
+   * whoever is waving hardest. Measured numbers in games/fruitninja.ts.
+   */
+  private inPlay(players: TrackedPlayer[]): TrackedPlayer[] {
+    if (players.length <= 1) {
+      this.soloLock = players[0]?.id ?? -1;
+      return players;
+    }
+    const best = new Map<number, TrackedPlayer>();
+    for (const p of players) {
+      const slot = this.slotOf(p);
+      const held = best.get(slot);
+      if (!held || p.scale.unit > held.scale.unit) best.set(slot, p);
+    }
+    // Hysteresis: two bodies at the same distance measure within a few percent
+    // of each other, and a bare comparison would move the lock 30 times a
+    // second — which in this game would also drag the whole lane with it.
+    if (this.playerCount === 1) {
+      const top = best.get(0)!;
+      const held = players.find((p) => p.id === this.soloLock);
+      if (held && held.scale.unit >= top.scale.unit * SOLO_LOCK_KEEP) best.set(0, held);
+      this.soloLock = best.get(0)!.id;
+    }
+    return [...best.values()];
+  }
+
+  /**
+   * Of those, the ones whose fists are not currently fiction.
+   *
+   * MediaPipe's left/right are inferred and subject-relative, and when they
+   * exchange, `BladeTracker`'s own guard cannot see it — that test compares
+   * FILTERED landmarks, which have barely moved on the frame of the swap. The
+   * blade instead glides across the body over ~13 frames of never-`reacquired`,
+   * perfectly plausible motion, sweeping the swept-segment test through every
+   * target ring on the way.
+   *
+   * MEASURED, both fists held still for 15s:
+   *   clean                        0
+   *   realistic (limbSwap 0.004)   0 / 0 / 0
+   *   limbSwap 0.008 alone         105 / 239 / 73
+   *   HOSTILE                      170 / 105 / 139
+   *
+   * This game's anti-passive gate is `NoteRuntime.armed` — the fist must have
+   * come from OUTSIDE the ring — and a phantom sweep satisfies it perfectly,
+   * which is why the gate did not help. Full frame-by-frame trace, and the
+   * six-line core/blades.ts fix this duplicates, in games/fruitninja.ts.
+   *
+   * Dropping the body from `BladeTracker.update` is the supported way to say
+   * "this hand is not observable right now": the blades go invisible, so
+   * nothing scores off them and `drawHands` stops drawing a fist where the
+   * fist is not, and the tracker's own `wasHidden` path snaps cleanly on
+   * return instead of sweeping the gap.
+   */
+  private bladeBodies(players: TrackedPlayer[], now: number): TrackedPlayer[] {
+    const live = new Set<number>();
+    const out: TrackedPlayer[] = [];
+
+    for (const p of players) {
+      live.add(p.id);
+      const lw = p.raw[POSE.LEFT_WRIST];
+      const rw = p.raw[POSE.RIGHT_WRIST];
+      const unit = p.scale.unit;
+
+      if (lw && rw && unit > 0) {
+        const prev = this.rawWrists.get(p.id);
+        let step = prev?.step ?? -1;
+
+        if (prev) {
+          // Isotropic: landmark x is normalised by frame WIDTH and y by HEIGHT,
+          // so x has to be scaled by the aspect before the two can be combined
+          // or compared against a torso height. (ARCHITECTURE.md; the same
+          // correction LaneDetector and TPoseDetector needed.)
+          const a = p.scale.aspect;
+          const d = (ax: number, ay: number, bx: number, by: number): number =>
+            Math.hypot((ax - bx) * a, ay - by) / unit;
+
+          const apart = d(prev.lx, prev.ly, prev.rx, prev.ry);
+          const stay = d(lw.x, lw.y, prev.lx, prev.ly) + d(rw.x, rw.y, prev.rx, prev.ry);
+          const swap = d(lw.x, lw.y, prev.rx, prev.ry) + d(rw.x, rw.y, prev.lx, prev.ly);
+
+          const exchanged =
+            step >= 0 &&
+            apart >= SWAP_APART_TORSOS &&
+            swap < stay * 0.5 &&
+            stay >= Math.max(1e-3, step) * SWAP_STAY_SPIKE;
+
+          if (exchanged) this.swapUntil.set(p.id, now + SWAP_SETTLE_SEC * 1000);
+
+          // The baseline deliberately EXCLUDES the spike frame. Folding a swap
+          // into it lifts it by an order of magnitude, and the next swap a
+          // second later would then be measured against the last one and go
+          // unnoticed. ~10-frame time constant: long enough to be a baseline,
+          // short enough to follow a player winding up.
+          if (step < 0) step = stay;
+          else if (!exchanged) step = step * 0.9 + stay * 0.1;
+        }
+
+        this.rawWrists.set(p.id, { lx: lw.x, ly: lw.y, rx: rw.x, ry: rw.y, step });
+      }
+
+      if (now >= (this.swapUntil.get(p.id) ?? 0)) out.push(p);
+    }
+
+    // A kiosk runs for hours; ids never repeat, so these maps would grow for
+    // the whole event.
+    for (const id of this.rawWrists.keys()) {
+      if (!live.has(id)) {
+        this.rawWrists.delete(id);
+        this.swapUntil.delete(id);
+      }
+    }
+
+    return out;
+  }
+
+  /** The tracked player driving a given slot. In 1P, the one body in play. */
   private playerFor(players: readonly TrackedPlayer[], slot: number): TrackedPlayer | undefined {
     if (this.playerCount > 1) return players.find((p) => p.slot === slot);
     return players[0];
@@ -708,7 +869,7 @@ export class RhythmGame extends GameBase {
     let sawHand = false;
 
     for (const blade of blades) {
-      if (this.playerCount > 1 && blade.slot !== slot) continue;
+      if (this.playerCount > 1 && this.slotOf(blade) !== slot) continue;
 
       // Segment, not point. At 30fps a fast fist jumps hundreds of pixels
       // between samples and a point test tunnels straight through the target —
@@ -1350,7 +1511,7 @@ export class RhythmGame extends GameBase {
 
     ctx.save();
     for (const blade of this.blades.all) {
-      if (this.playerCount > 1 && blade.slot !== slot) continue;
+      if (this.playerCount > 1 && this.slotOf(blade) !== slot) continue;
       const color = HAND_COLORS[blade.side];
 
       const pts = blade.trail;
