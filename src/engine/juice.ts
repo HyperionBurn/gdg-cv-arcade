@@ -233,12 +233,26 @@ export class RollingNumber {
 
   constructor(private speed = 8) {}
 
+  /**
+   * NON-FINITE INPUT IS DROPPED, not stored.
+   *
+   * This is the last thing standing between a bad score and the literal
+   * glyphs "NaN" rendered at 11vh on a television, which is a failure the
+   * audience can read from the back of the hall. Once NaN enters `target` it
+   * is permanent: every `update` propagates it into `display`, and nothing
+   * downstream checks.
+   *
+   * Cheap insurance on a number computed from division by a body scale that
+   * can legitimately be zero for a frame.
+   */
   set(value: number, immediate = false): void {
+    if (!Number.isFinite(value)) return;
     this.target = value;
     if (immediate) this.display = value;
   }
 
   add(delta: number): void {
+    if (!Number.isFinite(delta)) return;
     this.target += delta;
   }
 

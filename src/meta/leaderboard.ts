@@ -79,6 +79,48 @@ function emptyStore(): Store {
   return { boards: {}, factionTotals: {}, plays: {} };
 }
 
+function isEntry(e: unknown): e is Entry {
+  if (!e || typeof e !== 'object') return false;
+  const x = e as Partial<Entry>;
+  return (
+    typeof x.initials === 'string' &&
+    typeof x.score === 'number' &&
+    Number.isFinite(x.score) &&
+    typeof x.at === 'number' &&
+    Number.isFinite(x.at)
+  );
+}
+
+/** Keeps only boards that are arrays of well-formed, finite-scored entries. */
+function validBoards(raw: unknown): Partial<Record<GameId, Entry[]>> {
+  const out: Partial<Record<GameId, Entry[]>> = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const [game, board] of Object.entries(raw as Record<string, unknown>)) {
+    if (!Array.isArray(board)) continue;
+    const clean = board.filter(isEntry);
+    if (clean.length > 0) out[game as GameId] = clean;
+  }
+  return out;
+}
+
+function validTotals(raw: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
+  }
+  return out;
+}
+
+function validPlays(raw: unknown): Partial<Record<GameId, number>> {
+  const out: Partial<Record<GameId, number>> = {};
+  if (!raw || typeof raw !== 'object') return out;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === 'number' && Number.isFinite(v)) out[k as GameId] = v;
+  }
+  return out;
+}
+
 class Leaderboard {
   private store: Store = emptyStore();
   private listeners = new Set<() => void>();
@@ -91,11 +133,24 @@ class Leaderboard {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
-        const parsed = JSON.parse(raw) as Store;
+        const parsed = JSON.parse(raw) as Partial<Store>;
+
+        // VALIDATE THE SHAPE, not just the parse.
+        //
+        // This is the only persisted store with no validation, and it is the
+        // one that has to carry Sept 24 into Sept 26 — ghosts.ts and
+        // tournament.ts both check theirs. `?? {}` catches a missing key and
+        // nothing else: a board that is not an array survives, and then
+        // `board.filter` throws or `previewRank` returns `rank: NaN,
+        // total: undefined`, which renders on the TV as literal "NaN".
+        //
+        // Anything that fails is dropped rather than repaired. A missing board
+        // costs one game's scores; a malformed one that half-works can corrupt
+        // every submission after it.
         this.store = {
-          boards: parsed.boards ?? {},
-          factionTotals: parsed.factionTotals ?? {},
-          plays: parsed.plays ?? {},
+          boards: validBoards(parsed.boards),
+          factionTotals: validTotals(parsed.factionTotals),
+          plays: validPlays(parsed.plays),
         };
       }
     } catch {
