@@ -59,6 +59,18 @@ import {
 import { COLORS, PLAYER_COLORS, FONTS, SHADOW, STROKE, TRACK, WEIGHT } from './theme';
 import type { Screen, FrameContext } from './screen';
 
+/**
+ * Most bodies this screen will ever track at once — the largest option in the
+ * player dropdown, which is Red Light's six.
+ *
+ * Every per-slot array below is this long, and the read and write paths clamp
+ * with the SAME bound. They used to disagree: writes clamped to `< 2` while
+ * the MOTION readout clamped to `energy.length - 1` (5), so in 6-player mode
+ * it read a cell nothing ever wrote and the bar sat at zero with a person
+ * moving in front of it.
+ */
+const MAX_SLOTS = 6;
+
 interface FramingVerdict {
   ok: boolean;
   headline: string;
@@ -74,10 +86,26 @@ export class RigCheckScreen implements Screen {
   private panel: HTMLElement | null = null;
   private devices: CameraDevice[] = [];
 
-  // One gesture set per tracked slot, so two people can be tested at once.
-  private reps = [new RepCounter(), new RepCounter()];
-  private vertical = [new VerticalGestures(), new VerticalGestures()];
-  private lanes = [new LaneDetector(), new LaneDetector()];
+  /**
+   * One gesture set per tracked slot — ALL of them, not two.
+   *
+   * The player dropdown offers 1, 2 and 6, and `maxPlayers` is pushed straight
+   * through to the tracker, so slots 2-5 are routine. These arrays were length
+   * 2 and every slot >= 2 was collapsed onto index 0, so in 6-player mode up
+   * to five different bodies were pushed through the SAME RepCounter,
+   * VerticalGestures and MotionEnergy in a single frame. Each one differences
+   * against whatever body happened to go through it last, so the JUMP /
+   * CROUCH / LANE / REPS chips showed an unusable blend of several people —
+   * on the screen whose whole job is telling an operator what the detectors
+   * can see, in the mode that exists to test Red Light's six lanes.
+   */
+  private reps = RigCheckScreen.perSlot(() => new RepCounter());
+  private vertical = RigCheckScreen.perSlot(() => new VerticalGestures());
+  private lanes = RigCheckScreen.perSlot(() => new LaneDetector());
+
+  private static perSlot<T>(make: () => T): T[] {
+    return Array.from({ length: MAX_SLOTS }, make);
+  }
   /**
    * The panel's own copy of what it has told the worker.
    *
@@ -95,9 +123,9 @@ export class RigCheckScreen implements Screen {
   private numPoses = 2;
 
   /** Last energy per slot, sampled on inference only. See the MOTION readout. */
-  private energy = [0, 0, 0, 0, 0, 0];
+  private energy: number[] = Array.from({ length: MAX_SLOTS }, () => 0);
 
-  private motion = [new MotionEnergy(), new MotionEnergy()];
+  private motion = RigCheckScreen.perSlot(() => new MotionEnergy());
   private tpose = new TPoseDetector();
 
   private showVideo = true;
@@ -112,16 +140,47 @@ export class RigCheckScreen implements Screen {
     this.panel.className = 'rig-panel';
     root.appendChild(this.panel);
 
+    // DRAW THE PANEL BEFORE ANYTHING THAT CAN HANG OR THROW.
+    //
+    // This used to be the last line of `mount`, behind two awaits. But
+    // `vision.start()` resolves by polling `ready || error` on a 50ms timer
+    // and HAS NO TIMEOUT — if the model or WASM fetch stalls, which is PLAN.md
+    // §9's "venue wifi will fail", the promise never settles and this method
+    // never returns. `camera.listDevices()` can also reject outright.
+    //
+    // The router sets the current screen before awaiting mount, so the screen
+    // rendered either way — as an empty div. No camera selector, no model
+    // selector, no live stats, and in particular no `#rig-fault` element, so
+    // `updateLiveStats` silently did nothing. The screen whose stated purpose
+    // is that it NAMES THE FAULT showed absolutely nothing in precisely the
+    // fault it exists to diagnose.
+    //
+    // `renderPanel` reads only fields that are already initialised, so it is
+    // safe here; the device list starts empty and the panel is rebuilt below
+    // once it arrives.
+    this.renderPanel();
+
     // Guarded like every other vision consumer. Without this the screen hangs
     // on <STARTING CAMERA> forever under ?sim=1, where there is no camera to
     // start — which made the Sept 18 camera-test tool the one screen nobody
     // could exercise in development.
     if (!isSimEnabled()) {
-      await vision.start({ mode: 'pose', numPoses: 2, poseModel: 'lite' });
+      try {
+        await vision.start({ mode: 'pose', numPoses: 2, poseModel: 'lite' });
+      } catch (err) {
+        console.error('[rigcheck] vision.start failed', err);
+      }
     }
 
-    this.devices = await camera.listDevices();
-    this.renderPanel();
+    try {
+      this.devices = await camera.listDevices();
+    } catch (err) {
+      console.error('[rigcheck] listDevices failed', err);
+      this.devices = [];
+    }
+
+    // The screen can be torn down while those awaits are outstanding.
+    if (this.panel) this.renderPanel();
   }
 
   unmount(): void {
@@ -403,10 +462,14 @@ export class RigCheckScreen implements Screen {
     let players = this.tracker.getPlayers();
     if (fc.vision && fc.vision.frameId !== this.lastFrameId) {
       this.lastFrameId = fc.vision.frameId;
+      // No `setOptions({ aspect })`. This screen's whole point is swapping
+      // cameras, and the tracker now follows the live aspect by itself —
+      // passing one explicitly would PIN it, so the device dropdown would
+      // change the feed and leave the body measurements on the old shape.
       players = this.tracker.update(fc.vision.poses, fc.time);
 
       for (const p of players) {
-        const slot = p.slot >= 0 && p.slot < 2 ? p.slot : 0;
+        const slot = p.slot >= 0 && p.slot < MAX_SLOTS ? p.slot : 0;
         const before = this.reps[slot]!.count;
         this.reps[slot]!.update(p, now);
         if (this.reps[slot]!.count !== before) this.flash.rep = now;

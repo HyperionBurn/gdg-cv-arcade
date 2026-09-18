@@ -85,6 +85,60 @@ const HOLD_STILL_SEC = 1.1;
 const PRESENCE_FORCE_SEC = 6;
 
 /**
+ * How far a body may TRAVEL across the frame and still be counted as standing
+ * here, in fractions of frame width.
+ *
+ * `PRESENCE_FORCE_SEC` above is the escape hatch for a person who will not
+ * hold still, and as written it asked only "has a body existed for 6s". It
+ * never looked at where that body was going, so anyone WALKING PAST the stall
+ * was promoted on the same timer as someone standing in front of it.
+ *
+ * MEASURED, attract screen, body at play distance, realistic input:
+ *
+ *   standing (fidget + sensor noise)   promoted at 6.2s, stillTime 0.80
+ *   strolling across frame             promoted at 6.2s, stillTime 0.00
+ *
+ * Note the second line: the hold-still path correctly refused it, and the
+ * force path promoted it anyway. At a club fair, where the stall has a
+ * corridor of people walking past it all day, that is the menu coming up over
+ * and over for nobody — and every one of those laps costs a `whoosh`, a `go`
+ * and a music start/stop, then times out 32s later.
+ *
+ * (The still path came closer to firing than it should have, too:
+ * `MotionEnergy` sums a raw x/y displacement and divides by a torso height,
+ * without the aspect correction, so it under-reads horizontal motion by 1.78x
+ * at 16:9 — sideways drift is exactly the motion it is worst at seeing. That
+ * is in core/gestures.ts and is reported separately; this fix deliberately
+ * does not depend on it.)
+ *
+ * MEASURED, net centroid travel over the same 6 seconds:
+ *
+ *   standing, realistic input   0.0069      strolling across   0.6205
+ *   standing, hostile input     0.0196
+ *
+ * 0.08 is 4x the worst standing figure and 7.8x below a crossing, so a body
+ * that is genuinely parked cannot trip it and one that is travelling cannot
+ * avoid it. Rather than rejecting the walker outright, exceeding the budget
+ * RE-ANCHORS and restarts the timer — so someone who walks up to the stall and
+ * then stops is promoted 6s after they stop, which is what the timer was
+ * always meant to measure.
+ *
+ * VERIFIED — someone entering at one edge, crossing, and leaving:
+ *
+ *   brisk   0.30 frame-widths/s (3s to cross)    HELD on attract
+ *   normal  0.18                (5s)             HELD
+ *   slow    0.09                (10s)            HELD
+ *   dawdle  0.045               (20s)            promoted at 6.6s
+ *
+ * and a real visitor is unaffected: standing still promotes at 3.9s, fidgeting
+ * at 6.2s, hostile input at 6.2s. Every one of those walk-throughs promoted at
+ * 6.2s before. The dawdle case is someone moving about 4cm/s across the front
+ * of the stall, which is loitering rather than passing, and promoting them is
+ * exactly what PRESENCE_FORCE_SEC is for.
+ */
+const PRESENCE_ANCHOR_DRIFT = 0.08;
+
+/**
  * After the menu times out with nobody interacting, attract holds on for
  * longer before promoting the next body it sees.
  *
@@ -99,9 +153,19 @@ const PRESENCE_FORCE_SEC = 6;
 const BOUNCE_COOLDOWN_SEC = 45;
 const BOUNCE_HOLD_MULT = 3;
 
-/** When the menu last gave up on an unengaged body. Module-level because the
- *  attract screen is constructed fresh on every visit. */
-let lastMenuTimeout = 0;
+/**
+ * When the menu last gave up on an unengaged body. Module-level because the
+ * attract screen is constructed fresh on every visit.
+ *
+ * -Infinity, NOT 0. `performance.now()` is milliseconds since navigation, so
+ * with a 0 seed `now - lastMenuTimeout < 45000` is TRUE for the first 45
+ * seconds of the app's life — before the menu has ever timed out even once.
+ * The first person to walk up after a boot or a reload was silently charged
+ * the 3x bounce penalty: 3.3s of holding still instead of 1.1s, and 18s
+ * instead of 6s on the force path. That window is exactly stall setup and the
+ * first walk-up demo of the day.
+ */
+let lastMenuTimeout = -Infinity;
 
 /** Called by the menu when it bails without anyone having interacted. */
 export function noteMenuTimeout(): void {
@@ -110,6 +174,14 @@ export function noteMenuTimeout(): void {
 /** Mean per-frame landmark displacement, in body units, that counts as still. */
 const STILL_ENTER = 0.030;
 const STILL_EXIT = 0.055;
+
+/**
+ * Age at which a vision frame stops counting as evidence that anyone is there.
+ * Same figure and same reasoning as `GameBase`: generous enough to clear a
+ * `numPoses` model rebuild (a 492-575ms dead window plus a 354-418ms first
+ * inference).
+ */
+const VISION_STALE_MS = 1500;
 /** Seconds each game's leaderboard holds the rail before it cycles. */
 const RAIL_CYCLE_SEC = 5;
 const RAIL_FADE_SEC = 0.45;
@@ -176,6 +248,12 @@ export class AttractScreen implements Screen {
   private presenceTime = 0;
   private stillTime = 0;
   private wasPresent = false;
+  /** Track id the two timers above belong to. A change resets both. */
+  private primaryId: number | null = null;
+  /** Where the body was when `presenceTime` last restarted. See the drift budget. */
+  private anchorX = 0;
+  /** The hold currently being demanded, after the bounce multiplier. */
+  private holdFor = HOLD_STILL_SEC;
   /** 0..1, snaps to 1 the frame a person appears and eases back down. */
   private detectPulse = 0;
 
@@ -340,8 +418,34 @@ export class AttractScreen implements Screen {
   }
 
   private updateTracking(fc: FrameContext): void {
+    // STALE VISION MEANS NOBODY, NOT "THE LAST PERSON, FOREVER".
+    //
+    // Same guard, and the same reasoning, as `GameBase.updateTracking`. The
+    // tracker is only stepped on a NEW frameId, so if the vision worker dies
+    // or wedges it is simply never called again — tracks never age out and
+    // `getPrimary()` keeps returning a frozen body indefinitely. On this
+    // screen that body accumulates `presenceTime` until PRESENCE_FORCE_SEC
+    // promotes a ghost to the menu, where the matching guard in `menu.ts`
+    // stops the same corpse from pinning both of that screen's exits open.
+    //
+    // The worker's `onerror` only emits a stat, so nothing else catches this.
+    if (fc.vision && fc.now - fc.vision.captureTime > VISION_STALE_MS) {
+      if (this.players.length > 0) {
+        this.players = [];
+        this.tracker.reset();
+        this.motion.clear();
+        this.energy.clear();
+      }
+      return;
+    }
+
     if (!fc.vision || fc.vision.frameId === this.lastFrameId) return;
     this.lastFrameId = fc.vision.frameId;
+
+    // NO `setOptions({ aspect })` HERE. The tracker follows the live camera
+    // aspect on its own now (`setCameraAspect`, published once per frame by
+    // main.ts), and passing an explicit aspect PINS it — which would opt this
+    // screen back out of the very mechanism that fixed it.
     this.players = this.tracker.update(fc.vision.poses, fc.time);
 
     const live = new Set<number>();
@@ -369,9 +473,49 @@ export class AttractScreen implements Screen {
    * menu." Held still, not posed: asking a stranger to perform a gesture
    * before they know what the thing is loses them.
    */
+  private resolvePrimary(): TrackedPlayer | null {
+    // `PoseTracker.getPrimary()` does this now, for every screen at once, and
+    // on stabilised TORSO SIZE rather than bounding-box area.
+    //
+    // Area was the wrong statistic: a bbox spans every visible landmark, so it
+    // swings 3.1x with arm spread on ONE body at a fixed distance (0.121 arms
+    // down, 0.378 arms out, torso unit unchanged). This local copy therefore
+    // handed "primary" to whoever was waving hardest, and flipped between two
+    // people standing at equal distance up to 38 times a second.
+    return this.tracker.getPrimary();
+  }
+
   private updatePresence(fc: FrameContext): void {
-    const primary = this.tracker.getPrimary();
+    const primary = this.resolvePrimary();
     const present = !!primary;
+
+    // A DIFFERENT BODY IS A DIFFERENT VISIT.
+    //
+    // Both timers used to key off `present` alone and never looked at WHO was
+    // present, so at a busy stall they never reset: a queue, a marshal and a
+    // friend by the table keep *some* track confirmed continuously, and
+    // `presenceTime` accumulated across all of them. PRESENCE_FORCE_SEC then
+    // fired on "has anything been in frame for 6s", regardless of motion and
+    // regardless of whether it was even the same human — attract to menu at
+    // 6s, menu back at 32s, all day, with a whoosh and a go each lap.
+    //
+    // The stillness leak was worse than the timer: a brand-new track's first
+    // `MotionEnergy.update` returns 0 by definition (it has nothing to
+    // difference against), and the `presenceTime > 0.35` guard below was
+    // already satisfied by the PREVIOUS person — so the newcomer's very first
+    // frame read as perfectly still and could complete the hold on borrowed
+    // time.
+    //
+    // The handover itself has to be STABLE for this reset to be safe, which is
+    // what `resolvePrimary` is for — see the measurements on it. Keyed off a
+    // bare `getPrimary()` this reset fires dozens of times a second whenever
+    // two people stand at the same distance, and then NOBODY is ever promoted.
+    if (primary && primary.id !== this.primaryId) {
+      this.presenceTime = 0;
+      this.stillTime = 0;
+      this.anchorX = primary.centroid.x;
+    }
+    this.primaryId = primary?.id ?? null;
 
     if (present && !this.wasPresent) {
       // The instant reaction. This is the single most important frame on this
@@ -382,6 +526,7 @@ export class AttractScreen implements Screen {
       audio.play('whoosh');
       this.presenceTime = 0;
       this.stillTime = 0;
+      if (primary) this.anchorX = primary.centroid.x;
     }
     this.wasPresent = present;
     this.detectPulse = Math.max(0, this.detectPulse - fc.dt * 1.2);
@@ -390,6 +535,14 @@ export class AttractScreen implements Screen {
       this.presenceTime = 0;
       this.stillTime = 0;
       return;
+    }
+
+    // STILL HERE, OR STILL WALKING? See PRESENCE_ANCHOR_DRIFT. A body that has
+    // travelled out of its own budget is passing through, not waiting, so the
+    // patience timer starts again from wherever it has got to.
+    if (Math.abs(primary.centroid.x - this.anchorX) > PRESENCE_ANCHOR_DRIFT) {
+      this.anchorX = primary.centroid.x;
+      this.presenceTime = 0;
     }
 
     this.presenceTime += fc.dt;
@@ -409,6 +562,9 @@ export class AttractScreen implements Screen {
     const bouncedRecently = performance.now() - lastMenuTimeout < BOUNCE_COOLDOWN_SEC * 1000;
     const holdFor = bouncedRecently ? HOLD_STILL_SEC * BOUNCE_HOLD_MULT : HOLD_STILL_SEC;
     const forceAt = bouncedRecently ? PRESENCE_FORCE_SEC * BOUNCE_HOLD_MULT : PRESENCE_FORCE_SEC;
+    // Published so the hold ring can show progress against the hold that is
+    // actually being applied. See `drawHoldRing`.
+    this.holdFor = holdFor;
 
     if (this.stillTime >= holdFor || this.presenceTime >= forceAt) {
       if (!this.exiting) audio.play('go');
@@ -537,8 +693,22 @@ export class AttractScreen implements Screen {
       color: COLORS.ink,
       weight: WEIGHT.black,
       align: 'left',
-      // The brand's only shadow: hard, ink, straight down, zero blur.
-      shadow: vh(v, SHADOW.lifted),
+      // KNOCKOUT, NOT SHADOW — reported from the playtest as "text might be
+      // doubled", and it was.
+      //
+      // `drawText`'s hard shadow is the SAME GLYPHS filled again at
+      // `y + shadow` in `shadowColor ?? COLORS.ink`. That is the brand's
+      // sticker lift and it works because a sticker's face is paper or a brand
+      // colour, so the ink underneath reads as a shadow. Under INK letterforms
+      // it is not a shadow at all — it is the identical word printed twice,
+      // here 0.94vh apart, which at this size on a TV reads as a blurred
+      // double image and looks like a rendering fault.
+      //
+      // The separation this line genuinely needs is from the live skeleton
+      // behind it, and the tool for that is the paper ring: one stroke of
+      // paper around the glyphs, then the ink fill. Same job, one copy of the
+      // text.
+      knockout: true,
       letterSpacing: TRACK.display,
       alpha: intro,
     });
@@ -679,10 +849,18 @@ export class AttractScreen implements Screen {
    * The ring is NOT suppressed under reduced motion: it is a dwell timer, and
    * a progress indicator that does not progress is a broken control, not a
    * calm one.
+   *
+   * AGAINST `holdFor`, NOT `HOLD_STILL_SEC`. Those differ by 3x whenever the
+   * menu has timed out in the last 45 seconds, and this divided by the
+   * constant — so the ring filled, the readout said 100 and the label said
+   * <HOLD IT> while the gate silently wanted another 2.2 seconds. By this
+   * file's own standard above, that is the broken control: a ring that
+   * saturates and then does nothing is worse than no ring, because the player
+   * concludes the camera has stopped seeing them and walks away.
    */
   private drawHoldRing(fc: FrameContext, cx: number, cy: number): void {
     const { ctx, v } = fc;
-    const t = Math.min(1, this.stillTime / HOLD_STILL_SEC);
+    const t = Math.min(1, this.stillTime / Math.max(0.05, this.holdFor));
     const r = vh(v, 5.8);
     const ring = vh(v, 1.3);
 
@@ -734,7 +912,8 @@ export class AttractScreen implements Screen {
       color: COLORS.ink,
       align: 'left',
       weight: WEIGHT.black,
-      shadow: vh(v, SHADOW.base),
+      // Ink glyphs: a paper knockout, never an ink shadow. See the CTA above.
+      knockout: true,
       letterSpacing: TRACK.h1,
     });
     drawText(ctx, 'AND THE MENU OPENS', cx + r + vh(v, SPACE.md), cy + vh(v, 3.4), {
@@ -808,13 +987,22 @@ export class AttractScreen implements Screen {
       letterSpacing: '0.3em',
     });
 
+    // Same rule: the Runner tile is yellow, so its rail heading was invisible
+    // once per cycle. `textColor` falls back to ink when the tile colour
+    // cannot carry type on paper.
+    //
+    // WHICH IS EXACTLY WHEN THE SHADOW MUST GO. An ink shadow under an ink
+    // glyph is the same word drawn twice, one offset apart — so the yellow
+    // games (Runner, Rhythm) were the two whose rail headings rendered
+    // doubled, while the blue/red/green ones looked correct. Coloured glyph
+    // keeps its ink lift; an ink glyph gets no shadow, because on paper it
+    // already has the highest contrast available.
+    const railTitleColor = textColor(tile.color);
     drawText(ctx, tile.title, cx, y + vh(v, 10.6), {
       size: fitText(ctx, tile.title, w - pad * 2, vh(v, TYPE.heading)),
-      // Same rule: the Runner tile is yellow, so its rail heading was
-        // invisible once per cycle.
-        color: textColor(tile.color),
+      color: railTitleColor,
       weight: WEIGHT.black,
-      shadow: vh(v, SHADOW.base),
+      shadow: railTitleColor === COLORS.ink ? 0 : vh(v, SHADOW.base),
       letterSpacing: TRACK.h1,
     });
 
@@ -932,15 +1120,20 @@ export class AttractScreen implements Screen {
       // the leader would cost it its identity AND collide with whichever
       // faction is actually that colour. The leader is already obvious from
       // being first and from carrying the hard shadow.
+      // THE YELLOW RULE: a faction colour can be flat yellow, which is ~1.7:1
+      // on paper and simply gone at 3m. textColor() falls back to ink.
+      const factionColor = scored ? textColor(entry.color) : COLORS.muted;
       drawTabularNumber(ctx, part, cursor, rowY, {
         size,
-        // THE YELLOW RULE: a faction colour can be flat yellow, which is
-      // ~1.7:1 on paper and simply gone at 3m. textColor() falls back to ink.
-      color: scored ? textColor(entry.color) : COLORS.muted,
+        color: factionColor,
         font: FONTS.body,
         weight: WEIGHT.black,
         align: 'left',
-        shadow: lead ? vh(v, SHADOW.base) : 0,
+        // No ink shadow under an ink glyph — that is the same text drawn
+        // twice, not a lift. A yellow faction in the lead therefore keeps the
+        // ink fallback and simply loses the shadow; it is still obviously the
+        // leader from being first in the row.
+        shadow: lead && factionColor !== COLORS.ink ? vh(v, SHADOW.base) : 0,
         letterSpacing: TRACK.number,
       });
       cursor += partW;

@@ -70,6 +70,7 @@ import {
   ramp,
 } from './theme';
 import { DWELL, HoverCursor, fitTextSize, type HoverTarget } from './hover';
+import { router } from './router';
 import type { FrameContext, Screen } from './screen';
 
 /* ------------------------------------------------------------------ */
@@ -123,6 +124,11 @@ const COUNTDOWN_VISIBLE_SEC = 8;
  * screen rather than burning the full deadline staring at an empty room.
  */
 const ABANDONED_SEC = 3.5;
+/**
+ * Age at which a vision frame stops counting as evidence that anyone is there.
+ * Same figure as `GameBase`; see the guard in `updateTracking`.
+ */
+const VISION_STALE_MS = 1500;
 /**
  * How long the confirmation flourish holds before routing on.
  *
@@ -215,11 +221,61 @@ export class InitialsScreen implements Screen {
     if (!isSimEnabled()) {
       await vision.start({ mode: 'pose', numPoses: 1, poseModel: 'lite' });
     }
+
+    window.addEventListener('keydown', this.onKey);
   }
 
   unmount(): void {
     this.particles.clear();
+    window.removeEventListener('keydown', this.onKey);
   }
+
+  /**
+   * OPERATOR KEYBOARD. A-Z types, Backspace deletes, Enter submits.
+   *
+   * The companion to the mouse override on the hand cursor, and requested with
+   * it: "the [operator] should still be able to press back/forth, click any
+   * buttons or type etc". Spelling a name three dwells at a time is the right
+   * interaction for a player standing three metres away and the wrong one for a
+   * marshal fixing a typo with a laptop in front of them.
+   *
+   * Bound as a field so `removeEventListener` gets the same reference — a fresh
+   * arrow function per call silently leaks a listener per turn, and this screen
+   * mounts on every single turn of the event.
+   *
+   * Routed through `commit()` rather than touching `letters` directly, so a
+   * typed letter fires exactly the same particles, audio, auto-advance and
+   * latch handling as a dwelled one, and there is only one path to keep right.
+   */
+  private onKey = (e: KeyboardEvent): void => {
+    if (this.phase === 'done' || e.metaKey || e.ctrlKey || e.altKey) return;
+
+    // Where to throw the confirmation particles. The cursor's last position if
+    // there is one, so a marshal typing while a player is still pointing sees
+    // the burst at the hand rather than in a corner.
+    const at = this.cursor.last;
+    const x = at.present ? at.x : 0;
+    const y = at.present ? at.y : 0;
+
+    // `layout()` is not called here on purpose: it runs on every render frame,
+    // and it needs a FrameContext this handler does not have.
+    if (e.key === 'Backspace') {
+      e.preventDefault();
+      this.commit('key:DEL', x, y);
+      return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      this.commit('key:OK', x, y);
+      return;
+    }
+    if (this.phase !== 'letters') return;
+    const k = e.key.toUpperCase();
+    if (k.length === 1 && k >= 'A' && k <= 'Z') {
+      e.preventDefault();
+      this.commit(`key:${k}`, x, y);
+    }
+  };
 
   render(fc: FrameContext): void {
     const { ctx, v } = fc;
@@ -281,7 +337,15 @@ export class InitialsScreen implements Screen {
     if (this.phase === 'done') {
       this.doneTime += fc.dt;
       if (this.doneTime > DUR.hold && !this.exiting) {
-        this.exiting = this.next;
+        // NEVER LEAVE TOWARD A SCREEN THAT DOES NOT EXIST.
+        //
+        // `next` arrives from `setPendingScore` as a free-form string, and
+        // `router.go` warns and silently returns on an unknown id — so this
+        // screen re-armed every DUR.base seconds and retried the same dead id
+        // forever, with no fallback. `GameBase.finishRound` already uses the
+        // safe idiom; this is the same one.
+        this.exiting =
+          router.has(this.next) ? this.next : router.firstAvailable('menu', 'attract') ?? 'attract';
         this.exitTime = 0;
       }
     }
@@ -321,8 +385,25 @@ export class InitialsScreen implements Screen {
       this.proj.update(fc.v, { cameraWidth: camW, cameraHeight: camH });
     }
 
+    // STALE VISION MEANS NOBODY. Without this the tracker is never stepped
+    // again after the worker dies, so `player` stays non-null and
+    // `awayTime` — which is `this.player ? 0 : awayTime + dt` — never
+    // accumulates. ABANDONED_SEC then cannot fire and only the 16s
+    // HARD_DEADLINE_SEC recovers the screen: the right outcome by the wrong
+    // mechanism, at a cost of 12.5s of queue time per abandoned turn.
+    if (fc.vision && fc.now - fc.vision.captureTime > VISION_STALE_MS) {
+      if (this.player) {
+        this.player = null;
+        this.tracker.reset();
+      }
+      return;
+    }
+
     if (!fc.vision || fc.vision.frameId === this.lastFrameId) return;
     this.lastFrameId = fc.vision.frameId;
+
+    // No `setOptions({ aspect })`: the tracker follows the live camera aspect
+    // by itself, and passing one explicitly would pin it away from that.
     this.tracker.update(fc.vision.poses, fc.time);
     this.player = this.tracker.getPrimary();
   }
@@ -415,7 +496,17 @@ export class InitialsScreen implements Screen {
       if (key === 'DEL') {
         this.letters.pop();
         this.juice.shake(0.08);
-        this.cursor.reset();
+        // NO `cursor.reset()` HERE. It is documented for a PHASE change, and
+        // DEL is not one — only the DEL/OK enable flags change, and `layout()`
+        // already rebuilds those on the line after every commit.
+        //
+        // `reset()` wipes `latchedId` as well as the state, so it did two
+        // unwanted things at once: the next frame took the cursor's
+        // absent -> present branch and restamped `acquiredAt`, imposing a
+        // fresh 0.45s settle grace on a hand that had not moved; and with the
+        // latch gone, a hand left resting on DEL auto-repeated it about once
+        // a second and ate the whole entry. Every letter key leaves the latch
+        // alone and needs a deliberate move-away to re-arm; DEL now matches.
         return;
       }
       if (key === 'OK') {
@@ -476,14 +567,37 @@ export class InitialsScreen implements Screen {
     const entered = this.letters.join('');
     const initials = entered.length > 0 ? entered : 'AAA';
 
-    this.result = leaderboard.submit(this.gameId, this.score, initials, this.faction);
-    this.letters = initials.split('');
+    // REACH `done` NO MATTER WHAT `submit` DOES.
+    //
+    // The latch above is set before this call and the phase change was set
+    // after it, so anything thrown out of `submit` left the screen latched in
+    // the 'letters' phase forever: `main.ts` swallows the exception to keep the
+    // render loop alive, the next frame calls `finish()` again, and the latch
+    // returns immediately. The hard deadline, the abandon timer AND an OK
+    // hover all become no-ops at once, and there is no other exit — the kiosk
+    // renders "SAVING IN 0" under a red bar until somebody reloads it.
+    //
+    // That is the exact stalled queue HARD_DEADLINE_SEC exists to prevent, and
+    // it defeated it. `leaderboard.save()` now isolates its listeners, which
+    // removes the reachable trigger; this removes the class.
+    try {
+      this.result = leaderboard.submit(this.gameId, this.score, initials, this.faction);
+    } catch (err) {
+      console.error('[initials] submit failed', err);
+      this.result = null;
+    }
+
+    // What the BOARD holds, which after sanitising is not always what was
+    // typed: a deadline-triggered "W" is stored as "W--". Showing the raw
+    // entry here meant the payoff sticker and the leaderboard a few seconds
+    // later disagreed about the player's own name.
+    this.letters = (this.result?.storedInitials ?? initials).split('');
 
     this.phase = 'done';
     this.doneTime = 0;
     this.cursor.reset();
 
-    if (this.result.isRecord) {
+    if (this.result?.isRecord) {
       this.juice.celebrate(COLORS.yellow);
       audio.play('record');
     } else {
@@ -728,7 +842,9 @@ export class InitialsScreen implements Screen {
       size: fitText(ctx, title, v.width - vh(v, SAFE * 4), vh(v, TYPE.title)),
       color: COLORS.ink,
       weight: WEIGHT.black,
-      shadow: vh(v, SHADOW.lifted),
+      // Ink glyphs: paper knockout, never an ink shadow — the shadow is the
+      // same word filled again one offset down, which reads as doubled text.
+      knockout: true,
       letterSpacing: TRACK.h1,
     });
 

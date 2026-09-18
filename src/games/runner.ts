@@ -74,6 +74,7 @@ import {
 } from '../shell/theme';
 import { GAME_COLORS } from '../meta/games';
 import { leaderboard } from '../meta/leaderboard';
+import { tunables } from '../meta/tunables';
 import type { FrameContext } from '../shell/screen';
 import {
   RunnerWorld,
@@ -126,9 +127,80 @@ const PENALTY_RECOVERY = 0.12; // per second
 const MAX_SLIDE_HOLD = 1.8;
 const SLIDE_LOCKOUT = 0.35;
 
+/**
+ * Sideways offset, in torso units, that commits to a side lane — and where the
+ * gate lets go again. `LaneDetector`'s own defaults are 0.55/0.30.
+ *
+ * WHY THIS GAME OVERRIDES THEM. `LaneDetector` measures the shoulder midpoint
+ * against a `Baseline` that keeps adapting WHILE THE LANE IS 0, at 0.02 per
+ * call — and `updateInput` calls it once per RENDERED frame, so on a 60Hz TV
+ * the reference has a time constant of ~0.83s. The baseline is therefore
+ * chasing the player during exactly the movement it is supposed to measure,
+ * and the peak offset a step produces depends on how FAST it was taken, not
+ * just how far. 0.55 is reachable only by a brisk, committed step.
+ *
+ * MEASURED — peak offset for a step of one full lane, realistic body, p10 of
+ * 25 trials (the tenth-percentile player, not the median one):
+ *
+ *   taken in 0.5s   0.829      taken in 1.5s   0.524   <- under 0.55
+ *   taken in 1.0s   0.657      taken in 2.0s   0.450
+ *
+ *   a 70%-of-a-lane step in 1.0s   0.459        in 1.5s   0.378
+ *   a 50%-of-a-lane step in 1.0s   0.341
+ *
+ * So at 0.55 a full lane change taken in 1.5s missed 16 times in 20, and a
+ * slightly short step taken in 1.0s — which is simply what a person does when
+ * they are being watched and not sure the game can see them — missed 20 times
+ * in 20. THAT IS THE REPORTED BUG: "runner didn't detect movement". It is not
+ * the aspect correction (already fixed in `LaneDetector`); it is the gate
+ * sitting above what an ordinary, slightly tentative step can reach.
+ *
+ * 0.35 / 0.22, chosen from the table above rather than by feel:
+ *
+ *   ENTER 0.35 catches a full lane taken in up to ~2s and a 70% step in up to
+ *   ~1.5s, and still rejects a 50% weight-shift (7 of 20 at 1.0s), which is a
+ *   shuffle and not a lane change.
+ *
+ *   It is 2.1x the largest lateral reading a MOTIONLESS body produced under
+ *   hostile input (max 0.164 torso units over 1200 samples; realistic max
+ *   0.079). Re-measured end to end: ZERO false lane changes in 120s of a still
+ *   body, realistic and hostile alike — the same zero the old 0.55 scored.
+ *
+ *   EXIT 0.22 clears that same 0.164 hostile noise floor, so a player who
+ *   steps back to the middle reliably re-centres instead of sticking.
+ *
+ * Verified after the change: 0 misses in 20 at every speed from 0.5s to 2.0s,
+ * both directions, realistic and hostile.
+ *
+ * Live-tunable because the right number belongs to the room and to how far
+ * apart the floor tape ends up being.
+ */
+const LANE_ENTER = 0.35;
+const LANE_EXIT = 0.22;
+
 /** Near-miss tuning. Garnish on top of momentum, never the main course. */
 const NEAR_TIME_WINDOW = 0.22; // seconds of margin that still counts as close
 const NEAR_LATERAL_WINDOW = 0.9; // metres of gap that still counts as close
+/**
+ * Below this a clearance is not a near miss and pays nothing.
+ *
+ * THIS IS ALSO WHAT KEEPS A MOTIONLESS PLAYER'S SCORE HONEST, and the margin
+ * is thinner than it looks. Someone who never moves sits in lane 0 while
+ * obstacles go past in lanes ±1, and that fixed geometry pays out every single
+ * row if this number is set even slightly lower:
+ *
+ *   gap       = LANE_WIDTH - (OBSTACLE_HALF_W + PLAYER_HALF_W)
+ *             = 2.4 - (1.032 + 0.6)          = 0.768 m
+ *   closeness = 1 - gap / NEAR_LATERAL_WINDOW
+ *             = 1 - 0.768 / 0.9              = 0.1467
+ *
+ * 0.16 clears that by 0.013, and because `laneX` tweens onto an exact LANE_X
+ * the figure is not a distribution — it is the same 0.1467 on every row of
+ * every run. So standing still earns distance and nothing else, which is the
+ * intended passive floor. Lower this below 0.147, or widen
+ * NEAR_LATERAL_WINDOW past 0.914, and doing nothing starts paying a bonus on
+ * every obstacle row in the game.
+ */
 const NEAR_MIN_CLOSENESS = 0.16;
 const NEAR_MAX_BONUS = 12; // metres
 
@@ -142,7 +214,7 @@ export class RunnerGame extends GameBase {
   private world: RunnerWorld | null = null;
   private worldFailed = false;
 
-  private lanes = new LaneDetector();
+  private lanes = new LaneDetector({ enter: LANE_ENTER, exit: LANE_EXIT, laneCount: 3 });
   private vert = new VerticalGestures();
   private gen = new TrackGenerator();
   private rows: TrackRow[] = [];
@@ -233,6 +305,14 @@ export class RunnerGame extends GameBase {
   }
 
   protected onStart(): void {
+    // Re-read per round, not per frame: a marshal moving the slider between
+    // plays has to see it take effect on the next go, and `LaneDetector` reads
+    // its tunables out of a struct rather than a getter.
+    this.lanes.setTunables({
+      enter: tunables.get('runner.laneEnter', LANE_ENTER),
+      exit: tunables.get('runner.laneExit', LANE_EXIT),
+    });
+
     this.lanes.reset();
     this.vert.reset();
     this.gen.reset();

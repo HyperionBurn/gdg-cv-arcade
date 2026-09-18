@@ -147,8 +147,21 @@ export function drawText(
     // the app, and after the conversion nothing passed it — `glow` on
     // SkeletonStyle is a HALO WIDTH, an unrelated thing that happens to share a
     // name. If you find yourself wanting a blur here, you want `stickerPill`.
-    ctx.fillStyle = opts.shadowColor ?? COLORS.ink;
-    ctx.fillText(text, x, y + opts.shadow);
+    // A SHADOW THE SAME COLOUR AS THE GLYPH IS THE WORD PRINTED TWICE.
+    //
+    // The shadow exists to lift coloured text off the paper. When the text is
+    // already ink and the shadow defaults to ink, the second fill is the same
+    // letterforms in the same colour ~0.94vh lower — which from 3m reads as a
+    // blurred double image, and was reported at the playtest as "text might be
+    // doubled". It hit the largest text in the app.
+    //
+    // Guarded here rather than only at the call sites, because there were seven
+    // of them and nothing stopped an eighth.
+    const shadowColor = opts.shadowColor ?? COLORS.ink;
+    if (shadowColor !== color) {
+      ctx.fillStyle = shadowColor;
+      ctx.fillText(text, x, y + opts.shadow);
+    }
   }
 
   ctx.fillStyle = color;

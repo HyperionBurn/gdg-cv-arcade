@@ -170,6 +170,32 @@ const IDLE_TIMEOUT_SEC = 20;
  * 3m takes a while.
  */
 const PRESENCE_STALL_SEC = 32;
+
+/**
+ * Absolute ceiling on one visit to this screen, regardless of presence.
+ *
+ * PRESENCE_STALL_SEC above closed the arms-DOWN case and left the arms-UP one
+ * open, which is the more common way a stranger stalls: hand raised, waving at
+ * the screen, moving too much to ever complete a 1.2s dwell. Every frame of
+ * that resets `idleTime` (a player is present) AND `stalledTime` (a wrist is
+ * raised), so both timers sit at zero and the screen can be occupied
+ * indefinitely with a queue behind it — the exact failure PRESENCE_STALL_SEC's
+ * comment claims was fixed.
+ *
+ * 75s is well past any honest decision: the two timers above are 20s and 32s,
+ * and a person who genuinely wants to play has committed a tile long before
+ * this. It only ever fires on someone who is stuck, and bailing to attract is
+ * the right answer for them too — attract is the screen that teaches the
+ * gesture.
+ */
+const MENU_HARD_CAP_SEC = 75;
+
+/**
+ * Age at which a vision frame stops counting as evidence that anyone is there.
+ * Same figure as `GameBase`; see the guard in `updateTracking`.
+ */
+const VISION_STALE_MS = 1500;
+
 /** Tiles per row, top row first. 4 + 3 keeps every tile large and centred. */
 const ROW_SIZES = [4, 3] as const;
 
@@ -313,14 +339,22 @@ export class MenuScreen implements Screen {
     if (state.present) this.stalledTime = 0;
     else this.stalledTime += fc.dt;
 
-    if (
-      !this.launching &&
-      !this.exiting &&
-      (this.idleTime > IDLE_TIMEOUT_SEC || this.stalledTime > PRESENCE_STALL_SEC)
-    ) {
-      // Tell attract this body did not engage, so it holds longer before
+    // The hard cap ignores `launching` as well: once that latch is set it is
+    // never cleared, so gating every exit on it leaves a failed launch with no
+    // way off this screen at all.
+    const cappedOut = fc.time - this.enterTime > MENU_HARD_CAP_SEC;
+    const unengaged = this.stalledTime > PRESENCE_STALL_SEC;
+    const empty = this.idleTime > IDLE_TIMEOUT_SEC;
+
+    if (!this.exiting && (cappedOut || (!this.launching && (empty || unengaged)))) {
+      // Tell attract this BODY did not engage, so it holds longer before
       // putting the menu back up. See BOUNCE_COOLDOWN_SEC.
-      noteMenuTimeout();
+      //
+      // Only on the paths where there actually was a body. `idleTime` firing
+      // means the stall is EMPTY, and charging the next visitor — who may
+      // arrive five seconds later — a 3x bounce penalty for the previous
+      // person having walked away is backwards.
+      if (unengaged || cappedOut) noteMenuTimeout();
       this.leave('attract');
     }
 
@@ -389,8 +423,28 @@ export class MenuScreen implements Screen {
       this.proj.update(fc.v, { cameraWidth: camW, cameraHeight: camH });
     }
 
+    // STALE VISION MEANS NOBODY. This is the worst strand in the shell.
+    //
+    // The tracker is only stepped on a NEW frameId, so a dead or wedged vision
+    // worker leaves `this.player` pointing at a frozen body forever. On this
+    // screen that disables BOTH exits at once: `idleTime` is pinned at 0 by
+    // the non-null player, and if the frozen landmarks happen to have a wrist
+    // up, `hover.sample` keeps returning a point so `state.present` pins
+    // `stalledTime` at 0 as well. The menu then sits there until somebody
+    // notices and reloads the page. Same guard as `GameBase.updateTracking`.
+    if (fc.vision && fc.now - fc.vision.captureTime > VISION_STALE_MS) {
+      if (this.player) {
+        this.player = null;
+        this.tracker.reset();
+      }
+      return;
+    }
+
     if (!fc.vision || fc.vision.frameId === this.lastFrameId) return;
     this.lastFrameId = fc.vision.frameId;
+
+    // No `setOptions({ aspect })`: the tracker follows the live camera aspect
+    // by itself, and passing one explicitly would pin it away from that.
     this.tracker.update(fc.vision.poses, fc.time);
     this.player = this.tracker.getPrimary();
   }
@@ -405,9 +459,49 @@ export class MenuScreen implements Screen {
     const { v } = fc;
     const top = vh(v, GRID_TOP);
     const bottom = vh(v, GRID_BOTTOM);
-    const gap = vh(v, SPACE.md);
+    // THE GUTTER IS THE ONLY THING BETWEEN PICKING A GAME AND PICKING THE
+    // WRONG GAME, AND IT WAS 2.2vh.
+    //
+    // Reported from the playtest: "sens is low for selecting, might pick the
+    // wrong game." A wrong pick costs a whole turn out of a moving queue, so
+    // it is much worse than no pick at all.
+    //
+    // The hit rect IS the visual rect, and tiles sit `gap` apart, so `gap` is
+    // the entire dead band between two neighbours. At 16:9 the old numbers
+    // worked out as tiles 40.7vh wide separated by 2.2vh — and the hand cursor
+    // maps ±`hover.reachX` (1.7) shoulder widths across the full 177.8vh of
+    // screen, so one shoulder width is 52.3vh:
+    //
+    //   old gutter  2.2vh = 0.042 shoulder widths ~ 1.7cm of wrist travel
+    //   new gutter  4.4vh = 0.084 shoulder widths ~ 3.4cm
+    //
+    // Under two centimetres of hand movement separated one game from another,
+    // for someone waving at a TV from three metres with a filter that lags.
+    //
+    // Doubling it costs almost nothing, because the cost comes out of tile
+    // WIDTH and there are four of them sharing it:
+    //
+    //   tile   40.7 x 31.4vh  ->  39.0 x 30.3vh   (-4.1% wide, -3.5% tall)
+    //
+    // A 4% smaller target in exchange for a 100% wider miss margin, and the
+    // miss now lands on NOTHING — where the dwell drains and the player simply
+    // corrects — instead of silently arming a game they did not choose.
+    //
+    // Deliberately NOT the other fix that gets suggested here, enlarging hit
+    // rects past their visual rects: with tiles this close together that
+    // removes the dead band entirely (or overlaps it), which makes the exact
+    // reported failure more likely, not less.
+    const gapY = vh(v, SPACE.lg);
+    // vh is the right unit for a TV (ARCHITECTURE hard rule 7) and the wrong
+    // one for a HORIZONTAL gap on a narrow window: `vh` is a fraction of
+    // HEIGHT, so in a tall operator window the gutter grows while the space it
+    // is eating shrinks. Measured in a 476x850 pane, a 4.4vh gutter is 37px
+    // against 73px-wide tiles — half the tile. Same width-relative ceiling the
+    // Runner's lane indicator uses, and for the same reason: the TV never
+    // reaches it, a windowed screen does.
+    const gapX = Math.min(gapY, v.width * 0.035);
     const sideMargin = vh(v, SAFE + SPACE.xs);
-    const rowH = (bottom - top - gap * (ROW_SIZES.length - 1)) / ROW_SIZES.length;
+    const rowH = (bottom - top - gapY * (ROW_SIZES.length - 1)) / ROW_SIZES.length;
 
     const order = tilesInDisplayOrder();
     this.targets = [];
@@ -417,10 +511,10 @@ export class MenuScreen implements Screen {
       const usable = v.width - sideMargin * 2;
       // Every row uses the widest row's cell width, so a short row is centred
       // rather than stretched into oversized tiles.
-      const cellW = (usable - gap * (Math.max(...ROW_SIZES) - 1)) / Math.max(...ROW_SIZES);
-      const rowW = cellW * count + gap * (count - 1);
+      const cellW = (usable - gapX * (Math.max(...ROW_SIZES) - 1)) / Math.max(...ROW_SIZES);
+      const rowW = cellW * count + gapX * (count - 1);
       const startX = (v.width - rowW) / 2;
-      const y = top + row * (rowH + gap);
+      const y = top + row * (rowH + gapY);
 
       for (let col = 0; col < count; col++) {
         const tile = order[index];
@@ -428,7 +522,7 @@ export class MenuScreen implements Screen {
         if (!tile) break;
         this.targets.push({
           id: tile.id,
-          x: startX + col * (cellW + gap),
+          x: startX + col * (cellW + gapX),
           y,
           w: cellW,
           h: rowH,
@@ -441,6 +535,24 @@ export class MenuScreen implements Screen {
   /* ---------------- select ---------------- */
 
   private commit(fc: FrameContext, id: string, x: number, y: number): void {
+    // ONE LAUNCH PER LAUNCH.
+    //
+    // `HoverState.committed` is documented as a one-frame edge, and on the
+    // happy path it is — but `HoverCursor.update` has a LOST_GRACE_SEC branch
+    // that returns THE SAME STATE OBJECT, `committed` still set, whenever the
+    // wrist goes away. This screen guarantees that happens on every single
+    // launch, because the line that drives the cursor passes `null` for the
+    // player the moment `launching` is set:
+    //
+    //     this.cursor.update(fc, this.launching ? null : this.player, ...)
+    //
+    // So frame N commits, and frames N+1..N+18 re-deliver the same commit for
+    // the full 0.3s of grace. Un-guarded that was ~18 stacked `whoosh` voices
+    // and ~18 celebrate bursts per selection, and because `launchAt` was
+    // restamped every one of those frames the hold before the wipe ran ~0.45s
+    // instead of DUR.fast's 0.15s.
+    if (this.launching) return;
+
     const tile = MENU_TILES.find((t) => t.id === id);
     if (!tile || !isTileAvailable(tile)) return;
     this.launching = id;
@@ -488,7 +600,13 @@ export class MenuScreen implements Screen {
       size: fitText(ctx, title, v.width - vh(v, SAFE * 2), vh(v, TYPE.title)),
       color: COLORS.ink,
       weight: WEIGHT.black,
-      shadow: vh(v, SHADOW.lifted),
+      // Ink glyphs get a PAPER KNOCKOUT, never an ink shadow. `drawText`'s
+      // shadow re-fills the same glyphs in ink one offset down, which under
+      // ink letterforms is the word printed twice — reported from the
+      // playtest as "text might be doubled". The knockout also does the job
+      // this line actually needs, which is separating the title from the live
+      // skeleton `drawBackdrop` paints behind it.
+      knockout: true,
       letterSpacing: TRACK.h1,
       alpha: t,
     });
@@ -610,11 +728,27 @@ export class MenuScreen implements Screen {
       const active = isTileAvailable(tile);
       const color = active ? tile.color : COLORS.muted;
 
-      // Brand button states: rest 5px, hover lift 2px with a 7px shadow,
-      // press 0px. The lift is real geometry, not a colour change, which is
-      // what makes it survive being looked at from the back of a queue.
-      const lift = chosen ? vh(v, SHADOW.base) : isHovered ? -vh(v, 0.2) : 0;
-      const drop = chosen ? 0 : isHovered ? vh(v, SHADOW.lifted) : vh(v, SHADOW.base);
+      // Brand button states: rest, hover LIFT, press flat. The lift is real
+      // geometry, not a colour change, which is what makes it survive being
+      // looked at from the back of a queue.
+      //
+      // The hover lift was -0.2vh against a rest state of 0, with the outline
+      // going from 0.41vh to 0.54vh. Two pixels and a third of a pixel of
+      // stroke, on a 1080p TV, at three metres: the player could not tell
+      // which tile was armed until the dwell fill had already climbed. That is
+      // half of "might pick the wrong game" — you cannot correct a mistake you
+      // cannot see, and the whole point of a 1.2s dwell is that there is time
+      // to correct it.
+      //
+      // 0.9vh of lift with a matching 1.6vh drop is an unmistakable step out
+      // of the grid — roughly a tenth of a tile height of separation — and it
+      // costs nothing but two numbers.
+      const lift = chosen ? vh(v, SHADOW.base) : isHovered ? -vh(v, 0.9) : 0;
+      const drop = chosen
+        ? 0
+        : isHovered
+          ? vh(v, SHADOW.lifted + 0.9)
+          : vh(v, SHADOW.base);
       const ty = target.y + lift;
 
       stickerCard(ctx, v, target.x, ty, target.w, target.h, {
@@ -765,6 +899,31 @@ export class MenuScreen implements Screen {
         ? 'RAISE A HAND TO POINT'
         : null;
 
+    // WHICHEVER DEADLINE IS ACTUALLY RUNNING.
+    //
+    // This used to read `IDLE_TIMEOUT_SEC - this.idleTime` only, and it sat
+    // BELOW an early `return` that fires whenever `this.player` is null. But
+    // `idleTime` is reset to 0 on every frame a player IS present — so on the
+    // one path that could reach this line, `idleTime` was always exactly 0,
+    // `remaining` was always 20, `urgent` was always false, and the red
+    // "RETURNING IN n" warning was unreachable dead code.
+    //
+    // Meanwhile the timer that does fire for a present-but-confused player is
+    // `stalledTime`, which had no countdown at all: the screen simply wiped
+    // out from under them mid-decision. Now the countdown tracks whichever of
+    // the three is closest, and it is drawn ALONGSIDE the prompt pill rather
+    // than instead of it — the prompt says what to do and the countdown says
+    // how long they have, and they are never in competition.
+    const remaining = Math.max(
+      0,
+      Math.min(
+        this.player ? Infinity : IDLE_TIMEOUT_SEC - this.idleTime,
+        PRESENCE_STALL_SEC - this.stalledTime,
+        MENU_HARD_CAP_SEC - (fc.time - this.enterTime)
+      )
+    );
+    const urgent = remaining < 8;
+
     if (prompt) {
       ctx.save();
       ctx.translate(v.width / 2, y);
@@ -776,11 +935,19 @@ export class MenuScreen implements Screen {
         shadow: vh(v, SHADOW.base),
       });
       ctx.restore();
+
+      if (urgent) {
+        drawTabularNumber(ctx, `RETURNING IN ${Math.ceil(remaining)}`, v.width / 2, y - vh(v, 4.6), {
+          size: vh(v, TYPE.label),
+          color: COLORS.red,
+          font: FONTS.body,
+          weight: WEIGHT.black,
+          letterSpacing: TRACK.pill,
+        });
+      }
       return;
     }
 
-    const remaining = Math.max(0, IDLE_TIMEOUT_SEC - this.idleTime);
-    const urgent = remaining < 8;
     if (urgent) {
       drawTabularNumber(ctx, `RETURNING IN ${Math.ceil(remaining)}`, v.width / 2, y, {
         size: vh(v, TYPE.label),

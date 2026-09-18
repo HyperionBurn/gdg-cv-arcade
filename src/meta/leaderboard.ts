@@ -48,6 +48,12 @@ export interface RankResult {
   nextRank: number | null;
   /** Previous best for these initials, if we've seen them before. */
   personalBest: number | null;
+  /**
+   * What `submit` actually wrote to the board, after sanitising. Only set by
+   * `submit`; absent on a preview. Show THIS on a confirmation screen, so the
+   * payoff and the board can never disagree about someone's name.
+   */
+  storedInitials?: string;
 }
 
 const STORAGE_KEY = 'gdg-arcade:leaderboard:v1';
@@ -69,6 +75,45 @@ export const FACTIONS = [
 
 export type Faction = (typeof FACTIONS)[number];
 
+/**
+ * Every game id that may appear in a persisted store.
+ *
+ * `GameId` is a compile-time type and `JSON.parse` output is not type-checked,
+ * so without a runtime allowlist an `as GameId` cast on a loaded key lets a
+ * corrupt or hand-edited store invent games. `getPlayCounts()` then returns
+ * ids nothing else recognises, and a consumer doing
+ * `MENU_TILES.find((t) => t.id === game)` gets `undefined` — which is the
+ * "undefined on a TV in front of a queue" failure this whole file is careful
+ * about everywhere else.
+ *
+ * It also closes a prototype hole: `JSON.parse` produces a real own
+ * `"__proto__"` key, and assigning through it on a plain object literal
+ * rewrites the accumulator's prototype rather than adding a board.
+ */
+const GAME_IDS: readonly GameId[] = [
+  'sixtyseven',
+  'fruitninja',
+  'redlight',
+  'runner',
+  'posematch',
+  'rhythm',
+  'balloonpop',
+];
+
+function isGameId(k: string): k is GameId {
+  return (GAME_IDS as readonly string[]).includes(k);
+}
+
+/**
+ * Three glyphs, A-Z0-9 only. The single definition of what an initials string
+ * is allowed to be, applied on the way IN from storage as well as on submit —
+ * a loaded entry used to bypass sanitising entirely, so a corrupt store could
+ * put a 4KB string or an emoji straight onto the board screen.
+ */
+function cleanInitials(raw: string): string {
+  return (raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) || 'AAA').padEnd(3, '-');
+}
+
 interface Store {
   boards: Partial<Record<GameId, Entry[]>>;
   factionTotals: Record<string, number>;
@@ -79,32 +124,62 @@ function emptyStore(): Store {
   return { boards: {}, factionTotals: {}, plays: {} };
 }
 
-function isEntry(e: unknown): e is Entry {
-  if (!e || typeof e !== 'object') return false;
+/**
+ * A loaded row, repaired to exactly what `submit` would have written, or null.
+ *
+ * Returns a NEW object rather than narrowing in place, because the checks
+ * `submit` applies (initials sanitising, a positive integer score, a faction
+ * that is a string or nothing) were only ever applied on the way in from the
+ * keypad. Anything already in storage went straight onto the board.
+ */
+function readEntry(e: unknown): Entry | null {
+  if (!e || typeof e !== 'object') return null;
   const x = e as Partial<Entry>;
-  return (
-    typeof x.initials === 'string' &&
-    typeof x.score === 'number' &&
-    Number.isFinite(x.score) &&
-    typeof x.at === 'number' &&
-    Number.isFinite(x.at)
-  );
+  if (typeof x.initials !== 'string') return null;
+  if (typeof x.score !== 'number' || !Number.isFinite(x.score) || x.score <= 0) return null;
+  if (typeof x.at !== 'number' || !Number.isFinite(x.at)) return null;
+  // `faction` was not checked at all. A non-string one survived, and
+  // `removeEntry` then keyed `factionTotals` on "[object Object]".
+  const faction = typeof x.faction === 'string' ? x.faction : null;
+  return {
+    initials: cleanInitials(x.initials),
+    score: Math.round(x.score),
+    faction,
+    at: x.at,
+  };
 }
 
 /** Keeps only boards that are arrays of well-formed, finite-scored entries. */
 function validBoards(raw: unknown): Partial<Record<GameId, Entry[]>> {
-  const out: Partial<Record<GameId, Entry[]>> = {};
+  const out: Partial<Record<GameId, Entry[]>> = Object.create(null);
   if (!raw || typeof raw !== 'object') return out;
   for (const [game, board] of Object.entries(raw as Record<string, unknown>)) {
-    if (!Array.isArray(board)) continue;
-    const clean = board.filter(isEntry);
-    if (clean.length > 0) out[game as GameId] = clean;
+    if (!isGameId(game) || !Array.isArray(board)) continue;
+    const clean = board
+      .map(readEntry)
+      .filter((e): e is Entry => e !== null)
+      // RE-SORT AND RE-CAP ON LOAD.
+      //
+      // `previewRank` breaks on the first entry it beats, `getBest` returns
+      // `board[0]` and `getScoreAtRank` indexes positionally — every rank
+      // query in this file assumes descending order, and nothing was
+      // enforcing it. A store that is corrupt but well-FORMED (hand-edited
+      // for the writeup, half-written, pasted in) therefore produced wrong
+      // ranks and a wrong "NEW RECORD" on every submission afterwards, which
+      // is precisely the "half-works and corrupts everything after it" case
+      // the comment in `load()` says we drop things to avoid.
+      //
+      // Same tie-break as `submit`: equal scores, earlier entry first.
+      .sort((a, b) => b.score - a.score || a.at - b.at)
+      // `submit` caps at 100; `load` did not, so a grown store never shrank.
+      .slice(0, 100);
+    if (clean.length > 0) out[game] = clean;
   }
   return out;
 }
 
 function validTotals(raw: unknown): Record<string, number> {
-  const out: Record<string, number> = {};
+  const out: Record<string, number> = Object.create(null);
   if (!raw || typeof raw !== 'object') return out;
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
     if (typeof v === 'number' && Number.isFinite(v)) out[k] = v;
@@ -113,10 +188,10 @@ function validTotals(raw: unknown): Record<string, number> {
 }
 
 function validPlays(raw: unknown): Partial<Record<GameId, number>> {
-  const out: Partial<Record<GameId, number>> = {};
+  const out: Partial<Record<GameId, number>> = Object.create(null);
   if (!raw || typeof raw !== 'object') return out;
   for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof v === 'number' && Number.isFinite(v)) out[k as GameId] = v;
+    if (isGameId(k) && typeof v === 'number' && Number.isFinite(v)) out[k] = v;
   }
   return out;
 }
@@ -160,13 +235,41 @@ class Leaderboard {
     }
   }
 
+  /**
+   * True once a write has failed. Surfaced so the operator console can say so.
+   *
+   * The quota path used to be entirely silent: scores kept accumulating in
+   * memory and vanished on the next reload, on the one store that has to carry
+   * Sept 24 into Sept 26.
+   */
+  saveFailed = false;
+
   private save(): void {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(this.store));
+      this.saveFailed = false;
     } catch {
       /* private mode / quota — keep running in memory */
+      this.saveFailed = true;
     }
-    for (const fn of this.listeners) fn();
+
+    // EVERY LISTENER IN ITS OWN TRY.
+    //
+    // This loop was outside the try above, so a throwing subscriber propagated
+    // out of `save()` -> `submit()` -> `InitialsScreen.finish()`. That screen
+    // sets its `submitted` latch BEFORE the call and its `phase = 'done'`
+    // AFTER, so a throw here left it latched in the 'letters' phase with every
+    // exit — the hard deadline, the abandon timer, and OK — reduced to a
+    // no-op. The kiosk sat on "SAVING IN 0" until someone reloaded it.
+    //
+    // A broken observer must never be able to take down the thing it observes.
+    for (const fn of this.listeners) {
+      try {
+        fn();
+      } catch (err) {
+        console.error('[leaderboard] listener threw', err);
+      }
+    }
   }
 
   subscribe(fn: () => void): () => void {
@@ -195,7 +298,16 @@ class Leaderboard {
    * What rank a score WOULD get, without committing it. Used to show a live
    * target during play rather than only at the end.
    */
-  previewRank(game: GameId, score: number): RankResult {
+  previewRank(game: GameId, rawScore: number): RankResult {
+    // NOTHING NON-FINITE GETS PAST HERE.
+    //
+    // There was no input guard at all, and `Math.max(1, NaN)` is NaN — so a
+    // NaN score propagated into `pointsToNext` and rendered on the results
+    // screen as the literal string "NaN OFF #3". A fractional score rendered
+    // "3.5 OFF #2". Both are reachable from `setScore`, from `?screen=initials`
+    // and from the operator console.
+    const score = Number.isFinite(rawScore) ? Math.round(rawScore) : 0;
+
     const board = this.getBoard(game);
     let rank = board.length + 1;
     for (let i = 0; i < board.length; i++) {
@@ -228,22 +340,40 @@ class Leaderboard {
    * the leaderboard — the entire competitive layer — look broken to everyone
    * standing in the queue reading it.
    */
-  submit(game: GameId, score: number, initials: string, faction: string | null): RankResult {
-    if (!(score > 0)) return this.previewRank(game, score);
+  submit(game: GameId, rawScore: number, initials: string, faction: string | null): RankResult {
+    const score = Number.isFinite(rawScore) ? Math.round(rawScore) : 0;
+
+    // A DROPPED SCORE MUST NOT REPORT A PLACE.
+    //
+    // This returned a bare `previewRank`, and on a board with fewer than TOP_N
+    // entries `previewRank` hands back a NON-NULL rank — so a score that was
+    // deliberately never stored still came back as `#4`, with a
+    // "2 OFF THIRD" chase line and a green faction-points pill for points that
+    // were never added. On an empty board it reported `#1`. `GameBase` guards
+    // its own call with `best.score > 0`, but `setScore`, `?screen=initials`
+    // and the operator console all reach this directly.
+    if (!(score > 0)) {
+      return {
+        ...this.previewRank(game, score),
+        rank: null,
+        isRecord: false,
+        isFirst: false,
+        pointsToNext: null,
+        nextRank: null,
+      };
+    }
 
     const board = [...this.getBoard(game)];
 
     // Always three glyphs. The auto-accept deadline can submit a partial entry,
     // and 'P' sitting in a column of 'GDG' looks like a bug rather than a name.
-    const cleanInitials =
-      (initials.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) || 'AAA').padEnd(3, '-');
+    const stored = cleanInitials(initials);
     const personalBest =
-      board.filter((e) => e.initials === cleanInitials).reduce((m, e) => Math.max(m, e.score), 0) ||
-      null;
+      board.filter((e) => e.initials === stored).reduce((m, e) => Math.max(m, e.score), 0) || null;
 
     const preview = this.previewRank(game, score);
 
-    board.push({ initials: cleanInitials, score, faction, at: Date.now() });
+    board.push({ initials: stored, score, faction, at: Date.now() });
     board.sort((a, b) => b.score - a.score || a.at - b.at);
 
     // Keep a bit more than we display — useful for the post-event writeup and
@@ -257,7 +387,11 @@ class Leaderboard {
 
     this.save();
 
-    return { ...preview, personalBest };
+    // `storedInitials` so the payoff sticker can show what the BOARD shows.
+    // A deadline-triggered partial entry of "W" is stored as "W--", and the
+    // done screen used to display the raw "W" while the leaderboard a few
+    // seconds later displayed "W--".
+    return { ...preview, personalBest, storedInitials: stored };
   }
 
   /* ---------------- factions ---------------- */
@@ -268,10 +402,21 @@ class Leaderboard {
       .sort((a, b) => b.total - a.total);
   }
 
-  /** Remembers the last faction chosen so repeat players skip the picker. */
-  getLastFaction(): string | null {
+  /**
+   * Remembers the last faction chosen so repeat players skip the picker.
+   *
+   * VALIDATED AGAINST THE CURRENT LIST. `FACTIONS` is flagged above as a
+   * placeholder the club will edit once they decide majors-or-years, and that
+   * edit lands between Day 1 and Day 2. A returning player whose stored
+   * faction no longer exists used to have the picker SKIPPED and their points
+   * credited to a bucket the standings screen can never look up — the points
+   * simply vanished, with no error anywhere. An unknown value now means
+   * "ask again", which is the right answer for a changed list.
+   */
+  getLastFaction(): Faction | null {
     try {
-      return localStorage.getItem(FACTION_KEY);
+      const v = localStorage.getItem(FACTION_KEY);
+      return v !== null && (FACTIONS as readonly string[]).includes(v) ? (v as Faction) : null;
     } catch {
       return null;
     }
@@ -300,6 +445,11 @@ class Leaderboard {
   /** Operator console: remove a bogus score without nuking the board. */
   removeEntry(game: GameId, index: number): void {
     const board = [...this.getBoard(game)];
+    // BOUNDS FIRST. `splice` takes a negative index from the END, so a stale
+    // or mistyped -1 silently deleted the LAST row and debited the wrong
+    // faction — on a console whose entire job is correcting a bogus score.
+    if (!Number.isInteger(index) || index < 0 || index >= board.length) return;
+
     const removed = board.splice(index, 1)[0];
     if (removed?.faction) {
       this.store.factionTotals[removed.faction] = Math.max(
@@ -308,6 +458,9 @@ class Leaderboard {
       );
     }
     this.store.boards[game] = board;
+    // `plays` was left alone, so every correction drifted the play counts
+    // further from the boards they are reported next to.
+    this.store.plays[game] = Math.max(0, (this.store.plays[game] ?? 1) - 1);
     this.save();
   }
 
@@ -318,6 +471,15 @@ class Leaderboard {
 
   clearAll(): void {
     this.store = emptyStore();
+    // The remembered faction lives under its own key and survived a reset, so
+    // after a between-days wipe a returning player still skipped the picker
+    // and credited points to a faction the freshly-empty standings showed as
+    // new. A reset that leaves state behind is not a reset.
+    try {
+      localStorage.removeItem(FACTION_KEY);
+    } catch {
+      /* private mode — nothing was persisted anyway */
+    }
     this.save();
   }
 

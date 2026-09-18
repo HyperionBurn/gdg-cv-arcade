@@ -53,7 +53,7 @@
  * rotate the limb angles, which stay absolute.
  */
 
-import { POSE, type Landmark } from '../core/types';
+import { POSE, POSE_LANDMARK_COUNT, type Landmark } from '../core/types';
 import { tunables } from '../meta/tunables';
 import type { TrackedPlayer } from '../core/tracker';
 import { COLORS } from '../shell/theme';
@@ -205,6 +205,101 @@ export function passThreshold(): number {
 
 /** Below this a landmark is guesswork; ignore the segment rather than fail it. */
 const MIN_VISIBILITY = 0.5;
+
+/* ------------------------------------------------------------------ */
+/* Left/right label swap                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * LEFT_x <-> RIGHT_x landmark indices; identity for everything on the midline.
+ *
+ * Derived from POSE rather than listed by hand so a landmark added to the enum
+ * cannot be silently left unpaired.
+ */
+const MIRRORED_LANDMARK: readonly number[] = (() => {
+  const map = Array.from({ length: POSE_LANDMARK_COUNT }, (_, i) => i);
+  for (const key of Object.keys(POSE)) {
+    if (!key.startsWith('LEFT_')) continue;
+    const l = (POSE as Record<string, number>)[key];
+    const r = (POSE as Record<string, number>)[key.replace('LEFT_', 'RIGHT_')];
+    if (l === undefined || r === undefined) continue;
+    map[l] = r;
+    map[r] = l;
+  }
+  return map;
+})();
+
+/**
+ * How much side evidence, in torso units, before we believe the labels.
+ *
+ * MediaPipe's LEFT_/RIGHT_ are SUBJECT-relative and INFERRED, not observed, so
+ * a body turning, crossing its arms or standing at an angle can flip them for a
+ * run of frames. Every other detector in the app is immune by construction —
+ * `LaneDetector` and `VerticalGestures` read MIDPOINTS, and 67 sums both arms —
+ * so this game is the only place a swap changes an answer, and it changes it
+ * catastrophically: a swap turns a held pose into its mirror, and the scorer
+ * compares direction vectors, so a mirrored limb reads as maximally wrong
+ * rather than merely different.
+ *
+ * MEASURED — what a sustained swap costs, as `poseConfusion(mirror(p), p)`
+ * for the shipped library against PASS_THRESHOLD 0.66:
+ *
+ *   symmetric  (T, TOUCHDOWN, GOALPOST, FLEX, CHICKEN, ORANGUTAN)  1.000  pass
+ *   ROBOT                                                          0.276  FAIL
+ *   TAXI, TEAPOT, DISCO, ZORRO, BOLT                               0.000  FAIL
+ *
+ * Half the library, including every pose above difficulty 0.2, becomes
+ * unclearable no matter how perfectly the player holds the shape. The wall
+ * closes on someone who did exactly what the hole showed them, which is the
+ * one failure this game must never produce.
+ *
+ * THE SIGNAL. A player facing the camera has their own left at the LARGER x
+ * (see the angle convention at the top of this file), so
+ * `(LEFT_SHOULDER.x - RIGHT_SHOULDER.x) + (LEFT_HIP.x - RIGHT_HIP.x)`,
+ * aspect-corrected and in torso units, is strongly positive when the labels
+ * are right and strongly negative when they are not.
+ *
+ * MEASURED over all 12 poses, 60fps, One Euro `poseHold`, frames within 15 of
+ * a transition excluded (n = 4278/2807 realistic, 4408/2709 hostile):
+ *
+ *                       labels correct          labels swapped
+ *   realistic body   min +1.273  p50 +1.363   max -1.262  p50 -1.364
+ *   hostile body     min +1.161  p50 +1.362   max -1.167  p50 -1.361
+ *
+ * The two populations are separated by 2.3 torso units with nothing in
+ * between. 0.35 sits 3.3x below the smallest legitimate reading, so it cannot
+ * be reached by noise, and anything inside ±0.35 is a body too side-on to
+ * call — during a transition One Euro blends the two states and the evidence
+ * passes through zero (p50 +0.11). Those frames are left AS REPORTED rather
+ * than guessed at: the blended skeleton scores badly either way, and `best`
+ * is a decaying peak that rides straight over them.
+ */
+export const SIDE_EVIDENCE_UNITS = 0.35;
+
+/**
+ * True when MediaPipe has this body's left and right the wrong way round.
+ *
+ * Reads the same filtered array `poseSimilarity` scores, so detection and
+ * scoring can never disagree about which frame they are looking at.
+ */
+export function sidesSwapped(player: TrackedPlayer): boolean {
+  const lms = player.landmarks;
+  const ls = lms[POSE.LEFT_SHOULDER];
+  const rs = lms[POSE.RIGHT_SHOULDER];
+  const lh = lms[POSE.LEFT_HIP];
+  const rh = lms[POSE.RIGHT_HIP];
+  if (!ls || !rs || !lh || !rh) return false;
+  if (
+    Math.min(ls.visibility, rs.visibility, lh.visibility, rh.visibility) < MIN_VISIBILITY
+  ) {
+    return false;
+  }
+  const unit = player.scale.unit;
+  if (!(unit > 0)) return false;
+  const evidence = ((ls.x - rs.x + (lh.x - rh.x)) * player.scale.aspect) / unit;
+  return evidence < -SIDE_EVIDENCE_UNITS;
+}
+
 /**
  * A segment shorter than this many body units is foreshortened (pointing at the
  * camera) or mis-detected, and its direction is noise. Expressed in
@@ -214,6 +309,100 @@ const MIN_VISIBILITY = 0.5;
 const MIN_SEGMENT_UNITS = 0.09;
 /** Below this fraction of total weight we are not looking at enough body. */
 const MIN_COVERAGE = 0.35;
+
+/**
+ * Fraction of the ARM weight that must be visible for the arms to be trusted
+ * to decide the pose on their own.
+ *
+ * Arms carry ~64% of the stacked weight, and the comment on SEGMENTS is blunt
+ * about why: "Legs are flavour; arms are the game." Arm coverage therefore
+ * takes exactly three values in practice, because what drops out is wrists:
+ * 1.00 with both forearms seen, 0.79 with one gone, 0.58 with both gone.
+ *
+ * 0.85 means "anything less than both forearms". Above it the scorer behaves
+ * exactly as it always has; at or below it the rest test in REST_MARGIN is
+ * also required. When the camera can see less, we demand more — and the
+ * threshold sits above 0.79 so that even ONE missing forearm triggers it.
+ */
+const MIN_ARM_COVERAGE = 0.85;
+
+/**
+ * How much better than STANDING STILL the target pose must explain the body
+ * before a DEGRADED frame counts as evidence of the pose at all.
+ *
+ * WHY A RELATIVE TEST AND NOT A HIGHER THRESHOLD. `validateLibrary` proves at
+ * module load that no shipped pose scores above 0.55 against `REST_POSE`, and
+ * that proof is what stops a wall opening for a player who does nothing — the
+ * single worst failure this game has, per REST_POSE's own comment. But the
+ * proof assumes the WHOLE body is visible, and the scorer deliberately drops
+ * invisible segments from both sides of the ratio. Drop enough of the right
+ * ones and the proof evaporates.
+ *
+ * MEASURED, motionless body, realistic input, 3000 frames x 12 poses. Arm
+ * coverage takes exactly three values, because it is the forearms that drop:
+ *
+ *   both forearms seen   (armCov 1.00)   max idle score  0.458   realistic
+ *   one forearm gone     (armCov 0.79)   max idle score  0.614     0.636 hostile
+ *   both forearms gone   (armCov 0.58)   max idle score  0.995     0.996 hostile
+ *
+ * With both forearms unseen, THE FLEX (upper arms at 24 degrees) is
+ * indistinguishable from standing at rest (14 degrees) — every remaining
+ * segment agrees — so an idle body scored 0.995 against it and cleared the
+ * wall. Confirmed end to end: a player who stood still for a full 60s round
+ * under realistic input cleared 1 wall of 15 and finished with a score.
+ *
+ * A coverage floor cannot fix this. Both forearms gone leaves total coverage
+ * 0.73 and BOTH LEGS gone leaves 0.72 — and legs out of frame is the normal
+ * case at a stall, which the scorer must keep forgiving. The two are
+ * indistinguishable by coverage alone.
+ *
+ * So instead: score REST over exactly the same visible segments and require
+ * the target to beat it. That is the library's own guarantee, re-applied to
+ * the evidence actually in hand, and it does not care what `passThreshold()`
+ * has been tuned to — which matters, because that slider is expected to go
+ * DOWN on the day and every absolute margin here shrinks with it.
+ *
+ * MEASURED, target-minus-rest margin:
+ *
+ *                       idle body (48000 samples)     held pose (4200)
+ *   realistic           p90 -0.573   MAX +0.002       p01 +0.385  p10 +0.656
+ *   hostile             p90 -0.566   MAX +0.006       p01 +0.373  p10 +0.650
+ *
+ * 0.05 sits 8x above the largest margin an idle body ever produced and 7.5x
+ * below the first percentile of a real hold. The ~1% of held frames it does
+ * reject are frames where the visible limbs genuinely cannot tell the pose
+ * from standing still — rejecting those is the correct answer, and `best` is a
+ * decaying peak precisely so a handful of unreadable frames costs nothing.
+ *
+ * ONLY ON DEGRADED FRAMES — see MIN_ARM_COVERAGE. Applied unconditionally it
+ * also breaks the live meter, which is this game's second pillar ("the live
+ * state teaches it in one attempt"). Halfway into a T-pose the arms are at 45
+ * degrees, genuinely equidistant from rest and from the target, so the margin
+ * is ~0 and the reading is suppressed; MEASURED, the meter then sat at 0% for
+ * the first half of the movement and jumped straight to 83% — past CLOSE
+ * entirely, so a player never learns they are getting warmer. Restricting the
+ * test to frames where a forearm is missing leaves the meter's normal path
+ * completely untouched, because during an ordinary approach both arms are
+ * visible.
+ *
+ * VERIFIED after the change, 60000 idle pose-frames per condition:
+ *
+ *                    max idle score      frames at/over the gate
+ *   realistic            0.461                    0
+ *   hostile              0.498                    0
+ *
+ * (Before: 0.995 and 0.996, and a player who stood still through a full round
+ * finished with a score.) The gate is 0.66, so there is 0.16 of headroom — an
+ * idle body still cannot clear even if the threshold is tuned down to 0.55,
+ * which is the first thing a marshal would try.
+ *
+ * And the poses stay winnable: every one of the twelve clears on 97.8-100% of
+ * frames while genuinely held under HOSTILE input, p10 >= 0.985. The live
+ * meter's approach curve is unchanged and monotone — a T-pose reads
+ * 30 -> 51 -> 70 -> 86 -> 96 -> 100 across the movement, so NOT YET, CLOSE and
+ * <MATCH> all still appear in order.
+ */
+const REST_MARGIN = 0.05;
 
 export interface MatchResult {
   /** 0..1. Compare against PASS_THRESHOLD. */
@@ -229,11 +418,15 @@ export interface MatchResult {
 
 const INVALID: MatchResult = { score: 0, cosine: -1, coverage: 0, valid: false, worstGroup: null };
 
-function meanPoint(lms: readonly Landmark[], idx: readonly number[]): { x: number; y: number } | null {
+function meanPoint(
+  lms: readonly Landmark[],
+  idx: readonly number[],
+  flip = false
+): { x: number; y: number } | null {
   let sx = 0;
   let sy = 0;
   for (const i of idx) {
-    const lm = lms[i];
+    const lm = lms[flip ? MIRRORED_LANDMARK[i] ?? i : i];
     if (!lm || lm.visibility < MIN_VISIBILITY) return null;
     sx += lm.x;
     sy += lm.y;
@@ -284,6 +477,13 @@ function scoreFromCosine(cosine: number): number {
  * ratio rather than scored as mismatches. Cropped feet are the normal case at a
  * stall, and a player must never be failed for something the camera could not
  * see.
+ *
+ * The cost of that generosity is that the surviving segments can stop being
+ * able to tell the pose apart from STANDING STILL, and the library's
+ * whole-body proof that they can does not cover it. `REST_MARGIN` is the
+ * guard; the result is `valid: false` when the evidence in hand does not
+ * distinguish the two, because "this frame is not readable" is a truer answer
+ * than a confident number derived from four visible limbs.
  */
 export function poseSimilarity(player: TrackedPlayer, target: PoseAngles): MatchResult {
   const lms = player.landmarks;
@@ -291,17 +491,34 @@ export function poseSimilarity(player: TrackedPlayer, target: PoseAngles): Match
   const aspect = player.scale.aspect;
   if (!player.scale.valid || unit <= 0) return INVALID;
 
+  // UNDO A LEFT/RIGHT LABEL SWAP BEFORE MEASURING ANYTHING.
+  //
+  // Every segment below is read by LABEL, and MediaPipe's labels are inferred.
+  // When they flip, the scorer measures the player's right arm against the
+  // target's left and reports a perfectly-held pose as maximally wrong — see
+  // SIDE_EVIDENCE_UNITS for what that costs the shipped library. Reading the
+  // landmarks through the mirror map restores the labels the body actually has;
+  // the midline segments (torso, and the shoulder/hip midpoints it is built
+  // from) are unchanged by it, which is why only the limbs move.
+  const flip = sidesSwapped(player);
+
   let num = 0;
   let den = 0;
   let total = 0;
+  /** The same weighted cosine, against standing still. See REST_MARGIN. */
+  let restNum = 0;
+  /** Arm weight seen vs arm weight that exists. See MIN_ARM_COVERAGE. */
+  let armsSeen = 0;
+  let armsTotal = 0;
   const groupCost = new Map<SegmentGroup, number>();
 
   for (const seg of SEGMENTS) {
     const w2 = seg.weight * seg.weight;
     total += w2;
+    if (seg.group === 'arms') armsTotal += w2;
 
-    const a = meanPoint(lms, seg.from);
-    const b = meanPoint(lms, seg.to);
+    const a = meanPoint(lms, seg.from, flip);
+    const b = meanPoint(lms, seg.to, flip);
     if (!a || !b) continue;
 
     // Translation-normalised (a difference), scale-normalised (÷ unit) and
@@ -323,11 +540,20 @@ export function poseSimilarity(player: TrackedPlayer, target: PoseAngles): Match
     const len = Math.hypot(vx, vy);
     if (len < MIN_SEGMENT_UNITS) continue;
 
+    const ux = vx / len;
+    const uy = vy / len;
+
     const t = targetDirection(seg, target);
-    const c = (vx / len) * t.x + (vy / len) * t.y;
+    const c = ux * t.x + uy * t.y;
+
+    // Standing still, measured over the identical segment set — so the
+    // comparison below is like for like no matter which limbs dropped out.
+    const rest = targetDirection(seg, REST_POSE);
+    restNum += w2 * (ux * rest.x + uy * rest.y);
 
     num += w2 * c;
     den += w2;
+    if (seg.group === 'arms') armsSeen += w2;
     groupCost.set(seg.group, (groupCost.get(seg.group) ?? 0) + w2 * (1 - c));
   }
 
@@ -335,6 +561,22 @@ export function poseSimilarity(player: TrackedPlayer, target: PoseAngles): Match
   if (den <= 0 || coverage < MIN_COVERAGE) return { ...INVALID, coverage };
 
   const cosine = num / den;
+  const score = scoreFromCosine(cosine);
+
+  // ON A DEGRADED FRAME, DOES THIS BEAT STANDING STILL?
+  //
+  // Not a second threshold on the score — a comparison between two readings of
+  // the SAME segments, so it stays honest however few of them survived and
+  // whatever the pass threshold has been tuned to. Gated on arm coverage so
+  // that an ordinary approach, where both arms are visible, is scored exactly
+  // as before and the live meter keeps its full resolution.
+  const armCoverage = armsTotal > 0 ? armsSeen / armsTotal : 0;
+  if (
+    armCoverage < MIN_ARM_COVERAGE &&
+    score - scoreFromCosine(restNum / den) < REST_MARGIN
+  ) {
+    return { ...INVALID, coverage };
+  }
 
   let worstGroup: SegmentGroup | null = null;
   let worst = 0;
@@ -345,7 +587,7 @@ export function poseSimilarity(player: TrackedPlayer, target: PoseAngles): Match
     }
   }
 
-  return { score: scoreFromCosine(cosine), cosine, coverage, valid: true, worstGroup };
+  return { score, cosine, coverage, valid: true, worstGroup };
 }
 
 /**
@@ -393,14 +635,27 @@ export function poseConfusion(held: PoseAngles, target: PoseAngles): number {
  * Only ONE of these is ever on screen at a time, so the live skeleton stays
  * inside the two-brand-colours-per-component cap.
  *
- * `PASS_THRESHOLD` (the constant, not the tunable) is the green boundary on
- * purpose: green must mean "this would open the wall", which is the gate
- * `resolveWall` actually applies.
+ * THE GREEN BOUNDARY IS `passThreshold()`, THE LIVE VALUE — not the constant.
+ *
+ * It used to be the constant, with a comment claiming that was deliberate
+ * because "green must mean this would open the wall". That is the right rule
+ * and the constant is the wrong way to honour it: the gate `resolveWall`
+ * actually applies is `passThreshold()`, which reads the tunable. The registry
+ * ships the same 0.66 today, so the two agree until the moment somebody moves
+ * the slider — and moving that slider is the single thing it exists for. Both
+ * this file and `meta/tunables.ts` say in as many words that the Sept 22
+ * playtest is expected to want it LOWER.
+ *
+ * At 0.55, the first thing a marshal would try, every wall between 0.55 and
+ * 0.66 opened while the skeleton stayed yellow and the word underneath it said
+ * CLOSE. The player is told they missed by all three channels the design is
+ * built on — colour, word and number — and then walks through. That reads as
+ * the game being broken in the exact session held to find out whether it is.
  */
 export const CLOSE_THRESHOLD = 0.45;
 
 export function matchColor(score: number): string {
-  if (score >= PASS_THRESHOLD) return COLORS.green;
+  if (score >= passThreshold()) return COLORS.green;
   if (score >= CLOSE_THRESHOLD) return COLORS.yellow;
   return COLORS.red;
 }
@@ -414,7 +669,7 @@ export function matchColor(score: number): string {
  * an instruction to keep moving; "MISS" would be a verdict.
  */
 export function matchLabel(score: number): string {
-  if (score >= PASS_THRESHOLD) return '<MATCH>';
+  if (score >= passThreshold()) return '<MATCH>';
   if (score >= CLOSE_THRESHOLD) return 'CLOSE';
   return 'NOT YET';
 }
