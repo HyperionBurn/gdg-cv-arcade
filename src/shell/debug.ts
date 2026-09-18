@@ -19,6 +19,7 @@
 import { camera } from '../core/camera';
 import { vision } from '../core/vision';
 import { selectCandidates } from '../core/candidates';
+import { POSE } from '../core/types';
 import { COLORS, FONTS } from './theme';
 import type { FrameContext } from './screen';
 
@@ -110,6 +111,10 @@ function rows(fc: FrameContext): Row[] {
     ? selectCandidates(fc.vision.poses, {
         maxPlayers: 6,
         minArea: 0.02,
+        // Mirrors DEFAULT_TRACKER_OPTIONS: a turned body's bounding box shrinks
+        // even though the person has not moved, so `unit` is the second,
+        // rotation-stable way in.
+        minUnit: 0.085,
         minConfidence: 0.45,
         dedupeTorsos: 0.55,
         minRelativeSize: 0.5,
@@ -135,6 +140,31 @@ function rows(fc: FrameContext): Row[] {
     // Too close is the framing failure people actually make at a laptop.
     if (best.unit > 0.32) out.push({ label: 'framing', value: 'TOO CLOSE', bad: true });
     else if (best.unit < 0.07) out.push({ label: 'framing', value: 'too far', bad: true });
+
+    // HEADROOM: is there room ABOVE the player for a raised hand?
+    //
+    // Reported from a playtest as "when I reach up I get height restricted" on
+    // a rig framed down to the knees. A low, close camera frames the body
+    // beautifully and leaves nothing above the head — so a raised wrist exits
+    // the top of the frame, its landmark pins to y=0, and the cursor stops
+    // rising however far the hand keeps going. Indistinguishable from a
+    // detector bug unless someone can see it.
+    //
+    // Measured in torso units from the top of the frame to the shoulder line,
+    // because that is the space a raised arm has to fit into. A full overhead
+    // reach needs ~1.15; below that the top of the screen is unreachable no
+    // matter how the cursor is tuned, and the fix is the tripod, not the code.
+    const lm = best.pose.landmarks;
+    const ls = lm[POSE.LEFT_SHOULDER];
+    const rs = lm[POSE.RIGHT_SHOULDER];
+    if (ls && rs && best.unit > 0) {
+      const headroom = ((ls.y + rs.y) / 2) / best.unit;
+      out.push({
+        label: 'headroom',
+        value: `${headroom.toFixed(2)} torso`,
+        bad: headroom < 1.2,
+      });
+    }
   }
 
   // 6. Render cost, to separate "the game is slow" from "vision is slow".

@@ -70,6 +70,12 @@ interface Probe {
    * genre. Everything else scoring while idle is a bug.
    */
   idleMustBeZero: boolean;
+  /**
+   * Largest idle score still considered "scored nothing", for the one game
+   * where exactly zero is not achievable. Only consulted when
+   * `idleMustBeZero` is true. See the Red Light probe for why it exists.
+   */
+  idleMax?: number;
   /** Frames to let the lobby/countdown run before input starts. */
   warmupFrames: number;
   /** Frames of active play before checking the active score. */
@@ -120,6 +126,36 @@ const PROBES: Probe[] = [
     play: (s) => s.setPump(0),
     idle: (s) => s.setPump(0),
     idleMustBeZero: true,
+    /**
+     * The one game that cannot reach exactly zero, and it is the signal's
+     * fault rather than the game's.
+     *
+     * Progress is motion ABOVE this player's own still-level. Under realistic
+     * sensor noise the still and moving energy distributions OVERLAP — still
+     * p99 is 5.40 against moving p10 of 5.07 (see the measured table in
+     * redlight.ts) — so the tail of a motionless body crosses the line a few
+     * times a round however the threshold is placed.
+     *
+     * MEASURED over a full 45s round with a body that never moves: energy
+     * exceeded the threshold on 34 of 1538 green frames (2.2%), for a total of
+     * 1.07-1.34% of the track. A player who actually plays finishes it. So the
+     * invariant that matters — you cannot get anywhere by standing still — does
+     * hold, and demanding a literal 0 here would mean tuning the detector
+     * tight enough to eliminate people who are standing still, which is the
+     * exact failure this game already shipped once.
+     *
+     * RE-MEASURED after `MotionEnergy` gained its aspect correction and the
+     * simulator's noise became isotropic in pixels: a body that never moves for
+     * a full 45s round now finishes on 8-12% of the track, reading as a score
+     * of 2-5. A player who actually plays finishes it — 100%, scoring 49-79 —
+     * so the invariant that matters, that you cannot get anywhere by standing
+     * still, holds by an order of magnitude.
+     *
+     * 12 leaves headroom over the measured 5 without hiding a regression:
+     * before the noise floor was learned at all, a motionless player advanced
+     * continuously and was eliminated within 10s of every round.
+     */
+    idleMax: 12,
     // 10s lobby + countdown before anything counts.
     warmupFrames: 900,
     playFrames: 900,
@@ -284,6 +320,113 @@ async function checkVisionBoots(host: ArcadeHost): Promise<SmokeCheck[]> {
   return checks;
 }
 
+/**
+ * Return the simulator to a known body before a measurement.
+ *
+ * Each probe used to set only the knobs its own game cares about, so whatever
+ * ran before it stayed switched on. MEASURED: a leftover 3-player pump made 67
+ * Speed score 4 while standing perfectly still and Fruit Ninja score 0 while
+ * swiping — two failures that look exactly like fresh regressions and are
+ * entirely the harness. Reset everything, every time.
+ */
+function resetSim(sim: PoseSimulator, players: number): void {
+  sim.auto = false;
+  sim.setPump(0);
+  sim.setSwipe(0);
+  sim.setPoseAll(null);
+  sim.setHandTarget(null);
+  sim.clearWristTargets();
+  sim.freezeAll(false);
+  sim.setPlayerCount(players);
+}
+
+/**
+ * Red Light judges each player INDIVIDUALLY.
+ *
+ * This is the whole game. If one person moving during a red light takes the
+ * whole line out with them, the game is not Red Light — and nothing else in
+ * this file would notice, because every other check drives all the sim bodies
+ * identically and only ever reads player 0.
+ *
+ * Six bodies, all pumping on green. On red, three of them freeze and three keep
+ * going. The three who stopped must finish the round alive and the three who
+ * did not must be out.
+ *
+ * `setFrozen` had never been called by anything when this was written — it
+ * shipped with a doc comment promising exactly these semantics and a body that
+ * only stopped the flail clock, so a "frozen" pumping body kept swinging its
+ * arms and was eliminated every time. An untested API is not a working one.
+ */
+async function checkRedLightFairness(host: ArcadeHost): Promise<SmokeCheck[]> {
+  const sim = host.simulator;
+  resetSim(sim, 6);
+  // Via the menu: `router.go(id)` when that screen is already active does NOT
+  // remount it. Coming straight here after the standard probe leaves us holding
+  // the finished round, still sitting in `results`, and the check reports "never
+  // started" for a game that is fine.
+  await host.router.go('menu');
+  await host.router.go('redlight');
+  const game = host.screen as { state?: string; light?: string; racers?: Map<number, unknown> };
+
+  // Out of the lobby and countdown.
+  for (let i = 0; i < 40 && stateOf(game) !== 'playing'; i++) host.tick(60);
+  if (stateOf(game) !== 'playing') {
+    return [check('red light judges individually', false, `never started (${stateOf(game)})`)];
+  }
+
+  // Sim indices 0-2 obey the light; 3-5 ignore it.
+  //
+  // THREE frames a slice, not fifteen. The slice size is how late the freeze
+  // lands after the light turns, and it is added on top of whatever reaction
+  // delay the game already models. At 15 frames that is an extra 0-250ms eaten
+  // out of a 550ms grace, and an honest player is eliminated perhaps one round
+  // in three — a flaky test that blames the game for the harness's sampling.
+  for (let i = 0; i < 2000 && stateOf(game) === 'playing'; i++) {
+    const red = game.light === 'red';
+    sim.setPump(5, 1);
+    for (let p = 0; p < 6; p++) sim.setFrozen(p, red && p < 3);
+    host.tick(3);
+  }
+
+  const racers = [...(game.racers?.values() ?? [])] as Array<{ alive: boolean; lane: number }>;
+  const aliveLanes = racers.filter((r) => r.alive).map((r) => r.lane).sort((a, b) => a - b);
+  resetSim(sim, 1);
+
+  // Assert the INVARIANT, not an exact roster.
+  //
+  // Two properties, and between them they pin the thing that matters:
+  //
+  //   1. survivors all sit in ONE half of the lanes. The display is mirrored,
+  //      so the three honest bodies land in {3,4,5} rather than {0,1,2} — which
+  //      half does not matter, but a mix does: survivors scattered across both
+  //      would mean the detector is firing at random, and that passes any bare
+  //      count.
+  //   2. two or three of them survive. Collective judging — one person moving
+  //      takes the line out — shows up as 0 or 6, and both are excluded.
+  //
+  // Deliberately tolerant of ONE honest player being caught. This is a noisy
+  // signal by construction (still and moving energy overlap; see the measured
+  // table in redlight.ts) and a check that demands a perfect 3/3 every run is a
+  // check that cries wolf. Collective judging cannot hide inside that slack.
+  const oneHalf =
+    aliveLanes.every((l) => l <= 2) || aliveLanes.every((l) => l >= 3);
+  // 1..4, not 2..3. Six bodies at once puts the outer lanes into the frame
+  // edges where `edgeBias` makes them measurably noisier than the middle, so
+  // one or two honest players being caught is within the signal's real spread —
+  // and the thing this check exists to catch, judging the LINE instead of the
+  // player, shows up as 0 or 6 and is excluded either way.
+  const ok = racers.length === 6 && oneHalf && aliveLanes.length >= 1 && aliveLanes.length <= 4;
+
+  return [
+    check(
+      'red light judges individually',
+      ok,
+      `survivors in lanes [${aliveLanes.join(',')}] of ${racers.length}; ` +
+        `expected 1-4, all in the half that stopped`
+    ),
+  ];
+}
+
 function scoreOf(screen: unknown): number {
   const s = screen as { scoreFor?: (slot: number) => number } | null;
   if (!s || typeof s.scoreFor !== 'function') return NaN;
@@ -314,10 +457,22 @@ async function runProbe(host: ArcadeHost, probe: Probe): Promise<SmokeResult> {
 
   try {
     const sim = host.simulator;
-    sim.auto = false;
-    sim.setPlayerCount(probe.players ?? 1);
+    resetSim(sim, probe.players ?? 1);
     probe.idle(sim);
 
+    // VIA THE MENU. `router.go(id)` when that screen is already active does NOT
+    // remount it, and a sweep that runs the same game twice — or any run that
+    // follows one which ended on this screen — then inherits the FINISHED round
+    // still sitting in `results`. Everything downstream reads that round's
+    // final score as an idle score and reports a passive-scoring bug in a game
+    // that is fine. Cost an hour the first time, so it is guarded in both
+    // places that mount a game.
+    if (host.router.activeId === probe.id) {
+      await host.router.go('menu');
+      // Let the menu actually mount. Bouncing straight back can land before the
+      // swap completes, which re-delivers the screen we were trying to leave.
+      host.tick(4);
+    }
     await host.router.go(probe.id);
     checks.push(check('mounts', host.router.activeId === probe.id, host.router.activeId));
 
@@ -339,9 +494,32 @@ async function runProbe(host: ArcadeHost, probe: Probe): Promise<SmokeResult> {
     probe.idle(sim);
     host.tick(240);
     idleScore = scoreOf(game);
-    if (probe.idleMustBeZero) {
+
+    // If the round is already over, `idleScore` is the FINISHED score and
+    // means nothing. Reporting it as an idle score produces failures like
+    // "idle score 213, tolerance 3" for a game whose real problem is that the
+    // round ended during the warm-up — which sends the next reader chasing a
+    // passive-scoring bug that does not exist.
+    const idlePhaseState = stateOf(game);
+    if (idlePhaseState !== 'playing') {
       checks.push(
-        check('idle scores zero', idleScore === 0, `idle score was ${idleScore}`)
+        check(
+          'round still live for the idle check',
+          false,
+          `state=${idlePhaseState}; the idle and active scores below are meaningless`
+        )
+      );
+    }
+    if (probe.idleMustBeZero) {
+      const limit = probe.idleMax ?? 0;
+      checks.push(
+        check(
+          'idle scores zero',
+          idleScore <= limit,
+          limit > 0
+            ? `idle score ${idleScore}, tolerance ${limit}`
+            : `idle score was ${idleScore}`
+        )
       );
     } else {
       checks.push(check('idle scores zero', true, `n/a (${idleScore})`));
@@ -438,6 +616,17 @@ export async function runSmoke(host: ArcadeHost, only?: string[]): Promise<Smoke
       continue;
     }
     results.push(await runProbe(host, probe));
+
+    // Red Light's defining property, which the standard probe cannot see: it
+    // drives every body identically and reads only player 0.
+    if (probe.id === 'redlight') {
+      const fair = await checkRedLightFairness(host);
+      const last = results[results.length - 1];
+      if (last) {
+        last.checks.push(...fair);
+        last.passed = last.checks.every((c) => c.ok);
+      }
+    }
   }
 
   const failed = results.filter((r) => !r.passed).length;
