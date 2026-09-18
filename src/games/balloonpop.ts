@@ -147,7 +147,7 @@ export class BalloonPopGame extends GameBase {
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0) {
       this.spawnWave(fc);
-      const progress = 1 - this.timeLeft / this.config.roundSeconds;
+      const progress = 1 - this.timeLeft / this.roundTotal;
       this.spawnTimer = 0.8 - progress * 0.4;
     }
 

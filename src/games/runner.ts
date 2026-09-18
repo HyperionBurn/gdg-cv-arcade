@@ -405,7 +405,7 @@ export class RunnerGame extends GameBase {
   protected onTick(fc: FrameContext, _players: TrackedPlayer[], dt: number): void {
     if (dt <= 0) return;
 
-    const roundElapsed = this.config.roundSeconds - this.timeLeft;
+    const roundElapsed = this.roundTotal - this.timeLeft;
     const ramp = Math.max(0, Math.min(1, roundElapsed / SPEED_RAMP_SEC));
     const base = START_SPEED + (RAMP_SPEED - START_SPEED) * ramp;
 

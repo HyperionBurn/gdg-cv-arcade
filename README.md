@@ -218,6 +218,16 @@ time; neither is a bug.
   pin them: `simulator.setWristTargetAll('left', {x: 0.40, y: 0.66})` and the
   same for `'right'`. Remember to `clearWristTargets()` afterwards — pinned
   wrists override pump and swipe, and will fail the whole smoke sweep.
+- **A HIDDEN browser pane invalidates `smoke()`.** The sweep `await`s between
+  phases, and the app's own rAF loop keeps advancing the round during those
+  waits. With the pane visible that is a few frames; hidden, the browser
+  throttles rAF and each wait costs seconds of wall clock, so a long round can
+  finish before the probe measures it. The Runner fails first — 60s round, and
+  it accrues score on its own — presenting as `reaches playing: state=results`
+  and `active scores above idle: 578 -> 578`. `tick()` itself is exact (60
+  ticks = 1.000s, verified); it is the real time BETWEEN ticks that leaks.
+  Bring the pane forward before trusting a sweep, or drive the probe phases in
+  a single uninterrupted call.
 - **`import('/src/meta/highlights.ts')` from the dev console is a DIFFERENT
   module.** Vite appends an HMR timestamp to module URLs it has reloaded, so a
   bare dynamic import constructs a second instance: `source` null, every counter

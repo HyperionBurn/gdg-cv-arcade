@@ -434,7 +434,7 @@ export class RhythmGame extends GameBase {
     const leadInBeats = 6;
     // Stop charting early enough that the last note is fully hittable before
     // the clock runs out — a note the timer eats reads as a dropped input.
-    const usable = this.config.roundSeconds - leadInBeats * beatSeconds - APPROACH_SEC;
+    const usable = this.roundTotal - leadInBeats * beatSeconds - APPROACH_SEC;
     const bars = Math.max(1, Math.floor(usable / barSeconds));
 
     this.map = generateBeatmap({ seed, bpm: BPM, bars, leadInBeats });
@@ -539,7 +539,7 @@ export class RhythmGame extends GameBase {
     const inBar = ((index - this.map.leadInBeats) % 4 + 4) % 4;
     if (inBar === 0) this.barFlash = 1;
 
-    const progress = 1 - this.timeLeft / this.config.roundSeconds;
+    const progress = 1 - this.timeLeft / this.roundTotal;
     audio.playBeat(index, progress);
   }
 

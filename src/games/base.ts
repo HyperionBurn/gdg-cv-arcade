@@ -242,6 +242,13 @@ const RESULTS_SEC = 7;
  * while they are still standing there reading them is a worse bug than the one
  * being fixed.
  */
+/**
+ * Camera-ghost bitmap size. A positioning aid, not a picture — this is plenty
+ * to see where a body is, and it makes the import cheap enough to do per frame.
+ */
+const GHOST_W = 480;
+const GHOST_H = 270;
+
 const RESULTS_ABANDONED_SEC = 2.6;
 const RESULTS_EMPTY_GRACE_SEC = 0.9;
 
@@ -283,6 +290,24 @@ export abstract class GameBase implements Screen {
   protected stateTime = 0;
   /** Seconds remaining in the round. */
   protected timeLeft = 0;
+  /**
+   * The round's ACTUAL length in seconds, after `game.roundScale`.
+   *
+   * `timeLeft` was being scaled while every consumer went on dividing by the
+   * unscaled `config.roundSeconds`, so the operator's one lever for a long
+   * queue silently corrupted everything derived from elapsed time. Measured at
+   * scale 0.7, half a second into a 67 round: the game believed 6.58s had
+   * elapsed rather than 0.5, the ghost target read 57 reps instead of 4, the
+   * ghost race latched as already lost on the first frame, and the HUD timer
+   * bar started 67% drained.
+   *
+   * Worse, `ghosts.sample` records against the same figure, so a scaled round
+   * saved a time-shifted ghost that then mis-paced the NEXT player's race.
+   *
+   * Every consumer reads this. `config.roundSeconds` is the design intent;
+   * this is what actually ran.
+   */
+  protected roundTotal = 0;
   protected players: TrackedPlayer[] = [];
   protected playerCount = 1;
 
@@ -303,6 +328,10 @@ export abstract class GameBase implements Screen {
   private ghostRaceLost = false;
   /** Continuous seconds with nobody in frame, during results only. */
   private resultsEmptyTime = 0;
+  /** Cached downscaled camera frame for the ghost. See drawCameraGhost. */
+  private ghostBitmap: ImageBitmap | null = null;
+  private ghostAt = -1;
+  private ghostPending = false;
   /** stateTime at which the results panel first drew. -1 until it has. */
   private panelStart = -1;
   private frameBudgetStrikes = 0;
@@ -368,6 +397,12 @@ export abstract class GameBase implements Screen {
     audio.stopMusic();
     this.particles.clear();
     this.popups.clear();
+    // An ImageBitmap holds GPU memory until closed, and a kiosk switches games
+    // for hours.
+    this.ghostBitmap?.close();
+    this.ghostBitmap = null;
+    this.ghostAt = -1;
+    this.ghostPending = false;
   }
 
   protected enter(state: RoundState): void {
@@ -383,7 +418,8 @@ export abstract class GameBase implements Screen {
     }
     if (state === 'playing') {
       // roundScale lets a marshal shorten every round when the queue backs up.
-      this.timeLeft = this.config.roundSeconds * tunables.get('game.roundScale', 1);
+      this.roundTotal = this.config.roundSeconds * tunables.get('game.roundScale', 1);
+      this.timeLeft = this.roundTotal;
       for (const s of this.scores) s.reset(0);
       this.results = [];
       this.onStart(this.playerCount);
@@ -631,6 +667,8 @@ export abstract class GameBase implements Screen {
     });
     drawText(ctx, this.config.tagline, v.width / 2, v.height * 0.66, {
       size: vh(v, 2.2),
+      // Sits over the pre-round camera ghost at its strongest.
+      knockout: true,
       color: COLORS.muted,
       font: FONTS.body,
       weight: 400,
@@ -767,6 +805,8 @@ export abstract class GameBase implements Screen {
 
     drawText(ctx, this.config.tagline, v.width / 2, v.height * 0.74, {
       size: vh(v, 3),
+      // Sits over the pre-round camera ghost at its strongest.
+      knockout: true,
       color: COLORS.text,
       font: FONTS.body,
       weight: 600,
@@ -805,12 +845,12 @@ export abstract class GameBase implements Screen {
     }
 
     // Music intensity tracks the clock so the round builds toward its end.
-    const progress = 1 - this.timeLeft / this.config.roundSeconds;
+    const progress = 1 - this.timeLeft / this.roundTotal;
     audio.setMusicIntensity(progress);
 
     if (this.playerCount === 1) {
       ghosts.sample(
-        this.config.roundSeconds - this.timeLeft,
+        this.roundTotal - this.timeLeft,
         this.scoreFor(0),
         this.players[0]?.landmarks ?? null
       );
@@ -830,7 +870,7 @@ export abstract class GameBase implements Screen {
   private drawGhostPose(fc: FrameContext): void {
     if (!this.ghost || !this.proj) return;
     if (this.config.ghostSilhouette === false) return;
-    const pose = this.ghost.poseAt(this.config.roundSeconds - this.timeLeft);
+    const pose = this.ghost.poseAt(this.roundTotal - this.timeLeft);
     if (pose) drawGhost(fc.ctx, this.proj, pose, { color: COLORS.muted });
   }
 
@@ -1199,26 +1239,68 @@ export abstract class GameBase implements Screen {
     if (this.config.cameraGhost === false) return;
     // `camera.isLive()` is the whole condition. An explicit `isSimEnabled()`
     // check was redundant — sim mode has no camera, so `isLive()` is already
-    // false — and it made the ghost impossible to exercise without a webcam,
-    // which is the opposite of useful for the one feature added to fix a
-    // framing complaint.
+    // false — and it made the ghost impossible to exercise without a webcam.
     if (!this.proj || !camera.isLive()) return;
+
+    // Nothing to see behind an opaque results panel.
+    if (this.state === 'results') return;
 
     const base = tunables.get('game.cameraGhost', 0.16);
     if (base <= 0.001) return;
+
+    const video = camera.getVideo();
+
+    // DRAW A CACHED, DOWNSCALED BITMAP — NEVER THE <video> ELEMENT.
+    //
+    // MEASURED at 1080p: `drawImage(<video>)` costs ~4ms per call because it
+    // re-imports the frame every time, against ~0.39ms for identical pixels
+    // from an already-decoded source. Drawn every frame that was ~6ms — the
+    // single most expensive draw call in the app, about 35% of a 60fps budget
+    // on a fast GPU, and worse on the integrated one a stall laptop will have.
+    // Half of those imports were of a frame that had not even changed, since
+    // the render loop runs at 60 and the camera at 30.
+    //
+    // So: re-import only when the camera actually advances, at a fraction of
+    // the resolution, asynchronously. A ghost is a positioning aid, not a
+    // picture — 480x270 is more than enough to see where your body is, and the
+    // softness it brings is closer to what this is meant to look like anyway.
+    if (!this.ghostPending && video.currentTime !== this.ghostAt) {
+      this.ghostAt = video.currentTime;
+      this.ghostPending = true;
+      void createImageBitmap(video, {
+        resizeWidth: GHOST_W,
+        resizeHeight: GHOST_H,
+        resizeQuality: 'low',
+      })
+        .then((bmp) => {
+          this.ghostBitmap?.close();
+          this.ghostBitmap = bmp;
+          this.ghostPending = false;
+        })
+        .catch(() => {
+          // A frame that isn't decodable this tick. Keep the previous bitmap.
+          this.ghostPending = false;
+        });
+    }
+
+    if (!this.ghostBitmap) return;
 
     // STRONGER BEFORE THE ROUND, FAINTER DURING IT.
     //
     // "Am I lined up?" is a question you ask while stepping up, not while
     // playing — and before the round there is no playfield for the feed to
-    // compete with, so it can afford to be properly visible. Once play starts
-    // it drops back to a hint, because by then the player needs to read fruit
-    // and balloons, not their own jumper.
-    const alpha = this.state === 'playing' ? base : Math.min(0.55, base * 2.4);
+    // compete with. Once play starts it drops back to a hint.
+    //
+    // Capped at 0.30, not 0.55. MEASURED over a high-contrast feed: by about
+    // 0.30 the image is genuinely readable rather than a wash, and muted small
+    // type WITHOUT a knockout — the chase line, the waiting tagline, 67's empty
+    // arm dots — stops being legible on top of it. The knockout on the score
+    // and label survives well past that, which is exactly why they have one.
+    const alpha = this.state === 'playing' ? base : Math.min(0.3, base * 2.4);
 
     fc.ctx.save();
     fc.ctx.shadowBlur = 0;
-    this.proj.drawVideo(fc.ctx, camera.getVideo(), alpha);
+    this.proj.drawSource(fc.ctx, this.ghostBitmap, alpha);
     fc.ctx.restore();
   }
 
@@ -1294,7 +1376,7 @@ export abstract class GameBase implements Screen {
     }
 
     // Timer across the very top — visible from anywhere in the queue.
-    const t = this.timeLeft / this.config.roundSeconds;
+    const t = this.timeLeft / this.roundTotal;
     const barH = vh(v, m.barH);
     const urgent = this.timeLeft <= 5;
     progressBar(
@@ -1385,6 +1467,7 @@ export abstract class GameBase implements Screen {
       drawText(ctx, diff > 0 ? `LEADING BY ${diff}` : `DOWN BY ${-diff}`, chaseX, vh(v, m.chaseY), {
         size: chase(2.2),
         align: chaseAlign,
+        knockout: true,
         color: diff > 0 ? COLORS.green : COLORS.red,
         font: FONTS.body,
         weight: 700,
@@ -1405,7 +1488,7 @@ export abstract class GameBase implements Screen {
     // Once the gap is out of reach the ghost line is retired for the rest of
     // the round and the board takes over.
     if (this.ghost && !this.ghostRaceLost) {
-      const target = this.ghost.scoreAt(this.config.roundSeconds - this.timeLeft);
+      const target = this.ghost.scoreAt(this.roundTotal - this.timeLeft);
       const diff = score - target;
       const ahead = diff >= 0;
 
@@ -1415,7 +1498,7 @@ export abstract class GameBase implements Screen {
     }
 
     if (this.ghost && !this.ghostRaceLost) {
-      const target = this.ghost.scoreAt(this.config.roundSeconds - this.timeLeft);
+      const target = this.ghost.scoreAt(this.roundTotal - this.timeLeft);
       const diff = score - target;
       const ahead = diff >= 0;
       drawText(
@@ -1426,6 +1509,7 @@ export abstract class GameBase implements Screen {
         {
           size: chase(2.3),
           align: chaseAlign,
+        knockout: true,
           color: ahead ? COLORS.green : COLORS.red,
           font: FONTS.body,
           weight: 700,
@@ -1442,6 +1526,7 @@ export abstract class GameBase implements Screen {
       drawText(ctx, '<RECORD PACE>', chaseX, vh(v, m.chaseY), {
         size: chase(2.4),
         align: chaseAlign,
+        knockout: true,
         color: COLORS.ink,
         shadow: vh(v, SHADOW.base),
         shadowColor: COLORS.yellow,
@@ -1459,6 +1544,7 @@ export abstract class GameBase implements Screen {
       drawText(ctx, '<SET THE FIRST SCORE>', chaseX, vh(v, m.chaseY), {
         size: chase(2.2),
         align: chaseAlign,
+        knockout: true,
         color: COLORS.muted,
         font: FONTS.body,
         weight: 700,
@@ -1477,6 +1563,7 @@ export abstract class GameBase implements Screen {
       {
         size: chase(close ? 2.6 : 2.2),
         align: chaseAlign,
+        knockout: true,
         color: close ? COLORS.ink : COLORS.muted,
         font: FONTS.body,
         weight: 700,

@@ -351,7 +351,7 @@ export class RedLightGame extends GameBase {
   /* ------------------------------------------------------------------ */
 
   private roundProgress(): number {
-    return 1 - Math.max(0, this.timeLeft) / this.config.roundSeconds;
+    return 1 - Math.max(0, this.timeLeft) / this.roundTotal;
   }
 
   /**

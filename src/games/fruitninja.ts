@@ -156,7 +156,7 @@ export class FruitNinjaGame extends GameBase {
       this.spawn(fc);
       // Ramps from a lazy lob at the start to a steady stream by the end, so
       // the round builds instead of running flat.
-      const progress = 1 - this.timeLeft / this.config.roundSeconds;
+      const progress = 1 - this.timeLeft / this.roundTotal;
       this.spawnTimer = (0.95 - progress * 0.55) * (this.playerCount > 1 ? 0.75 : 1);
     }
 
@@ -175,11 +175,11 @@ export class FruitNinjaGame extends GameBase {
     const { v } = fc;
     for (let slot = 0; slot < this.playerCount; slot++) {
       const rect = this.slotRect(v, slot);
-      const progress = 1 - this.timeLeft / this.config.roundSeconds;
+      const progress = 1 - this.timeLeft / this.roundTotal;
 
       // Never in the first few seconds — a bomb before the player has worked
       // out the game is pure punishment.
-      const bombChance = this.timeLeft > this.config.roundSeconds - 6 ? 0 : 0.1 + progress * 0.12;
+      const bombChance = this.timeLeft > this.roundTotal - 6 ? 0 : 0.1 + progress * 0.12;
       const count = 1 + (Math.random() < 0.3 + progress * 0.3 ? 1 : 0);
 
       for (let i = 0; i < count; i++) {

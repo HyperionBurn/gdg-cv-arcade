@@ -269,7 +269,7 @@ export class PoseMatchGame extends GameBase {
    * than two that can disagree.
    */
   private rampProgress(): number {
-    const total = Math.max(0.001, this.config.roundSeconds);
+    const total = Math.max(0.001, this.roundTotal);
     return Math.max(0, Math.min(1, 1 - this.timeLeft / total));
   }
 
