@@ -275,9 +275,10 @@ export class BalloonPopGame extends GameBase {
 
     BURST.splat(this.particles, b.x, b.y, b.color, b.r / (v.height * 0.045));
 
-    // Popups are ink. PopupLayer still blurs its own fill (engine/juice.ts, not
-    // ours), and flat yellow type on white paper vanishes at three metres —
-    // which is precisely the size of the win this popup is announcing.
+    // Popups are ink, because flat yellow type on white paper vanishes at
+    // three metres — which is precisely the size of the win this popup is
+    // announcing. (The note that used to sit here, about PopupLayer blurring
+    // its own fill, is obsolete: no `shadowBlur` survives anywhere in src/.)
     this.popups.spawn(
       b.golden ? `GOLD +${gained}` : `+${gained}`,
       b.x,
@@ -456,6 +457,9 @@ export class BalloonPopGame extends GameBase {
 
     drawTabularNumber(ctx, `${this.popped[slot] ?? 0} POPPED`, rect.centerX, v.height - vh(v, 3), {
       size: vh(v, 2),
+      // Balloons drift across this line too. `drawTabularNumber` forwards opts
+      // straight to `drawText`, so the knockout comes along per glyph.
+      knockout: true,
       color: COLORS.muted,
       font: FONTS.body,
       weight: WEIGHT.bold,

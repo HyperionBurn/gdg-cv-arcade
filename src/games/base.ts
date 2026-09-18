@@ -176,7 +176,39 @@ const IDLE_TIMEOUT_SEC = 20;
 const COUNTDOWN_SEC = 3.2;
 /** Lobby ends early once this many have joined and held still briefly. */
 const GATHER_SETTLE_SEC = 1.2;
+/**
+ * How long the lobby waits after the LAST person joins before giving up on
+ * more arriving.
+ *
+ * `gatherSeconds` alone was a flat hold: a solo stranger stepping up to Red
+ * Light — the only game with a lobby — sat through all 10 seconds of "1 PLAYER
+ * READY / STARTING IN 10..9..8" before anything happened. That is a sixth of
+ * their turn spent watching a number, alone, at a stall built around a moving
+ * queue, and nobody was ever going to join them.
+ *
+ * Waiting on STABILITY instead gets both cases right: every new arrival resets
+ * the clock, so a group trickling in keeps the doors open for as long as they
+ * keep coming, and a lone player is off the hook in under three seconds.
+ * `gatherSeconds` stays as the hard ceiling.
+ */
+const GATHER_STABLE_SEC = 2.6;
 const RESULTS_SEC = 7;
+/**
+ * Shorter results hold once the player has actually walked off.
+ *
+ * The 7s hold exists so a turn is PREDICTABLE, and so the person who just
+ * played gets to read their rank. Neither reason survives them leaving. Timed
+ * end to end, the old unconditional hold put ~13.3s between a round ending and
+ * the menu being usable again, and ~17.7s before the next person was actually
+ * playing — past the point where a queue at a stall starts breaking up.
+ *
+ * `RESULTS_EMPTY_GRACE_SEC` is there because tracking drops a stationary body
+ * for a frame or two fairly often, and cutting someone's own results short
+ * while they are still standing there reading them is a worse bug than the one
+ * being fixed.
+ */
+const RESULTS_ABANDONED_SEC = 2.6;
+const RESULTS_EMPTY_GRACE_SEC = 0.9;
 
 export abstract class GameBase implements Screen {
   readonly id: string;
@@ -201,6 +233,18 @@ export abstract class GameBase implements Screen {
   private lostTime = 0;
   private results: Array<{ slot: number; score: number; rank: RankResult }> = [];
   private lastCountdownTick = -1;
+  /** Highest headcount seen this lobby, and when it last went up. */
+  private gatherPeak = 0;
+  private gatherLastJoin = 0;
+  /**
+   * Latched once the ghost race is out of reach, so the chase line can fall
+   * back to the leaderboard instead. LATCHED rather than recomputed each
+   * frame, because the deficit crosses any threshold repeatedly and the line
+   * would flicker between two different messages.
+   */
+  private ghostRaceLost = false;
+  /** Continuous seconds with nobody in frame, during results only. */
+  private resultsEmptyTime = 0;
   private frameBudgetStrikes = 0;
   /**
    * The best previous solo run, replayed alongside the live player.
@@ -272,6 +316,10 @@ export abstract class GameBase implements Screen {
     if (state === 'countdown') {
       this.lastCountdownTick = -1;
     }
+    if (state === 'gathering') {
+      this.gatherPeak = 0;
+      this.gatherLastJoin = 0;
+    }
     if (state === 'playing') {
       // roundScale lets a marshal shorten every round when the queue backs up.
       this.timeLeft = this.config.roundSeconds * tunables.get('game.roundScale', 1);
@@ -282,6 +330,7 @@ export abstract class GameBase implements Screen {
       // Ghosts are a solo mechanic — in versus the opponent IS the ghost, and
       // a third translucent body on screen would just be noise.
       this.ghost = null;
+      this.ghostRaceLost = false;
       ghosts.cancel();
       if (this.playerCount === 1) {
         this.ghost = ghosts.load(this.config.gameId);
@@ -293,6 +342,7 @@ export abstract class GameBase implements Screen {
       this.juice.flash(this.config.color, 0.3, 5);
     }
     if (state === 'results') {
+      this.resultsEmptyTime = 0;
       audio.stopMusic();
       this.finaliseResults();
     }
@@ -518,14 +568,25 @@ export abstract class GameBase implements Screen {
 
     const elapsed = this.stateTime;
     const full = present >= this.config.maxPlayers;
+
+    // Every arrival reopens the window. Only counts people JOINING — someone
+    // stepping out of frame must not shorten the wait for everyone still in it.
+    if (present > this.gatherPeak) {
+      this.gatherPeak = present;
+      this.gatherLastJoin = elapsed;
+    }
+
+    // The earlier of "nobody has joined for a while" and the hard ceiling.
+    const deadline = Math.min(total, this.gatherLastJoin + GATHER_STABLE_SEC);
+
     // A full lobby still gets a moment to settle, so the last person to step in
     // isn't mid-stride when the countdown starts.
-    if (elapsed >= total || (full && elapsed >= GATHER_SETTLE_SEC)) {
+    if (elapsed >= deadline || (full && elapsed >= GATHER_SETTLE_SEC)) {
       this.enter('countdown');
       return;
     }
 
-    const remain = Math.max(0, total - elapsed);
+    const remain = Math.max(0, deadline - elapsed);
     const pulse = 0.65 + Math.sin(fc.time * 3) * 0.35;
 
     drawText(ctx, String(present), v.width / 2, v.height * 0.33, {
@@ -555,7 +616,7 @@ export abstract class GameBase implements Screen {
 
     progressBar(
       ctx, v.width * 0.25, v.height * 0.66, v.width * 0.5, vh(v, 1.2),
-      1 - remain / Math.max(0.001, total), this.config.color, 14
+      1 - remain / Math.max(0.001, deadline), this.config.color, 14
     );
     drawText(ctx, `<STARTING IN ${Math.ceil(remain)}>`, v.width / 2, v.height * 0.73, {
       size: vh(v, 2.2),
@@ -587,13 +648,22 @@ export abstract class GameBase implements Screen {
       this.juice.shake(0.08);
     }
 
-    // Scale-down pop per digit.
+    // POP IN BIG, SETTLE TO FULL SIZE — and hold there.
+    //
+    // This did the exact opposite of what its own comment claimed. `frac` is
+    // just elapsed time within the current digit's one-second window, so the
+    // old `ctx.scale(2 - scale, ...)` put the digit at 1.0x for the single
+    // frame it appeared, shrank it to 0.6x over the next third of a second,
+    // and held it at 0.6x for the remaining two thirds. The largest, most
+    // important element in the app — the thing the whole room reads from 3m —
+    // spent most of its life at 12vh instead of the 20vh it asks for, and the
+    // motion read as a retreat rather than a landing.
     const frac = 1 - ((remaining - 0.2) % 1);
-    const scale = 1 + EASE.out(Math.min(1, frac * 3)) * 0.4;
+    const scale = 1 + 0.4 * (1 - EASE.out(Math.min(1, frac * 3)));
 
     ctx.save();
     ctx.translate(v.width / 2, v.height * 0.45);
-    ctx.scale(2 - scale, 2 - scale);
+    ctx.scale(scale, scale);
     drawText(ctx, n > 0 ? String(n) : 'GO', 0, 0, {
       size: vh(v, 20),
       color: this.config.color,
@@ -711,8 +781,13 @@ export abstract class GameBase implements Screen {
       else this.drawSoloResults(fc, t);
     }
 
+    // Nobody left to read it? Then stop holding the screen.
+    this.resultsEmptyTime = this.players.length === 0 ? this.resultsEmptyTime + fc.dt : 0;
+    const abandoned =
+      this.stateTime >= RESULTS_ABANDONED_SEC && this.resultsEmptyTime >= RESULTS_EMPTY_GRACE_SEC;
+
     // Unconditional. Nothing drawn above may hold the queue up.
-    if (this.stateTime > RESULTS_SEC) {
+    if (this.stateTime > RESULTS_SEC || abandoned) {
       highlights.stop();
       this.finishRound();
     } else if (!showedReplay) {
@@ -899,6 +974,38 @@ export abstract class GameBase implements Screen {
     }
 
     if (rank.rank === null) {
+      // OFF THE BOARD, BUT SAY BY HOW MUCH.
+      //
+      // This used to print a flat "NOT IN THE TOP 10 — N PLAYED" and return,
+      // never looking at `pointsToNext`/`nextRank` — which `previewRank` has
+      // already computed and which are non-null precisely here. So a player who
+      // missed the board by ONE point and a player who missed it by four
+      // hundred got the identical, deflating sentence.
+      //
+      // That matters more than it looks, because it only starts happening once
+      // a board has ten entries — which for the queue eater is most of day one
+      // and nearly all of day two. In other words the near-miss line, which
+      // PLAN.md §2 stakes the entire design on ("near-misses are the addiction,
+      // not wins"), was visible only during each game's first ten plays and
+      // then switched itself off for the rest of the event.
+      if (rank.pointsToNext !== null) {
+        drawText(ctx, `${rank.pointsToNext} OFF THE BOARD`, v.width / 2, y, {
+          size: vh(v, 4.4),
+          color: COLORS.ink,
+          shadow: vh(v, SHADOW.base),
+          shadowColor: COLORS.yellow,
+          letterSpacing: '0.1em',
+        });
+        drawText(ctx, `${rank.total} PLAYED`, v.width / 2, y + vh(v, 4.4), {
+          size: vh(v, 2.2),
+          color: COLORS.muted,
+          font: FONTS.body,
+          weight: 600,
+          letterSpacing: '0.1em',
+        });
+        return;
+      }
+
       drawText(ctx, `NOT IN THE TOP 10 — ${rank.total} PLAYED`, v.width / 2, y, {
         size: vh(v, 2.4),
         color: COLORS.muted,
@@ -1060,10 +1167,14 @@ export abstract class GameBase implements Screen {
 
       drawText(ctx, this.primaryStat(slot), rect.centerX, vh(v, m.statY), {
         size: vh(v, m.statSize),
+        // Balloon Pop's balloons stay poppable above the shoulder line, so they
+        // rise straight through this band and cannot be culled. Free on paper.
+        knockout: true,
         ...this.playerTextStyle(color, vh(v, SHADOW.base)),
       });
       drawText(ctx, this.primaryLabel(), rect.centerX, vh(v, m.labelY), {
         size: vh(v, m.labelSize),
+        knockout: true,
         color: COLORS.muted,
         font: FONTS.body,
         weight: 600,
@@ -1127,7 +1238,26 @@ export abstract class GameBase implements Screen {
 
     // A ghost beats a leaderboard line: "3 AHEAD OF YOUR BEST" is a race you
     // can see, where "12 TO #4" is an abstraction.
-    if (this.ghost) {
+    //
+    // UNTIL IT DOESN'T. This branch ran unconditionally whenever a ghost had
+    // loaded, so a player having an off round against a strong personal best
+    // watched "106 BEHIND BEST" in red for a minute while an entirely reachable
+    // "1 TO #3" sat uncalled on the leaderboard beside it. A race you have
+    // visibly lost is the opposite of a chase line.
+    //
+    // Once the gap is out of reach the ghost line is retired for the rest of
+    // the round and the board takes over.
+    if (this.ghost && !this.ghostRaceLost) {
+      const target = this.ghost.scoreAt(this.config.roundSeconds - this.timeLeft);
+      const diff = score - target;
+      const ahead = diff >= 0;
+
+      if (!ahead && -diff > Math.max(8, target * 0.45)) {
+        this.ghostRaceLost = true;
+      }
+    }
+
+    if (this.ghost && !this.ghostRaceLost) {
       const target = this.ghost.scoreAt(this.config.roundSeconds - this.timeLeft);
       const diff = score - target;
       const ahead = diff >= 0;
@@ -1164,7 +1294,21 @@ export abstract class GameBase implements Screen {
       return;
     }
 
-    if (preview.pointsToNext === null || preview.nextRank === null) return;
+    // NOTHING TO CHASE YET. On a virgin board `previewRank` has no next rank to
+    // report, and this returned silently — leaving the reserved chase slot
+    // empty for exactly the first players of the day, who are the ones with
+    // least idea what the game wants from them. Name the prize instead.
+    if (preview.pointsToNext === null || preview.nextRank === null) {
+      drawText(ctx, '<SET THE FIRST SCORE>', chaseX, vh(v, m.chaseY), {
+        size: chase(2.2),
+        align: chaseAlign,
+        color: COLORS.muted,
+        font: FONTS.body,
+        weight: 700,
+        letterSpacing: '0.1em',
+      });
+      return;
+    }
 
     // Closing in is the moment worth selling — brighten as the gap narrows.
     const close = preview.pointsToNext <= 5;

@@ -193,7 +193,7 @@ class AudioEngine {
    * @param pitch multiplier, used for combo ramps
    * PLAN.md §5: "Rising pitch on combo is the highest-value audio investment."
    */
-  play(name: SoundName, pitch = 1): void {
+  play(name: SoundName, pitch = 1, gainScale = 1): void {
     if (!this.ctx || this._muted) return;
     if (this.ctx.state === 'suspended') void this.ctx.resume();
 
@@ -249,8 +249,30 @@ class AudioEngine {
         break;
 
       case 'eliminate':
-        this.tone({ freq: 400, freqTo: 80, type: 'sawtooth', duration: 0.5, gain: 0.28 });
-        this.thump(60, 0.45, 0.5);
+        // HONOURS PITCH, AND IT HAS TO. A red light regularly takes three to
+        // six people on the same frame, and redlight.ts steps the pitch down
+        // per elimination for exactly that reason — its comment calls the
+        // result "an audible cascade, which is both clearer and much funnier".
+        // It never happened: these two frequencies were hardcoded, so `p` was
+        // discarded and every simultaneous elimination fired the IDENTICAL
+        // sawtooth at the same phase. That is the definition of a phase-summed
+        // smear, i.e. precisely the thing the caller was trying to avoid.
+        //
+        // `gainScale` is the other half. Six of these at once is 13 concurrent
+        // voices and ~4.7x unity into a compressor with a 4ms attack, which
+        // cannot catch six transient onsets; the caller now ducks the later
+        // ones, and past a couple drops the tone layer entirely so a mass
+        // wipeout stays a row of thumps rather than a crackle.
+        if (gainScale > 0.45) {
+          this.tone({
+            freq: 400 * p,
+            freqTo: 80 * p,
+            type: 'sawtooth',
+            duration: 0.5,
+            gain: 0.28 * gainScale,
+          });
+        }
+        this.thump(60 * p, 0.45, 0.5 * gainScale);
         break;
 
       case 'greenlight':

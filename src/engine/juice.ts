@@ -283,6 +283,21 @@ interface Popup {
   maxLife: number;
   color: string;
   size: number;
+  /** Estimated half-width, for the spawn-time separation pass. */
+  halfW: number;
+}
+
+/**
+ * Half the width a popup will occupy, without a canvas to measure against.
+ *
+ * `spawn` has no ctx, and the alternative — measuring at draw time — is too
+ * late, because by then the position is already committed. 0.56em per glyph is
+ * the measured average for Archivo Black across the digits and capitals these
+ * strings are made of; it only has to be close enough to decide whether two
+ * labels are in each other's way.
+ */
+function estimateHalfWidth(text: string, size: number): number {
+  return (text.length * size * 0.56) / 2;
 }
 
 /** Floating "+3", "COMBO x4", "MISS" text at the point of impact. */
@@ -304,8 +319,30 @@ export class PopupLayer {
   spawn(text: string, x: number, y: number, color: string, size: number, life = 0.9): void {
     // Clamp to the safe band, allowing for the full rise distance.
     const rise = size * 1.6 * life;
-    const safeY = Math.max(y, this.floorY + rise);
-    this.pool.push({ text, x, y: safeY, vy: -size * 1.6, life, maxLife: life, color, size });
+    let safeY = Math.max(y, this.floorY + rise);
+
+    // SEPARATION. Popups spawn at the point of impact, and impacts cluster:
+    // Balloon Pop routinely pops two balloons a few frames and a few tens of
+    // pixels apart, and the two labels landed on top of each other as an
+    // unreadable smear — "GOLD +58" through "+48". Four events in a second is
+    // the game working correctly, so the fix belongs here rather than in a
+    // spawn rate limit.
+    //
+    // Staggering DOWNWARD rather than up is deliberate twice over: up is where
+    // `floorY` is protecting the HUD, and since popups rise, a later one
+    // starting lower simply follows the earlier one instead of racing it.
+    const halfW = estimateHalfWidth(text, size);
+    for (let guard = 0; guard < 6; guard++) {
+      const clash = this.pool.find(
+        (q) =>
+          Math.abs(q.x - x) < q.halfW + halfW &&
+          Math.abs(q.y - safeY) < (q.size + size) * 0.58
+      );
+      if (!clash) break;
+      safeY = clash.y + (clash.size + size) * 0.58;
+    }
+
+    this.pool.push({ text, x, y: safeY, vy: -size * 1.6, life, maxLife: life, color, size, halfW });
     if (this.pool.length > 60) this.pool.shift();
   }
 

@@ -87,6 +87,22 @@ export interface TextOptions {
   shadowColor?: string;
   letterSpacing?: string;
   alpha?: number;
+  /**
+   * Draw a paper stroke around the glyphs (and their shadow) before filling,
+   * so the text survives whatever the playfield puts behind it.
+   *
+   * FOR TEXT THAT CANNOT CHOOSE ITS BACKGROUND. Balloon Pop is the case: its
+   * balloons stay poppable well above the shoulder line, so they rise THROUGH
+   * the HUD band and cannot be culled or hidden under a shelf the way Pose
+   * Match's wall can — a blue score ends up on a blue balloon. Pose Match's
+   * opposite fix, `hudShelf`, is the right one when the playfield behind the
+   * HUD is not interactive.
+   *
+   * On a paper background this is paper on paper: invisible by construction,
+   * and two extra `strokeText` calls. So it is safe to leave on everywhere,
+   * and it only shows up when it is earning its place.
+   */
+  knockout?: boolean;
 }
 
 export function drawText(
@@ -110,6 +126,18 @@ export function drawText(
   // Callers leave shadow state set on the context around these calls; clear it
   // so a label never inherits a neighbour's blur.
   ctx.shadowBlur = 0;
+
+  // Knockout first, under everything, so it surrounds the shadow too — a paper
+  // ring around only the top layer would leave the shadow's silhouette bleeding
+  // into whatever is behind.
+  if (opts.knockout) {
+    ctx.lineJoin = 'round';
+    ctx.miterLimit = 2;
+    ctx.lineWidth = opts.size * 0.14;
+    ctx.strokeStyle = COLORS.paper;
+    if (opts.shadow) ctx.strokeText(text, x, y + opts.shadow);
+    ctx.strokeText(text, x, y);
+  }
 
   if (opts.shadow) {
     // The brand shadow: the same glyphs, offset straight down, flat ink, no

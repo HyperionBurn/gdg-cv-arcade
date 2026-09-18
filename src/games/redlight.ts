@@ -700,13 +700,28 @@ export class RedLightGame extends GameBase {
     // identical sawtooth drops fired at the same millisecond phase-sum into one
     // loud smear; stepping the pitch down turns the same event into an audible
     // cascade, which is both clearer and much funnier.
-    audio.play('eliminate', Math.max(0.6, 1 - this.elimsThisFrame * 0.09));
+    //
+    // The pitch argument was being thrown away by the sound itself until the
+    // `eliminate` case learned to use it, so none of that was happening. Now
+    // it does, and the gain ducks with it: a six-player wipeout was measured at
+    // 13 concurrent voices and roughly 4.7x unity gain into a 4ms-attack
+    // compressor, which is the one place in the app loud enough to crack. Past
+    // the second body the tone layer drops out and only the thump survives.
+    const n = this.elimsThisFrame;
+    audio.play('eliminate', Math.max(0.6, 1 - n * 0.09), n === 0 ? 1 : 0.42 / n);
     this.elimsThisFrame++;
     this.elimPending = true;
-    this.juice.flash(COLORS.red, 0.42, 4.5);
-    this.juice.shake(0.55);
-    this.juice.hitStop(90);
-    this.juice.chromatic(0.8);
+
+    // The VISUALS duck the same way, and for the same reason. Six eliminations
+    // each asking for 0.55 of shake and 90ms of hitstop is not six times as
+    // dramatic — trauma accumulates, and the round would judder to a halt at
+    // the exact moment the crowd is watching. The first body gets the full
+    // hit; the rest add a diminishing shove.
+    const scale = n === 0 ? 1 : 1 / (1 + n);
+    this.juice.flash(COLORS.red, 0.42 * scale, 4.5);
+    this.juice.shake(0.55 * scale);
+    if (n === 0) this.juice.hitStop(90);
+    this.juice.chromatic(0.8 * scale);
     BURST.splat(this.particles, x, y, COLORS.red, 1.6);
     // Taunt sits INSIDE its own lane, not 0.55 lane-heights above it.
     //

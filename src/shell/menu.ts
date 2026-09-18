@@ -150,6 +150,25 @@ export function isTileAvailable(tile: MenuTile): boolean {
 
 /** PLAN.md §6: "Idle timeout back to attract after 20s." */
 const IDLE_TIMEOUT_SEC = 20;
+/**
+ * Seconds a tracked body may stand here without ever raising a hand.
+ *
+ * `idleTime` only counts ABSENCE, so someone standing in frame with their arms
+ * down reset it every frame and the menu had no exit at all: measured at a full
+ * 60 simulated seconds with a player present and motionless, `idleTime` pinned
+ * at 0 the whole way. Attract forces a decision after 6s of non-compliant
+ * presence and initials has a 16s hard deadline; this was the one screen a
+ * confused person could occupy indefinitely with a queue behind them.
+ *
+ * Bailing to attract rather than picking something for them is deliberate:
+ * attract is the screen that TEACHES the gesture, with the big step-in prompt
+ * and the live skeleton. Someone who has not worked out how to point at a tile
+ * needs that, not a game they did not choose.
+ *
+ * Generous on purpose — seven tiles is a real decision, and reading them from
+ * 3m takes a while.
+ */
+const PRESENCE_STALL_SEC = 32;
 /** Tiles per row, top row first. 4 + 3 keeps every tile large and centred. */
 const ROW_SIZES = [4, 3] as const;
 
@@ -231,6 +250,8 @@ export class MenuScreen implements Screen {
   private targets: HoverTarget[] = [];
   private lastFrameId = -1;
   private idleTime = 0;
+  /** Seconds present but never raising a hand. See PRESENCE_STALL_SEC. */
+  private stalledTime = 0;
   private enterTime = 0;
   private launching: string | null = null;
   private launchAt = 0;
@@ -266,7 +287,26 @@ export class MenuScreen implements Screen {
     // lost its wrist for a moment is not an empty stall.
     if (this.player) this.idleTime = 0;
     else this.idleTime += fc.dt;
-    if (!this.launching && !this.exiting && this.idleTime > IDLE_TIMEOUT_SEC) {
+
+    // Present, but never reaching for anything. `state.present` is false
+    // whenever no wrist is raised and trustworthy, which is exactly the
+    // "standing there not knowing what to do" case.
+    //
+    // Deliberately NOT also requiring `this.player` to be non-null. Measured
+    // over 1800 frames with a body standing still, the tracker drops it for 18
+    // of them — scattered single-frame gaps — and gating on the player reset
+    // this timer on every one, so a 32s patience threshold was never reached in
+    // a 30s test. Only an actual REACH clears it now; absence counts toward the
+    // stall too, which changes nothing in practice because `idleTime` fires
+    // twelve seconds earlier for a genuinely empty stall.
+    if (state.present) this.stalledTime = 0;
+    else this.stalledTime += fc.dt;
+
+    if (
+      !this.launching &&
+      !this.exiting &&
+      (this.idleTime > IDLE_TIMEOUT_SEC || this.stalledTime > PRESENCE_STALL_SEC)
+    ) {
       this.leave('attract');
     }
 
