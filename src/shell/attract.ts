@@ -83,6 +83,30 @@ const HOLD_STILL_SEC = 1.1;
  * never be stuck on the attract screen.
  */
 const PRESENCE_FORCE_SEC = 6;
+
+/**
+ * After the menu times out with nobody interacting, attract holds on for
+ * longer before promoting the next body it sees.
+ *
+ * Attract leaves for the menu after ~1.45s of a still presence, and the menu
+ * returns after 32s without a reach. Attract is a fresh instance each time, so
+ * there was no hysteresis anywhere on that round trip — a marshal, the
+ * previous player, or a friend watching from the table keeps the cycle running
+ * all day, and attract (the foot-traffic engine, and per PLAN.md the screen
+ * that is supposed to be up most of the time) is visible about 4% of it. Each
+ * lap also fires a whoosh, a go, and a music start/stop pair.
+ */
+const BOUNCE_COOLDOWN_SEC = 45;
+const BOUNCE_HOLD_MULT = 3;
+
+/** When the menu last gave up on an unengaged body. Module-level because the
+ *  attract screen is constructed fresh on every visit. */
+let lastMenuTimeout = 0;
+
+/** Called by the menu when it bails without anyone having interacted. */
+export function noteMenuTimeout(): void {
+  lastMenuTimeout = performance.now();
+}
 /** Mean per-frame landmark displacement, in body units, that counts as still. */
 const STILL_ENTER = 0.030;
 const STILL_EXIT = 0.055;
@@ -380,7 +404,13 @@ export class AttractScreen implements Screen {
     if (stillNow && this.presenceTime > 0.35) this.stillTime += fc.dt;
     else this.stillTime = Math.max(0, this.stillTime - fc.dt * 2);
 
-    if (this.stillTime >= HOLD_STILL_SEC || this.presenceTime >= PRESENCE_FORCE_SEC) {
+    // Someone who has just been bounced out of the menu has to hold longer —
+    // a passer-by glancing over should not put the menu back up.
+    const bouncedRecently = performance.now() - lastMenuTimeout < BOUNCE_COOLDOWN_SEC * 1000;
+    const holdFor = bouncedRecently ? HOLD_STILL_SEC * BOUNCE_HOLD_MULT : HOLD_STILL_SEC;
+    const forceAt = bouncedRecently ? PRESENCE_FORCE_SEC * BOUNCE_HOLD_MULT : PRESENCE_FORCE_SEC;
+
+    if (this.stillTime >= holdFor || this.presenceTime >= forceAt) {
       if (!this.exiting) audio.play('go');
       this.leave('menu');
     }

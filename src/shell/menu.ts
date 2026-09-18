@@ -17,6 +17,7 @@ import { PoseTracker, type TrackedPlayer } from '../core/tracker';
 import { vision } from '../core/vision';
 import { camera } from '../core/camera';
 import { audio } from '../engine/audio';
+import { noteMenuTimeout } from './attract';
 import {
   decorShape,
   drawTabularNumber,
@@ -261,6 +262,14 @@ export class MenuScreen implements Screen {
 
   async mount(): Promise<void> {
     audio.init();
+    // KEEP THE STALL'S PULSE. Attract stops its ambient bed on unmount,
+    // reasoning that "the menu and every game start their own music" — which
+    // is true of games and was never true here. A player could stand at the
+    // menu for up to PRESENCE_STALL_SEC in total silence, in a hall where the
+    // low end is the only part of the mix that carries. Same tempo and
+    // intensity as attract, so crossing between them is seamless.
+    audio.startMusic(96);
+    audio.setMusicIntensity(0.22);
     if (!isSimEnabled()) {
       await vision.start({ mode: 'pose', numPoses: 1, poseModel: 'lite' });
     }
@@ -268,6 +277,8 @@ export class MenuScreen implements Screen {
 
   unmount(): void {
     this.particles.clear();
+    // A game sets its own tempo; leaving this running would layer two.
+    audio.stopMusic();
   }
 
   render(fc: FrameContext): void {
@@ -307,6 +318,9 @@ export class MenuScreen implements Screen {
       !this.exiting &&
       (this.idleTime > IDLE_TIMEOUT_SEC || this.stalledTime > PRESENCE_STALL_SEC)
     ) {
+      // Tell attract this body did not engage, so it holds longer before
+      // putting the menu back up. See BOUNCE_COOLDOWN_SEC.
+      noteMenuTimeout();
       this.leave('attract');
     }
 
