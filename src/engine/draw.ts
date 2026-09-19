@@ -104,6 +104,20 @@ export interface TextOptions {
    * and it only shows up when it is earning its place.
    */
   knockout?: boolean;
+  /**
+   * Shrink to fit this many pixels. The preferred way to fit text.
+   *
+   * `fitText` asks the caller to repeat the size, the weight, the family AND
+   * the letter spacing, and a mismatch in any of the four is silent — the text
+   * simply renders wider than the box it was fitted to. That is how
+   * `RED LIGHT, GREEN LIGHT` reached 98% of a 4:3 screen after being "fitted":
+   * `fitText` measured it unspaced and `drawText` then added 0.03em per glyph.
+   *
+   * Here there is nothing to repeat. The font and the spacing are already set
+   * on the context two lines above, so the measurement is by construction the
+   * one that will be drawn.
+   */
+  maxWidth?: number;
 }
 
 export function drawText(
@@ -121,6 +135,15 @@ export function drawText(
   ctx.textBaseline = opts.baseline ?? 'middle';
   if (opts.letterSpacing) ctx.letterSpacing = opts.letterSpacing;
   if (opts.alpha !== undefined) ctx.globalAlpha = opts.alpha;
+
+  // Fit AFTER the font and the spacing are on the context, and re-apply the
+  // font at the new size. Measured here, drawn here, same state.
+  if (opts.maxWidth !== undefined && opts.maxWidth > 0 && text) {
+    const w = ctx.measureText(text).width;
+    if (w > opts.maxWidth && w > 0) {
+      ctx.font = `${weight} ${Math.max(1, opts.size * (opts.maxWidth / w))}px ${font}`;
+    }
+  }
 
   const color = opts.color ?? COLORS.ink;
 
@@ -178,10 +201,22 @@ export function measureText(
   // inferred default would narrow the parameter to that one literal and reject
   // every other value.
   weight: number | string = WEIGHT.black,
-  font: string = FONTS.display
+  font: string = FONTS.display,
+  /**
+   * The SAME value the eventual `drawText` will use.
+   *
+   * Canvas applies letter spacing as extra advance per glyph, so a 21-character
+   * headline at 0.03em is ~0.6em wider than an unspaced measurement of it, and
+   * every `TRACK.*` value in this kit is larger than that. Omitting it here is
+   * not a rounding error, it is a systematically low answer — and since the
+   * callers that care are precisely the ones fitting text to a box, the
+   * measurement being low is exactly the direction that overflows.
+   */
+  letterSpacing: string = '0px'
 ): number {
   ctx.save();
   ctx.font = `${weight} ${size}px ${font}`;
+  ctx.letterSpacing = letterSpacing;
   const w = ctx.measureText(text).width;
   ctx.restore();
   return w;
@@ -201,10 +236,12 @@ export function fitText(
   maxWidth: number,
   size: number,
   weight: number | string = WEIGHT.black,
-  font: string = FONTS.display
+  font: string = FONTS.display,
+  /** See `measureText`. Pass whatever the matching `drawText` passes. */
+  letterSpacing: string = '0px'
 ): number {
   if (!text) return size;
-  const w = measureText(ctx, text, size, weight, font);
+  const w = measureText(ctx, text, size, weight, font, letterSpacing);
   if (w <= maxWidth || w === 0) return size;
   return Math.max(1, size * (maxWidth / w));
 }

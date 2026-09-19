@@ -27,7 +27,6 @@ import { audio } from '../engine/audio';
 import {
   clearFrame,
   drawText,
-  fitText,
   vh,
   progressBar,
   roundRect,
@@ -41,6 +40,7 @@ import {
   FONTS,
   EASE,
   SHADOW,
+  SAFE,
   SPACE,
   STROKE,
   WEIGHT,
@@ -1071,8 +1071,21 @@ export abstract class GameBase implements Screen {
     if (this.idleTime > tunables.get('game.idleTimeoutSec', IDLE_TIMEOUT_SEC)) this.onExit?.('attract');
 
     const pulse = 0.6 + idlePulse(fc.time, 2.4, 1) * 0.4;
+    // FITTED — and it took the typeface being fixed to find out it wasn't.
+    //
+    // MEASURED by instrumenting `fillText` across every screen and every game
+    // once Archivo was actually loading: `RED LIGHT, GREEN LIGHT` at 9vh came
+    // out at 98% of the logical width on a 4:3 panel. It was the only string
+    // in the app over 90%, and it had been invisible because every previous
+    // measurement was taken in Helvetica, which is narrower.
+    //
+    // 16:9 is comfortable at ~74%, so this never showed on the machine it was
+    // written on. A club fair gets handed whatever projector is in the
+    // cupboard, and the failure mode is the longest game name on the roster
+    // running off both edges of its own title card.
     drawText(ctx, this.config.title, v.width / 2, v.height * 0.4, {
       size: vh(v, 9),
+      maxWidth: v.width - vh(v, SAFE * 2 + SPACE.md),
       color: this.config.color,
       shadow: vh(v, SHADOW.lifted),
             letterSpacing: '0.03em',
@@ -1101,7 +1114,8 @@ export abstract class GameBase implements Screen {
     // gets handed — Red Light's runs to 88% of the width and Pose Match's and
     // Rhythm's to ~75%. `fitText` is a no-op until it isn't.
     drawText(ctx, this.config.tagline, v.width / 2, v.height * 0.66, {
-      size: fitText(ctx, this.config.tagline, v.width - vh(v, 8), vh(v, 2.2), 400, FONTS.body),
+      size: vh(v, 2.2),
+      maxWidth: v.width - vh(v, SAFE * 2 + SPACE.md),
       // Sits over the pre-round camera ghost at its strongest.
       knockout: true,
       color: COLORS.ink,
@@ -1272,7 +1286,8 @@ export abstract class GameBase implements Screen {
     ctx.restore();
 
     drawText(ctx, this.config.tagline, v.width / 2, v.height * 0.74, {
-      size: fitText(ctx, this.config.tagline, v.width - vh(v, 8), vh(v, 3), 600, FONTS.body),
+      size: vh(v, 3),
+      maxWidth: v.width - vh(v, SAFE * 2 + SPACE.md),
       // Sits over the pre-round camera ghost at its strongest.
       knockout: true,
       color: COLORS.text,

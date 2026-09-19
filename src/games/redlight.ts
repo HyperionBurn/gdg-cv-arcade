@@ -520,7 +520,15 @@ export class RedLightGame extends GameBase {
       // body scale every threshold in this game is divided by. The tester who
       // got it right described what he was doing as "moving my arms like I'm
       // running without running", and that is the whole interaction. Say so.
-      tagline: '<PUMP YOUR ARMS ON GREEN — FREEZE ON RED> STAY WHERE YOU ARE',
+      tagline: '<PUMP YOUR ARMS ON GREEN — FREEZE ON RED>',
+      // WAS THE TAIL OF THE TAGLINE, and it read as a run-on: the bracketed
+      // instruction and a loose clause in the same weight on the same line,
+      // with the clause contradicting the instruction at a glance ("pump your
+      // arms" / "stay where you are"). It is the same failure 67 Speed has —
+      // testers read an instruction to move and WALKED, which cannot work at a
+      // stall and rescales the torso unit every threshold here divides by — so
+      // it gets the same words and the same red pill.
+      avoid: "DON'T WALK — STAY PUT",
       visionMode: 'pose',
       maxPlayers: LANES,
       roundSeconds: 45,
