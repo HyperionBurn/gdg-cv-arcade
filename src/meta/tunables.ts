@@ -172,12 +172,32 @@ class TunableRegistry {
     }
   }
 
+  /**
+   * True when a write was refused and the tuning is memory-only.
+   *
+   * Same shape as `leaderboard.saveFailed`, and added for the same reason: a
+   * storage failure here is invisible by design. The slider moves, the readout
+   * updates, the game reads the new value — and a reload silently puts the
+   * previous marshal's numbers back.
+   *
+   * It matters SOONER than the leaderboard's, because this saves on every
+   * slider move while the board only saves on a submit. Storage can be dead
+   * for an hour of tuning before the first score reveals it.
+   *
+   * Surfaced in the operator strip. Both flags share one chip: if either is
+   * failing, the answer is the same and a marshal does not need to know which
+   * key was refused.
+   */
+  saveFailed = false;
+
   private save(): void {
     try {
       if (this.overrides.size === 0) localStorage.removeItem(STORAGE_KEY);
       else localStorage.setItem(STORAGE_KEY, JSON.stringify(this.toObject()));
+      this.saveFailed = false;
     } catch {
       /* private mode / quota — keep running in memory */
+      this.saveFailed = true;
     }
   }
 

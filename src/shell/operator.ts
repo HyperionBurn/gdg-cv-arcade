@@ -590,8 +590,19 @@ export class OperatorOverlay {
     //
     // Loudest chip available, and it stays up — unlike the camera, this does
     // not recover on its own and there is nothing to wait for.
-    if (leaderboard.saveFailed) {
-      strip.appendChild(this.chip('SCORES', 'NOT SAVING — DO NOT RELOAD', 'bad'));
+    //
+    // Both flags, one chip. Tuning saves on every slider move and the board
+    // only on a submit, so tuning notices a dead disk first — but the answer
+    // is identical either way and a marshal does not need to know which key
+    // was refused.
+    if (leaderboard.saveFailed || tunables.saveFailed) {
+      const what =
+        leaderboard.saveFailed && tunables.saveFailed
+          ? 'SCORES + TUNING'
+          : leaderboard.saveFailed
+            ? 'SCORES'
+            : 'TUNING';
+      strip.appendChild(this.chip(what, 'NOT SAVING — DO NOT RELOAD', 'bad'));
     }
 
     const overridden = tunables.overriddenKeys().length;

@@ -17,6 +17,7 @@
  */
 
 import { leaderboard } from '../meta/leaderboard';
+import { tunables } from '../meta/tunables';
 import { camera } from '../core/camera';
 import { vision } from '../core/vision';
 import { isSimEnabled } from '../core/simulator';
@@ -187,14 +188,21 @@ function rows(fc: FrameContext): Row[] {
     }
   }
 
-  // 6. Render cost, to separate "the game is slow" from "vision is slow".
-  // Scores are running from memory only. Nothing else says so, and the
-  // runbook's answer to four different problems is F5 — which would throw
-  // the day away. See the same chip in the operator console.
+  // 6. Storage. Everything is running from memory only, nothing else says so,
+  // and the runbook's answer to four different problems is F5 — which would
+  // throw the day away. Same chip in the operator console.
+  //
+  // Tuning is listed separately and FIRST because it fails first: sliders save
+  // on every move, the board only on a submit, so a dead disk shows up here
+  // long before a single score would reveal it.
+  if (tunables.saveFailed) {
+    out.push({ label: 'tuning', value: 'NOT SAVING — DO NOT RELOAD', bad: true });
+  }
   if (leaderboard.saveFailed) {
     out.push({ label: 'scores', value: 'NOT SAVING — DO NOT RELOAD', bad: true });
   }
 
+  // 7. Render cost, to separate "the game is slow" from "vision is slow".
   out.push({ label: 'frame', value: `${(fc.dt * 1000).toFixed(1)}ms` , bad: fc.dt > 0.03 });
 
   return out;

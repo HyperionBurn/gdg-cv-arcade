@@ -135,6 +135,60 @@ describe('diagnostics know the simulator is not a fault', () => {
  * quietly failing throws the day away and has no way to know they did.
  */
 describe('a silent save failure is not silent', () => {
+  const readersOf = async (flag: string, owner: string): Promise<string[]> => {
+    const { readdir, readFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const walk = async (dir: string): Promise<string[]> => {
+      const out: string[] = [];
+      for (const e of await readdir(dir, { withFileTypes: true })) {
+        const p = join(dir, e.name);
+        if (e.isDirectory()) out.push(...(await walk(p)));
+        else if (p.endsWith('.ts')) out.push(p);
+      }
+      return out;
+    };
+    const found: string[] = [];
+    for (const file of await walk('src')) {
+      // `[\\/]`, not `[\/]` — see the note in the leaderboard test below.
+      const rel = file.split(/[\\/]/).join('/');
+      if (rel === owner) continue;
+      if ((await readFile(file, 'utf8')).includes(flag)) found.push(rel);
+    }
+    return found;
+  };
+
+  /**
+   * Tuning saves on EVERY slider move; the board only on a submit. So a dead
+   * disk shows up here an hour before the first score would reveal it, which
+   * is the whole reason it gets its own flag rather than relying on the
+   * leaderboard to notice.
+   */
+  test('the tuning flag is surfaced too', async () => {
+    // `tunables.saveFailed` by name, not a bare `saveFailed` — otherwise this
+    // passes on a file that only ever reads the leaderboard's flag, which is
+    // exactly the state both surfaces were in before this test existed.
+    const readers = await readersOf('tunables.saveFailed', 'src/meta/tunables.ts');
+    assert.ok(
+      readers.length > 0,
+      'nothing surfaces tunables.saveFailed, so a marshal can tune for an hour ' +
+        'into a disk that is refusing every write'
+    );
+  });
+
+  /**
+   * And on BOTH surfaces. The `d` overlay is the fast one — a marshal hits `d`
+   * mid-queue; the operator console is a deliberate trip. Reporting a dead disk
+   * on only one of them means the answer depends on which key you pressed.
+   */
+  test('both storage readouts cover both flags', async () => {
+    const { readFile } = await import('node:fs/promises');
+    for (const f of ['src/shell/debug.ts', 'src/shell/operator.ts']) {
+      const src = await readFile(f, 'utf8');
+      assert.match(src, /leaderboard\.saveFailed/, `${f} stopped reporting score saves`);
+      assert.match(src, /tunables\.saveFailed/, `${f} stopped reporting tuning saves`);
+    }
+  });
+
   test('saveFailed is read somewhere outside the leaderboard', async () => {
     const { readdir, readFile } = await import('node:fs/promises');
     const { join } = await import('node:path');
