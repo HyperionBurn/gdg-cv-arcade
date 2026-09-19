@@ -1302,14 +1302,19 @@ function factionStandings(): Array<{ name: string; total: number; color: string 
   return out.slice(0, 4);
 }
 
-/** PLAN.md §4 writes this row as "CS", not "COMPUTER SCI". */
-const FACTION_SHORT: Record<string, string> = {
-  'COMPUTER SCI': 'CS',
-};
-
+/**
+ * Abbreviate only if it does not fit.
+ *
+ * There used to be a `FACTION_SHORT` map here turning 'COMPUTER SCI' into 'CS'
+ * for this rail alone — and the initials picker, which has room, spelled it
+ * out. A player picked one label and was then listed under a different one,
+ * which is the whole reason factions exist working against itself.
+ *
+ * The faction is now named 'COMP SCI', which is inside the limit below, so
+ * every surface prints the same string and this function is an identity for
+ * the current roster. It stays as the guard for whatever gets added next.
+ */
 function shortFaction(name: string): string {
-  const mapped = FACTION_SHORT[name];
-  if (mapped) return mapped;
   if (name.length <= 11) return name;
   return name
     .split(/\s+/)

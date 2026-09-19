@@ -66,7 +66,11 @@ const TOP_N = 10;
  */
 export const FACTIONS = [
   'ENGINEERING',
-  'COMPUTER SCI',
+  // 'COMP SCI', not 'COMPUTER SCI'. The attract rail abbreviated it to 'CS'
+  // while the initials picker spelled it out, so a player chose one label and
+  // was then listed under another. Eight characters fits the rail at full
+  // length, so there is no abbreviation left to disagree with.
+  'COMP SCI',
   'BUSINESS',
   'MEDIA',
   'SCIENCE',

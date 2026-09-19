@@ -70,8 +70,8 @@ describe('a faction follows the player, not the kiosk', () => {
   test('it looks across every game, not just the one being played', () => {
     // Somebody who set their faction on Red Light on day one and comes back to
     // Fruit Ninja on day two has already answered.
-    leaderboard.submit('redlight' as GameId, 40, 'BOB', 'COMPUTER SCI');
-    assert.equal(leaderboard.factionFor('BOB'), 'COMPUTER SCI');
+    leaderboard.submit('redlight' as GameId, 40, 'BOB', 'COMP SCI');
+    assert.equal(leaderboard.factionFor('BOB'), 'COMP SCI');
   });
 
   test('a faction the club has since deleted means ASK AGAIN', () => {
@@ -114,5 +114,49 @@ describe('a faction follows the player, not the kiosk', () => {
     assert.equal(totals.get('MEDIA'), 20);
     assert.equal(totals.get('BUSINESS'), 30);
     assert.equal(totals.get('SCIENCE'), 40);
+  });
+});
+
+/**
+ * ONE FACTION, ONE LABEL, EVERY SCREEN.
+ *
+ * The attract rail abbreviates a name that does not fit its column. The
+ * initials picker has room and prints the raw name. For most of the project
+ * one faction was called COMPUTER SCI on the screen where you chose it and CS
+ * on the screen that showed the standings — so a player picked one team and
+ * watched a different one score.
+ *
+ * The rename to COMP SCI fixed it by making every name short enough that the
+ * abbreviator is an identity function. This keeps it that way: it is a rule
+ * about the NAMES, not about the two drawing functions, because a third
+ * surface will eventually print one and it should not have to know.
+ */
+describe('a faction is called the same thing everywhere', () => {
+  // The rail's own limit, from `shortFaction` in shell/attract.ts.
+  const RAIL_LIMIT = 11;
+
+  for (const name of FACTIONS) {
+    test(`${name} fits the attract rail without being abbreviated`, () => {
+      assert.ok(
+        name.length <= RAIL_LIMIT,
+        `"${name}" is ${name.length} characters, so the rail will shorten it ` +
+          `to "${name
+            .split(/\s+/)
+            .map((w) => w.charAt(0))
+            .join('')}" while the initials picker spells it out`
+      );
+    });
+  }
+
+  test('and no two factions collapse to the same initials', () => {
+    // The fallback only runs for a name over the limit, but if one is ever
+    // added, two teams sharing an abbreviation is the next failure along.
+    const initials = FACTIONS.map((n) =>
+      n
+        .split(/\s+/)
+        .map((w) => w.charAt(0))
+        .join('')
+    );
+    assert.equal(new Set(initials).size, initials.length);
   });
 });
