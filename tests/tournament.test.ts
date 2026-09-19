@@ -702,6 +702,83 @@ describe('Tournament', () => {
     assert.equal(t.toRender().next, null);
   });
 
+  /**
+   * THE EXPORT HAS TO ANSWER "WHO BEAT WHOM" ON ITS OWN.
+   *
+   * Scores and tuning had an export and the bracket did not, which was exactly
+   * backwards: the other two can be reconstructed by asking people, and an
+   * afternoon of results cannot. The runbook's answer to a dead disk used to be
+   * to photograph the tab.
+   *
+   * So the file has to stand alone. A match carrying `slots: [3, 5]` and
+   * `winner: 0` is only meaningful next to the player list it was written
+   * beside, and somebody opening this at 6pm should not have to join two tables
+   * by hand to find out who won.
+   */
+  test('the export names the people, not just their ids', () => {
+    const t = fresh('t:export');
+    for (const n of ['AAA', 'BBB', 'CCC', 'DDD']) t.addPlayer(n);
+    t.start('sixtyseven');
+
+    // Round 0: AAA beats DDD, BBB beats CCC (standard 1v4 / 2v3 seeding).
+    const r0 = t.getMatches().filter((m) => m.round === 0);
+    for (const m of r0) t.report(m.id, 0);
+    const final = t.getMatches().find((m) => m.round === 1)!;
+    t.report(final.id, 1);
+
+    const dump = JSON.parse(t.exportJSON()) as {
+      champion: string | null;
+      state: string;
+      game: string | null;
+      players: Array<{ initials: string }>;
+      matches: Array<{ names: [string | null, string | null]; winner: string | null; round: number }>;
+    };
+
+    assert.equal(dump.champion, t.champion()!.initials);
+    assert.equal(dump.state, 'complete');
+    assert.equal(dump.game, 'sixtyseven');
+    assert.deepEqual(
+      dump.players.map((p) => p.initials),
+      ['AAA', 'BBB', 'CCC', 'DDD']
+    );
+
+    // Every played match says who was in it and who won, in initials.
+    for (const m of dump.matches) {
+      assert.ok(m.names[0] && m.names[1], `round ${m.round} match has an unnamed slot`);
+      assert.ok(m.winner, `round ${m.round} match does not say who won`);
+      assert.ok(
+        m.names.includes(m.winner),
+        `winner ${m.winner} is not one of the two people in the match`
+      );
+    }
+
+    const finalOut = dump.matches.find((m) => m.round === 1)!;
+    assert.equal(finalOut.winner, dump.champion, 'the final disagrees with the champion');
+  });
+
+  /**
+   * And it must not throw before anyone has played. The DATA tab hides the
+   * button until there is a bracket, but a marshal can reach this the instant
+   * the first name goes in.
+   */
+  test('exporting a bracket nobody has played is still valid JSON', () => {
+    const t = fresh('t:export-empty');
+    const empty = JSON.parse(t.exportJSON()) as { champion: string | null; matches: unknown[] };
+    assert.equal(empty.champion, null);
+    assert.deepEqual(empty.matches, []);
+
+    t.addPlayer('ZZZ');
+    const lobby = JSON.parse(t.exportJSON()) as {
+      state: string;
+      players: Array<{ initials: string }>;
+    };
+    assert.equal(lobby.state, 'lobby');
+    assert.deepEqual(
+      lobby.players.map((p) => p.initials),
+      ['ZZZ']
+    );
+  });
+
   test('an empty tournament renders without throwing', () => {
     const t = fresh('t:empty');
     const r = t.toRender();

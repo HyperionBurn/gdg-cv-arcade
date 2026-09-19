@@ -1243,6 +1243,20 @@ export class OperatorOverlay {
         download(`gdg-arcade-tuning-${stamp()}.json`, tunables.exportJSON());
       })
     );
+    // Only offered while there is a bracket to export, so the DATA tab is not
+    // carrying a button that writes `{"players":[]}` for most of the day.
+    //
+    // It is the LAST one added and the most important one to press: scores and
+    // tuning can be reconstructed by asking people, and who beat whom across an
+    // afternoon cannot. It had no export at all until now, which had it exactly
+    // backwards — the runbook's answer was to photograph the tab.
+    if (tournament.active || tournament.getPlayers().length > 0) {
+      exports.appendChild(
+        button('op-btn', 'EXPORT BRACKET JSON', () => {
+          download(`gdg-arcade-bracket-${stamp()}.json`, tournament.exportJSON());
+        })
+      );
+    }
     pane.appendChild(exports);
 
     pane.appendChild(

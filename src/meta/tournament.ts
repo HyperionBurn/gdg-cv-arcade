@@ -495,6 +495,42 @@ export class Tournament {
     for (const fn of this.listeners) fn();
   }
 
+  /**
+   * JSON dump — the same payload `save()` persists, so an export taken while
+   * storage is refusing writes is a complete substitute for the write that did
+   * not land.
+   *
+   * This existed for scores and tuning and not for the bracket, which had it
+   * backwards: the other two are recoverable by asking people, and a bracket is
+   * not. The runbook's answer used to be to photograph the tab.
+   *
+   * Resolves the player names rather than leaving raw ids on the matches. The
+   * thing somebody needs at 4pm is who beat whom, and an id is only meaningful
+   * next to the player list it was written beside.
+   */
+  exportJSON(): string {
+    return JSON.stringify(
+      {
+        v: 1,
+        game: this._game,
+        state: this._state,
+        startedAt: this.startedAt,
+        champion: this.champion()?.initials ?? null,
+        players: this.players,
+        matches: this.matches.map((m) => {
+          // `matchPlayers` already resolves byes and unfilled slots, so this
+          // reads the bracket the same way the screen does rather than
+          // reaching into `slots` and getting the edge cases wrong.
+          const [a, b] = this.matchPlayers(m);
+          const won = m.winner === null ? null : m.winner === 0 ? a : b;
+          return { ...m, names: [a?.initials ?? null, b?.initials ?? null], winner: won?.initials ?? null, winnerSlot: m.winner };
+        }),
+      },
+      null,
+      2
+    );
+  }
+
   subscribe(fn: () => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
