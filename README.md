@@ -390,6 +390,20 @@ Red Light 0.98ms · Pose Match 0.49ms · Fruit Ninja 3.52ms per frame.
 
 All driven deterministically via `window.__arcade.tick()`:
 
+- **The two controls a marshal reaches for when it is going wrong**, exercised
+  end to end 2026-09-19:
+
+  **The mid-round key guard holds.** A bare number key during a live round does
+  nothing — a bag or an elbow on the keyboard cannot end somebody's turn.
+  `SHIFT` + the same key jumps as documented.
+
+  **PANIC does what the card says.** From a live Rhythm round: audio muted,
+  effects floored, back to attract, console closed so the screen looks
+  deliberate again. Reopening shows `PANIC ACTIVE — audio muted, effects at
+  minimum, returned to attract`, so the next marshal is never left wondering
+  why the stall is silent. RECOVER clears it and leaves no tuning override
+  behind.
+
 - **Endurance, Sept 19 (after the day's changes):** `__arcade.turn()` five
   times, **65 full turns**, attract → menu → game → initials → out, alternating
   1P and 2P across all seven games. **0 failures.** JS heap across the five
