@@ -424,6 +424,23 @@ export class Tournament {
   private listeners = new Set<() => void>();
   private storageKey: string;
 
+  /**
+   * TRUE ONCE A BRACKET WRITE HAS BEEN REFUSED.
+   *
+   * `lsSet` already returned a boolean saying whether the write landed, and
+   * `save()` threw it away — the third place in this codebase with that exact
+   * shape, after `leaderboard.saveFailed` (set, never read) and
+   * `tunables.save()` (no flag at all).
+   *
+   * It is the worst of the three. A lost score is a number somebody can tell
+   * you again; a lost bracket is who beat whom across a whole afternoon, and
+   * nobody in the queue can reconstruct it. The header above says a bracket
+   * surviving a mid-event crash is the entire reason this persists — which is
+   * only true while the writes are actually landing, and until now nothing
+   * anywhere would have said they were not.
+   */
+  saveFailed = false;
+
   // Written out rather than a parameter property: `node --test` strips TS types
   // rather than compiling them, and parameter properties are the one common
   // TS-ism it cannot handle. This file has to be unit-testable.
@@ -470,9 +487,10 @@ export class Tournament {
       nextPlayerId: this.nextPlayerId,
     };
     try {
-      lsSet(this.storageKey, JSON.stringify(payload));
+      this.saveFailed = !lsSet(this.storageKey, JSON.stringify(payload));
     } catch {
       /* JSON.stringify cannot realistically throw here, but never block the event */
+      this.saveFailed = true;
     }
     for (const fn of this.listeners) fn();
   }

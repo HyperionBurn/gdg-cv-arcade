@@ -18,6 +18,7 @@
 
 import { leaderboard } from '../meta/leaderboard';
 import { tunables } from '../meta/tunables';
+import { tournament } from '../meta/tournament';
 import { camera } from '../core/camera';
 import { vision } from '../core/vision';
 import { isSimEnabled } from '../core/simulator';
@@ -192,11 +193,19 @@ function rows(fc: FrameContext): Row[] {
   // and the runbook's answer to four different problems is F5 — which would
   // throw the day away. Same chip in the operator console.
   //
-  // Tuning is listed separately and FIRST because it fails first: sliders save
-  // on every move, the board only on a submit, so a dead disk shows up here
-  // long before a single score would reveal it.
+  // One row each, in the order they NOTICE, which is the order they write:
+  // tuning on every slider move, the bracket on every reported match, scores
+  // only on a submit. So a dead disk surfaces as `tuning` long before a single
+  // score would have revealed it.
+  //
+  // The bracket is the one that cannot be reconstructed — a lost score is a
+  // number somebody can tell you again, a lost bracket is who beat whom across
+  // a whole afternoon.
   if (tunables.saveFailed) {
     out.push({ label: 'tuning', value: 'NOT SAVING — DO NOT RELOAD', bad: true });
+  }
+  if (tournament.saveFailed) {
+    out.push({ label: 'bracket', value: 'NOT SAVING — DO NOT RELOAD', bad: true });
   }
   if (leaderboard.saveFailed) {
     out.push({ label: 'scores', value: 'NOT SAVING — DO NOT RELOAD', bad: true });

@@ -163,29 +163,87 @@ describe('a silent save failure is not silent', () => {
    * is the whole reason it gets its own flag rather than relying on the
    * leaderboard to notice.
    */
-  test('the tuning flag is surfaced too', async () => {
-    // `tunables.saveFailed` by name, not a bare `saveFailed` — otherwise this
-    // passes on a file that only ever reads the leaderboard's flag, which is
-    // exactly the state both surfaces were in before this test existed.
-    const readers = await readersOf('tunables.saveFailed', 'src/meta/tunables.ts');
-    assert.ok(
-      readers.length > 0,
-      'nothing surfaces tunables.saveFailed, so a marshal can tune for an hour ' +
-        'into a disk that is refusing every write'
-    );
-  });
+  /**
+   * Three stores persist, and all three had the same defect in a different
+   * stage: the leaderboard set a flag nothing read, tunables had no flag at
+   * all, and the tournament's `lsSet` returned a boolean that `save()` threw
+   * away. Named individually so adding a fourth store is a deliberate choice
+   * rather than something this suite quietly stops covering.
+   */
+  const STORES = [
+    { flag: 'tunables.saveFailed', owner: 'src/meta/tunables.ts' },
+    { flag: 'tournament.saveFailed', owner: 'src/meta/tournament.ts' },
+    { flag: 'leaderboard.saveFailed', owner: 'src/meta/leaderboard.ts' },
+  ];
+
+  for (const { flag, owner } of STORES) {
+    // The qualified name, not a bare `saveFailed` — otherwise this passes on a
+    // file that only ever reads a DIFFERENT store's flag, which is exactly the
+    // state both surfaces were in before this test existed.
+    test(`${flag} reaches a human`, async () => {
+      const readers = await readersOf(flag, owner);
+      assert.ok(
+        readers.length > 0,
+        `nothing surfaces ${flag}, so that store can be silently discarding ` +
+          'every write while the stall looks perfectly healthy'
+      );
+    });
+  }
 
   /**
    * And on BOTH surfaces. The `d` overlay is the fast one — a marshal hits `d`
    * mid-queue; the operator console is a deliberate trip. Reporting a dead disk
    * on only one of them means the answer depends on which key you pressed.
    */
-  test('both storage readouts cover both flags', async () => {
+  test('both storage readouts cover every store', async () => {
     const { readFile } = await import('node:fs/promises');
     for (const f of ['src/shell/debug.ts', 'src/shell/operator.ts']) {
       const src = await readFile(f, 'utf8');
-      assert.match(src, /leaderboard\.saveFailed/, `${f} stopped reporting score saves`);
-      assert.match(src, /tunables\.saveFailed/, `${f} stopped reporting tuning saves`);
+      for (const { flag } of STORES) {
+        assert.ok(src.includes(flag), `${f} stopped reporting ${flag}`);
+      }
+    }
+  });
+
+  /**
+   * The bracket is the one that cannot be reconstructed. A lost score is a
+   * number somebody can tell you again; a lost bracket is who beat whom across
+   * a whole afternoon, and the file header says surviving a mid-event crash is
+   * the entire reason it persists.
+   */
+  test('a refused bracket write sets the flag', async () => {
+    const { Tournament } = await import('../src/meta/tournament.ts');
+    const store = new Map<string, string>();
+    let refuse = false;
+
+    (globalThis as { localStorage?: unknown }).localStorage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      removeItem: (k: string) => void store.delete(k),
+      setItem: (k: string, v: string) => {
+        if (refuse) {
+          const e = new Error('quota');
+          e.name = 'QuotaExceededError';
+          throw e;
+        }
+        store.set(k, v);
+      },
+    };
+
+    try {
+      const t = new Tournament('test-bracket');
+      t.addPlayer('AAA');
+      assert.equal(t.saveFailed, false, 'a working write must not raise the flag');
+
+      refuse = true;
+      t.addPlayer('BBB');
+      assert.equal(t.saveFailed, true, 'a refused bracket write went unnoticed');
+
+      // And it must clear, or one blip at 10am reads as a dead disk all day.
+      refuse = false;
+      t.addPlayer('CCC');
+      assert.equal(t.saveFailed, false, 'the flag never clears once set');
+    } finally {
+      delete (globalThis as { localStorage?: unknown }).localStorage;
     }
   });
 

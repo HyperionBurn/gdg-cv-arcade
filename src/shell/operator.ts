@@ -591,18 +591,20 @@ export class OperatorOverlay {
     // Loudest chip available, and it stays up — unlike the camera, this does
     // not recover on its own and there is nothing to wait for.
     //
-    // Both flags, one chip. Tuning saves on every slider move and the board
-    // only on a submit, so tuning notices a dead disk first — but the answer
-    // is identical either way and a marshal does not need to know which key
-    // was refused.
-    if (leaderboard.saveFailed || tunables.saveFailed) {
-      const what =
-        leaderboard.saveFailed && tunables.saveFailed
-          ? 'SCORES + TUNING'
-          : leaderboard.saveFailed
-            ? 'SCORES'
-            : 'TUNING';
-      strip.appendChild(this.chip(what, 'NOT SAVING — DO NOT RELOAD', 'bad'));
+    // All three flags, one chip. They fail together in practice — a disk that
+    // refuses one key refuses them all — and the answer is identical either
+    // way, so a marshal does not need to know which key was refused. Listed in
+    // the order they NOTICE, which is the order they write: tuning on every
+    // slider move, the bracket on every reported match, scores only on a
+    // submit.
+    const dead = [
+      tunables.saveFailed && 'TUNING',
+      tournament.saveFailed && 'BRACKET',
+      leaderboard.saveFailed && 'SCORES',
+    ].filter((s): s is string => typeof s === 'string');
+
+    if (dead.length > 0) {
+      strip.appendChild(this.chip(dead.join(' + '), 'NOT SAVING — DO NOT RELOAD', 'bad'));
     }
 
     const overridden = tunables.overriddenKeys().length;
