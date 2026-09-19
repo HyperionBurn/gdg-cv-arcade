@@ -186,7 +186,11 @@ export class ModeScreen implements Screen {
   private elapsed = 0;
   private awayTime = 0;
 
-  private game: GameId = 'sixtyseven';
+  /**
+   * Null until the menu says which game. A screen that guessed would send the
+   * player to one they did not pick — see `mount`.
+   */
+  private game: GameId | null = null;
   private choices: [Choice, Choice] = choicesFor('sixtyseven');
   private chosen: PlayMode | null = null;
 
@@ -196,9 +200,14 @@ export class ModeScreen implements Screen {
 
   async mount(): Promise<void> {
     audio.init();
-    const handoff = takePendingGame();
-    if (handoff) this.game = handoff;
-    this.choices = choicesFor(this.game);
+
+    // Anything still pending belongs to a turn that never happened — a player
+    // who chose and then walked off during the wipe. Clearing it here means a
+    // choice can never be inherited by the next person.
+    setPlayMode(null);
+
+    this.game = takePendingGame();
+    if (this.game) this.choices = choicesFor(this.game);
 
     if (!isSimEnabled()) {
       await vision.start({ mode: 'pose', numPoses: 1, poseModel: 'lite' });
@@ -209,6 +218,16 @@ export class ModeScreen implements Screen {
     const { ctx, v } = fc;
     if (this.enterTime === 0) this.enterTime = fc.time;
     this.elapsed += fc.dt;
+
+    // NO GAME MEANS NO QUESTION. This screen is only ever reached from the
+    // menu, which always sets one — but "always" is doing a lot of work on a
+    // screen that now sits in the path of every single turn, and the failure
+    // if it is ever wrong is sending somebody to a game they did not choose.
+    // Back to the menu is the one answer that cannot be wrong.
+    if (!this.game) {
+      this.leave('menu');
+      this.game = 'sixtyseven';
+    }
 
     this.updateTracking(fc);
     this.layout(fc);
@@ -261,12 +280,16 @@ export class ModeScreen implements Screen {
   private choose(mode: PlayMode, deliberate: boolean): void {
     if (this.chosen) return;
     this.chosen = mode;
-    setPlayMode(mode);
     if (deliberate) audio.play('select', mode === 'solo' ? 0.9 : 1.15);
 
     // Straight out. There is no payoff to show here and the player has already
     // been told what they picked by the card lighting up under their hand.
-    this.leave(router.has(this.game) ? this.game : 'menu');
+    //
+    // The mode is only handed over if there is somewhere for it to go. A
+    // fallback to the menu must not leave one pending for whoever picks next.
+    const next = this.game && router.has(this.game) ? this.game : 'menu';
+    setPlayMode(next === 'menu' ? null : mode);
+    this.leave(next);
   }
 
   private leave(next: string): void {
@@ -364,12 +387,13 @@ export class ModeScreen implements Screen {
   private drawHeader(fc: FrameContext): void {
     const { ctx, v } = fc;
     const t = EASE.out(ramp(fc.time - this.enterTime, DUR.base));
-    const tile = MENU_TILES.find((x) => x.id === this.game);
+    const game = this.game ?? 'sixtyseven';
+    const tile = MENU_TILES.find((x) => x.id === game);
     const title = '<HOW MANY PLAYING?>';
 
-    drawText(ctx, tile?.title ?? this.game.toUpperCase(), v.width / 2, vh(v, 10), {
+    drawText(ctx, tile?.title ?? game.toUpperCase(), v.width / 2, vh(v, 10), {
       size: vh(v, TYPE.label),
-      color: gameColor(this.game),
+      color: gameColor(game),
       font: FONTS.body,
       weight: WEIGHT.bold,
       knockout: true,
@@ -399,7 +423,7 @@ export class ModeScreen implements Screen {
   private drawCards(fc: FrameContext, hovered: string | null, progress: number): void {
     const { ctx, v } = fc;
     const radius = vh(v, RADIUS.card);
-    const accent = gameColor(this.game);
+    const accent = gameColor(this.game ?? 'sixtyseven');
 
     for (const target of this.targets) {
       const choice = this.choices.find((c) => `mode:${c.mode}` === target.id);
