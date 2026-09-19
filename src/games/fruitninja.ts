@@ -107,6 +107,49 @@ const BOMB_TIME_PENALTY = 8;
  * combo and still costs BOMB_STUN_MS of dead blades, so it never becomes free.
  */
 const BOMB_TIME_BUDGET_SEC = 12;
+
+/**
+ * WHAT ONE BOMB COSTS THE CLOCK.
+ *
+ * Three rules in one expression, each of them a decision somebody could
+ * plausibly undo without realising what it was for:
+ *
+ *   A ROUND CAN ONLY EVER LOSE `BOMB_TIME_BUDGET_SEC` TO BOMBS, however many
+ *   are hit. Without the cap a run of bad luck deletes the round, and
+ *   ARCHITECTURE.md's "failure should be funny, never punishing" is the whole
+ *   reason this game has bombs at all.
+ *
+ *   IN VERSUS A BOMB COSTS NO TIME AT ALL. The clock is shared, so charging it
+ *   punishes the opponent for a mistake they did not make — measured at two
+ *   bombs taking 24s off a 45s round for BOTH players. The penalty there is
+ *   the per-slot blade stun instead: same joke, same lost combo, lands only on
+ *   the person who swung.
+ *
+ *   THE CLOCK NEVER DROPS BELOW 0.6s. A bomb late in a round must not end it
+ *   outright — that is the difference between a punchline and being cut off
+ *   mid-swing.
+ *
+ * Extracted so those can be checked rather than described. The game had no
+ * test of its own; the slice geometry is covered by `geometry.test.ts` and
+ * everything else about Fruit Ninja was resting on a README measurement.
+ */
+export function bombPenalty(
+  timeLeft: number,
+  bombSecondsSoFar: number,
+  versus: boolean
+): { spend: number; bombSeconds: number; timeLeft: number } {
+  const spend = versus
+    ? 0
+    : Math.max(0, Math.min(BOMB_TIME_PENALTY, BOMB_TIME_BUDGET_SEC - bombSecondsSoFar));
+
+  if (spend <= 0) return { spend: 0, bombSeconds: bombSecondsSoFar, timeLeft };
+
+  return {
+    spend,
+    bombSeconds: bombSecondsSoFar + spend,
+    timeLeft: Math.max(0.6, timeLeft - spend),
+  };
+}
 /** Seconds a juice splat survives. It fades out at the end — see drawSplats. */
 const SPLAT_DECAY = 0.4;
 /** Hard ceiling on splats. Paper has to stay the majority of the screen. */
@@ -811,14 +854,9 @@ export class FruitNinjaGame extends GameBase {
     // bomb costing something after the clock budget is gone.
     this.stunUntil[slot] = fc.now + BOMB_STUN_MS;
 
-    const spend =
-      this.playerCount > 1
-        ? 0
-        : Math.min(BOMB_TIME_PENALTY, BOMB_TIME_BUDGET_SEC - this.bombSeconds);
-    if (spend > 0) {
-      this.bombSeconds += spend;
-      this.timeLeft = Math.max(0.6, this.timeLeft - spend);
-    }
+    const cost = bombPenalty(this.timeLeft, this.bombSeconds, this.playerCount > 1);
+    this.bombSeconds = cost.bombSeconds;
+    this.timeLeft = cost.timeLeft;
 
     audio.play('bomb');
     this.juice.shake(0.75);
@@ -854,11 +892,11 @@ export class FruitNinjaGame extends GameBase {
     });
 
     this.popups.spawn(
-      spend > 0 ? `-${Math.round(spend)}s` : '<BLADES OUT!>',
+      cost.spend > 0 ? `-${Math.round(cost.spend)}s` : '<BLADES OUT!>',
       b.x,
       b.y,
       COLORS.red,
-      vh(v, spend > 0 ? 6 : 4.4),
+      vh(v, cost.spend > 0 ? 6 : 4.4),
       1.2
     );
   }
