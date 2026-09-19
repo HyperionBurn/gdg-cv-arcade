@@ -37,6 +37,7 @@ import { BURST } from '../engine/particles';
 import { audio } from '../engine/audio';
 import {
   drawTabularNumber,
+  labelPill,
   measureTabularNumber,
   stickerPill,
   vh,
@@ -86,6 +87,15 @@ const ARM_OFFSET_TORSOS = 0.25;
 const ARM_FALLBACK = 0.55;
 
 const BALLOON_COLORS = [COLORS.blue, COLORS.red, COLORS.green, COLORS.yellow] as const;
+
+/**
+ * How long into a round the "hands up" hint can still appear.
+ *
+ * Long enough for somebody who spent the countdown reading the tagline rather
+ * than getting ready, short enough that it is gone well before the round has
+ * any shape to it. See `drawArmHint`.
+ */
+const ARM_HINT_SEC = 7;
 
 /**
  * Half the width of the band balloons rise through, in TORSO UNITS either side
@@ -846,9 +856,56 @@ export class BalloonPopGame extends GameBase {
     });
   }
 
+  /**
+   * THE ARMING LINE IS THE ONE RULE NOTHING ON SCREEN SAYS OUT LOUD.
+   *
+   * A balloon below your shoulders is grey and cannot be popped. That is a
+   * good rule — it is what stops a player flailing at waist height and
+   * clearing the field — and the grey/colour flip is a clear signal ONCE YOU
+   * KNOW WHAT IT MEANS. Somebody meeting the game in a queue, standing with
+   * their hands at their sides, sees a screen full of grey balloons and a grey
+   * hand marker, touches one, and nothing happens. There is no way to tell
+   * that from the game being broken, which is the exact failure Red Light had
+   * when people read "move" and walked.
+   *
+   * So: one line, aimed at the player it is about.
+   *
+   * TIME-BOUNDED **AND** STATE-BOUNDED, unlike Red Light's, and the difference
+   * is whose state it reads. There the gate was on ANOTHER racer's progress,
+   * so the fastest player pulled the instruction off screen away from the five
+   * who still needed it. Here it is this slot's own hands: raising them is
+   * both the instruction and the proof it was understood, so hiding it then is
+   * correct. The clock cap is the backstop for somebody who never raises them
+   * — an instruction nobody is acting on becomes clutter.
+   */
+  private drawArmHint(fc: FrameContext, slot: number, rect: SlotRect): void {
+    const { ctx, v } = fc;
+    if (this.roundTotal - this.timeLeft > ARM_HINT_SEC) return;
+
+    const line = this.armLine[slot] ?? v.height * ARM_FALLBACK;
+    let armed = false;
+    for (const blade of this.blades.all) {
+      if (this.playerCount > 1 && this.slotOf(blade) !== slot) continue;
+      if (blade.y < line) armed = true;
+    }
+    if (armed) return;
+
+    labelPill(ctx, v, rect.centerX, v.height * 0.62, 'HANDS UP TO POP', vh(v, 5.4), {
+      size: vh(v, 2.8),
+      fill: COLORS.yellow,
+      color: COLORS.ink,
+      outline: COLORS.ink,
+      outlineWidth: vh(v, STROKE.base),
+      shadow: vh(v, SHADOW.base),
+      tilt: -4,
+    });
+  }
+
   protected onRenderHud(fc: FrameContext, slot: number, rect: SlotRect): void {
     const { ctx, v } = fc;
     const streak = this.streak[slot] ?? 0;
+
+    this.drawArmHint(fc, slot, rect);
 
     if (streak >= 3) {
       // Yellow action pill, straight: it carries a number, so it never tilts.

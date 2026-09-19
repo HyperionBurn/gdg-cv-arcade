@@ -461,6 +461,14 @@ export class RedLightGame extends GameBase {
 
   private light: Light = 'green';
   private lightT = 0;
+  /**
+   * True until the first red. Gates the one line that teaches the action.
+   *
+   * A time window rather than a behavioural one, because the person who needs
+   * the instruction is by definition the person who has not acted on it yet —
+   * see `drawBanner`.
+   */
+  private firstGreen = true;
   private lightDur = 3;
   /** Fraction of the phase after which the visual tightening starts. */
   private tellStart = 0.7;
@@ -533,6 +541,7 @@ export class RedLightGame extends GameBase {
     this.racers.clear();
     this.light = 'green';
     this.lightT = 0;
+    this.firstGreen = true;
     // The opening green is long and honest. Six strangers need a moment to
     // work out that the round has started before anything can go wrong.
     this.lightDur = 3.4 + Math.random() * 0.8;
@@ -647,6 +656,7 @@ export class RedLightGame extends GameBase {
    */
   private setLight(next: Light, duration?: number): void {
     const p = this.roundProgress();
+    if (next === 'red') this.firstGreen = false;
     this.light = next;
     this.lightT = 0;
     this.fakeout = false;
@@ -2034,8 +2044,16 @@ export class RedLightGame extends GameBase {
     // deliberately the longest and most forgiving of the round — costs nothing
     // and is gone before it can become clutter. After that, the doll, the
     // light and six other people are the instruction.
-    const anyoneMoved = [...this.racers.values()].some((r) => r.progress > 0.5);
-    if (!red && !anyoneMoved) {
+    //
+    // GATED ON THE LIGHT, NOT ON PROGRESS. It used to hide the moment ANY
+    // racer passed 0.5% of the track, which in a six-player game is the moment
+    // the FASTEST person starts — so the one line explaining the game was
+    // pulled off screen by somebody who had already understood it, away from
+    // the five who had not. The person who needs an instruction is by
+    // definition the person who has not acted on it yet, so a behavioural gate
+    // is always aimed at the wrong player. The opening green is 3.4-4.2s and
+    // there is exactly one of them; that is the window.
+    if (!red && this.firstGreen) {
       drawText(ctx, 'SWING YOUR ARMS — DO NOT WALK', v.width / 2, y + h + vh(v, 3.4), {
         size: vh(v, 2.6),
         color: COLORS.ink,
