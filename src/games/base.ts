@@ -794,6 +794,19 @@ export abstract class GameBase implements Screen {
     }
 
     // A live bracket owns the result of a versus round.
+    //
+    // DORMANT AS OF TODAY, and deliberately left wired. `meta/tournament.ts`
+    // is a complete, tested single-elimination engine — seeding, byes,
+    // propagation, persistence, `drawBracket` — and NOTHING IN THE APP EVER
+    // SETS IT RUNNING. There is no menu opt-in and no operator control, so
+    // `tournament.active` is false for every round the stall will ever play
+    // and this branch cannot be reached.
+    //
+    // Said out loud here because the alternative is somebody losing an hour to
+    // "why does reportCurrent never fire". What is missing is the wiring, not
+    // the bracket: a way for a marshal to enter names and start one, and a
+    // surface to show it on. PLAN.md §4 wants that surface to be attract,
+    // between rounds.
     if (
       this.playerCount === 2 &&
       tournament.active &&
