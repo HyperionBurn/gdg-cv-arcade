@@ -215,13 +215,25 @@ describe('muted is the disabled colour, and nothing else', () => {
    * it is how the Runner's JUMP and SLIDE labels ended up legible only while
    * the player was already doing the thing they were there to teach.
    *
-   * SCOPE, stated honestly: this catches the `color:` draw option, which is
-   * where every one of the 25 offences lived. It does not catch a muted colour
-   * bound to a local (`const color = out ? COLORS.muted : r.color`) or passed
-   * positionally, and those remaining few are all genuine disabled states —
-   * an eliminated racer's chip, a stunned hand marker, the shadow under a
-   * dead key. A guard that covered everything would need a type checker; a
-   * guard that covers the shape the bug actually took is worth having today.
+   * SCOPE, and the claim that stopped being true.
+   *
+   * This started out catching the `color:` draw option, which is where every
+   * one of the 25 original offences lived, with a note saying the remaining
+   * uncaught cases "are all genuine disabled states". That was true when it
+   * was written and is not a claim a comment can keep making on its own.
+   *
+   * It was already false. `GRADE_COLORS` in rhythm.ts is a colour MAP, and
+   * `good` pointed at `COLORS.muted`; the map feeds both a `popups.spawn` and
+   * a `drawText`, so the `<GOOD>` flash and the `+N` for a good hit were both
+   * 1.88:1 on paper. The irony is that `drawGradeFlash` special-cases `miss`
+   * out of the map with a comment explaining, correctly, that quiet is not the
+   * same as invisible — and left the identical problem one line away.
+   *
+   * So maps are checked now too. What is still NOT caught is a muted colour
+   * bound to a local (`const color = out ? COLORS.muted : r.color`), and those
+   * remaining cases genuinely are disabled states today: an eliminated racer's
+   * chip and lane, a stunned hand marker, an unarmed balloon. Verify that
+   * rather than trusting this sentence — it is the kind of claim that rots.
    */
   const setsMutedText = (line: string): boolean =>
     /(?<!shadow)[Cc]olor:\s*COLORS\.muted\b/.test(line) ||
@@ -232,11 +244,54 @@ describe('muted is the disabled colour, and nothing else', () => {
     // failed to fit through.
     /popups\.spawn\(.*COLORS\.muted/.test(line);
 
-  const ALLOWED: Record<string, string> = {
-    'src/games/base.ts': 'the ghost skeleton — a ghost is meant to be faint',
-    'src/engine/draw.ts': 'an EMPTY leaderboard row — the kit’s dashed empty slot',
-    'src/games/rhythm.ts': 'grey dust particles on a missed note',
-    'src/shell/menu.ts': 'a feature-flagged-off tile, which IS disabled',
+  /**
+   * A colour MAP whose values are drawn as text.
+   *
+   * `const GRADE_COLORS: Record<Grade, string> = { good: COLORS.muted }` is a
+   * `color:`-shaped bug that never writes the word `color`. Flagging any
+   * object-literal property bound to muted is blunt — a map of FILL colours
+   * would trip it too — but there is exactly one such map in this app and the
+   * allowlist is right there for the next one.
+   */
+  const isMutedInColourMap = (line: string, prev: string[]): boolean => {
+    if (!/^\s*\w+:\s*COLORS\.muted,?\s*$/.test(line)) return false;
+    // Only inside something that looks like a colour table.
+    return prev.some((l) => /(COLORS|COLOR|PALETTE|_COLORS)\b.*=\s*\{|Record<[^>]*,\s*string>/.test(l));
+  };
+
+  /**
+   * PER-FILE EXEMPTION WAS THE HOLE, NOT THE REGEX.
+   *
+   * This used to be `Record<string, string>` and the loop did
+   * `if (rel in ALLOWED) continue` — so allowlisting rhythm.ts for its grey
+   * dust particles exempted all 1,800 other lines of rhythm.ts. That is how
+   * `GRADE_COLORS.good = COLORS.muted` sat there: a legitimate exemption for
+   * one thing became blanket permission for the file.
+   *
+   * Proven, not assumed: reverting the `good` fix under the old guard left the
+   * suite green.
+   *
+   * So the allowance is a COUNT. A new muted string in an exempted file
+   * changes the number and fails, and the number going DOWN fails too, which
+   * is the stale-entry check the test below used to do separately.
+   */
+  const ALLOWED: Record<string, { why: string; count: number }> = {
+    'src/games/base.ts': {
+      why: 'the ghost skeleton — a ghost is meant to be faint',
+      count: 1,
+    },
+    'src/engine/draw.ts': {
+      why: 'an EMPTY leaderboard row — the kit’s dashed empty slot',
+      count: 1,
+    },
+    'src/games/rhythm.ts': {
+      why: 'grey dust particles on a missed note',
+      count: 1,
+    },
+    'src/shell/menu.ts': {
+      why: 'a feature-flagged-off tile and its shadow, which ARE disabled',
+      count: 4,
+    },
   };
 
   test('muted genuinely fails the contrast floor it kept being used under', () => {
@@ -261,6 +316,7 @@ describe('muted is the disabled colour, and nothing else', () => {
     };
 
     const offenders: string[] = [];
+    const found = new Map<string, number>();
     for (const file of await walk('src')) {
       // `join` gives backslashes on Windows; the allowlist is written the way
       // the repo writes paths.
@@ -271,10 +327,27 @@ describe('muted is the disabled colour, and nothing else', () => {
       const lines = src.split('\n');
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i]!;
-        if (!setsMutedText(line)) continue;
+        const prev = lines.slice(Math.max(0, i - 8), i);
+        if (!setsMutedText(line) && !isMutedInColourMap(line, prev)) continue;
+        found.set(rel, (found.get(rel) ?? 0) + 1);
         if (rel in ALLOWED) continue;
         offenders.push(`${rel}:${i + 1}`);
       }
+    }
+
+    // An exempted file is allowed EXACTLY what it was exempted for.
+    for (const [rel, { why, count }] of Object.entries(ALLOWED)) {
+      const n = found.get(rel) ?? 0;
+      assert.equal(
+        n,
+        count,
+        n > count
+          ? `${rel} has ${n} muted-text uses but is only exempted for ${count} ` +
+            `(${why}). A new one has been added — fix it, or raise the count and ` +
+            `say why.`
+          : `${rel} has ${n} muted-text uses and is exempted for ${count}. The ` +
+            `exemption is stale; lower the count or drop the entry.`
+      );
     }
 
     assert.deepEqual(
@@ -287,15 +360,14 @@ describe('muted is the disabled colour, and nothing else', () => {
   });
 
   test('every file on the allowlist still actually uses it', () => {
-    // A stale allowlist entry is permission nobody asked for.
+    // A stale allowlist entry is permission nobody asked for. The count
+    // assertion in the test above now catches that from both directions — too
+    // many AND too few — so all this has to check is that the file still
+    // exists to be exempted.
     return Promise.all(
       Object.keys(ALLOWED).map(async (rel) => {
-        const { readFile } = await import('node:fs/promises');
-        const src = await readFile(rel, 'utf8');
-        assert.ok(
-          src.split('\n').some((line) => setsMutedText(line)),
-          `${rel} no longer sets muted text — drop it from ALLOWED`
-        );
+        const { access } = await import('node:fs/promises');
+        await access(rel);
       })
     );
   });

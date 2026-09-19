@@ -237,12 +237,30 @@ const HAND_COLORS: Record<Hand, string> = { left: COLORS.blue, right: COLORS.red
 /**
  * Judgement colours. A separate component from the notes, so its own budget:
  * one brand colour (green, "success, confirmed") and neutrals for everything
- * else. `good` and `miss` are deliberately quiet — see `missNote`.
+ * else.
+ *
+ * `good` WAS `COLORS.muted`, and the argument against that is written out
+ * fifteen hundred lines below, in `drawGradeFlash`:
+ *
+ *   "MISS stays the quiet one — flat ink against three brand colours — but
+ *    quiet is not the same as invisible. In the kit's disabled grey the word
+ *    telling a player they missed could not be read from where they stand,
+ *    which removes the only half of the feedback loop that teaches timing."
+ *
+ * That reasoning was applied to `miss` by special-casing it at the draw, and
+ * the identical problem was left sitting in this map for `good`. Two
+ * player-facing strings came out at 1.88:1 on paper: the `<GOOD>` flash, and
+ * the `+N` points popup for a good hit.
+ *
+ * There is no legible mid-grey in this palette — that is the whole reason
+ * `muted` means disabled — so the neutral is ink. `great` and `good` now share
+ * it, and are told apart by the WORD and by the number of points, which are
+ * the two things a player is actually reading.
  */
 const GRADE_COLORS: Record<Grade, string> = {
   perfect: COLORS.green,
   great: COLORS.ink,
-  good: COLORS.muted,
+  good: COLORS.ink,
 };
 
 /* ------------------------------------------------------------------ */
