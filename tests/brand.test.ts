@@ -190,7 +190,12 @@ describe('muted is the disabled colour, and nothing else', () => {
    */
   const setsMutedText = (line: string): boolean =>
     /(?<!shadow)[Cc]olor:\s*COLORS\.muted\b/.test(line) ||
-    /[Cc]olor:.*\?.*:\s*COLORS\.muted\b/.test(line);
+    /[Cc]olor:.*\?.*:\s*COLORS\.muted\b/.test(line) ||
+    // `popups.spawn(text, x, y, color, size)` takes its colour positionally,
+    // which is how "OOF" — the only word telling a Pose Match player they
+    // missed the wall — ended up at 1.9:1 on top of the white hole they
+    // failed to fit through.
+    /popups\.spawn\(.*COLORS\.muted/.test(line);
 
   const ALLOWED: Record<string, string> = {
     'src/games/base.ts': 'the ghost skeleton — a ghost is meant to be faint',

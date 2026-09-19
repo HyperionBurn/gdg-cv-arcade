@@ -525,7 +525,10 @@ export class PoseMatchGame extends GameBase {
       audio.play('land', 0.7);
       // `textDim` now resolves to ink, so a "quiet" popup was arriving at full
       // primary weight. Muted is the token that actually means secondary.
-      this.popups.spawn('OOF', x, y - vh(fc.v, 8), COLORS.muted, vh(fc.v, 4), 1.1);
+      // Red, the kit's colour for a closed door — not the disabled grey it
+      // was, which put the only word telling a player they missed the wall at
+      // 1.9:1 on top of the white hole they failed to fit through.
+      this.popups.spawn('OOF', x, y - vh(fc.v, 8), COLORS.red, vh(fc.v, 4), 1.1);
       if (wall.worst) {
         this.popups.spawn(
           GROUP_HINT[wall.worst],

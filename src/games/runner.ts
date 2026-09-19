@@ -751,7 +751,9 @@ export class RunnerGame extends GameBase {
     // would have made the small print as loud as the headline.
     const word = OOF[Math.floor(Math.random() * OOF.length)] ?? 'OOF';
     this.popups.spawn(word, v.width / 2, v.height * 0.46, COLORS.red, vh(v, 6));
-    this.popups.spawn('COMBO LOST', v.width / 2, v.height * 0.53, COLORS.muted, vh(v, 2.4));
+    // Ink, not muted: the sub-line stays quieter than the 6vh red word above
+    // it by SIZE, which is the axis that survives being read from 3m.
+    this.popups.spawn('COMBO LOST', v.width / 2, v.height * 0.53, COLORS.ink, vh(v, 2.4));
   }
 
   /* ---------------- render ---------------- */
