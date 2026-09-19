@@ -71,8 +71,8 @@ export const GAME_SEATS: Record<GameId, number> = {
   sixtyseven: 2,
   fruitninja: 2,
   balloonpop: 2,
-  /** Six lanes. The only game on the roster that takes a whole group. */
-  redlight: 6,
+  /** Five lanes. The only game on the roster that takes a whole group. */
+  redlight: 5,
   posematch: 2,
   /**
    * Two runners, two identically seeded tracks, one WebGL context rendered

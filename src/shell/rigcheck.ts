@@ -92,13 +92,13 @@ export class RigCheckScreen implements Screen {
    *
    * The player dropdown offers 1, 2 and 6, and `maxPlayers` is pushed straight
    * through to the tracker, so slots 2-5 are routine. These arrays were length
-   * 2 and every slot >= 2 was collapsed onto index 0, so in 6-player mode up
-   * to five different bodies were pushed through the SAME RepCounter,
+   * 2 and every slot >= 2 was collapsed onto index 0, so in 5-player mode up
+   * to four different bodies were pushed through the SAME RepCounter,
    * VerticalGestures and MotionEnergy in a single frame. Each one differences
    * against whatever body happened to go through it last, so the JUMP /
    * CROUCH / LANE / REPS chips showed an unusable blend of several people —
    * on the screen whose whole job is telling an operator what the detectors
-   * can see, in the mode that exists to test Red Light's six lanes.
+   * can see, in the mode that exists to test Red Light's five lanes.
    */
   private reps = RigCheckScreen.perSlot(() => new RepCounter());
   private vertical = RigCheckScreen.perSlot(() => new VerticalGestures());
@@ -245,7 +245,7 @@ export class RigCheckScreen implements Screen {
         <select id="rig-players">
           <option value="1" ${this.numPoses === 1 ? 'selected' : ''}>1 player</option>
           <option value="2" ${this.numPoses === 2 ? 'selected' : ''}>2 players</option>
-          <option value="6" ${this.numPoses === 6 ? 'selected' : ''}>6 players</option>
+          <option value="5" ${this.numPoses === 5 ? 'selected' : ''}>5 players</option>
         </select>
       </div>
       <div class="rig-row">

@@ -2,7 +2,7 @@
  * RED LIGHT, GREEN LIGHT — "the sleeper hit".
  *
  * PLAN.md §3 rates this the single best addition to the roster, for one reason
- * the other six games cannot touch: **up to six people play at once**, which
+ * the other six games cannot touch: **up to five people play at once**, which
  * turns the queue itself into the game. It is universally recognisable, needs
  * no explanation, has no skill floor, and is the best thing on the stall to
  * stand and watch.
@@ -89,16 +89,29 @@ import type { FrameContext } from '../shell/screen';
 /**
  * What to draw ON a flat fill so it stays legible.
  *
- * `PLAYER_COLORS` runs yellow, blue, green, red, INK, muted — six identities
- * for a six-player game. Five of the six take ink; the ink one obviously does
- * not, and a black stick figure on a black chip is an invisible player.
+ * `PLAYER_COLORS` runs yellow, blue, green, red, INK — five identities, one
+ * per lane. Four of the five take ink; the ink one obviously does not, and a
+ * black stick figure on a black chip is an invisible player.
  */
 function markOn(fill: string): string {
   return fill === COLORS.ink ? COLORS.paper : COLORS.ink;
 }
 
-/** PLAN.md §3: "Up to 6 players at once." Also the length of PLAYER_COLORS. */
-const LANES = 6;
+/**
+ * FIVE, AND THE LENGTH OF `PLAYER_COLORS` IS WHY.
+ *
+ * PLAN.md §3 asked for six at once, and six is what this was — for the same
+ * reason it is five now: the lane's identity IS its entry in `PLAYER_COLORS`,
+ * so the roster can only be as long as that array. The sixth entry used to be
+ * `COLORS.muted`, which is the exact value `drawLane` and `drawChip` use for
+ * an ELIMINATED racer. Lane six was therefore drawn in the game's own colour
+ * for "you are out", under a HUD reading 6/6 STILL IN.
+ *
+ * Four brand hues plus ink is five unmistakable identities and there is no
+ * sixth to be had without a ninth palette token or a second identity axis.
+ * Five real players beats six where one cannot tell whether they are playing.
+ */
+const LANES = 5;
 
 /** Seconds a newly-seen player is immune. Walking in must never mean walking out. */
 const SETTLE_SEC = 0.6;
@@ -512,12 +525,12 @@ export class RedLightGame extends GameBase {
       maxPlayers: LANES,
       roundSeconds: 45,
       color: GAME_COLORS.redlight,
-      // Not a split-screen duel. Six people share one screen and one set of
+      // Not a split-screen duel. Five people share one screen and one set of
       // lanes, so the base's versus layout would be actively wrong here.
       supportsVersus: false,
       // Everyone in frame plays together.
       partyMode: true,
-      // Hold a lobby. This is the one game whose entire value is six people at
+      // Hold a lobby. This is the one game whose entire value is five people at
       // once, so starting the moment one person is confirmed would throw that
       // away — the rest of the group is still shuffling into frame.
       gatherSeconds: 10,
@@ -1250,7 +1263,7 @@ export class RedLightGame extends GameBase {
     // Clamped so it can never cross the lane boundary, whatever the count.
     // SIZE scales with the lane too, not just position.
     //
-    // Clamping the vertical offset alone was not enough: at six lanes the taunt
+    // Clamping the vertical offset alone was not enough: at five lanes the taunt
     // was still set at 4.2vh, which is taller than a lane, so it overflowed into
     // its neighbours no matter where it was anchored. Verified with a six-player
     // mass elimination — all six overlapped even after the position clamp.
@@ -1403,7 +1416,7 @@ export class RedLightGame extends GameBase {
    * a badly calibrated panel shifts the hue, it does not erase the shape.
    *
    * The lane fills were the other candidate and were rejected: they already
-   * carry six player identities in six different colours, and overloading them
+   * carry five player identities in five different colours, and overloading them
    * with a seventh meaning would have cost every player the ability to find
    * their own lane.
    *
@@ -1539,7 +1552,7 @@ export class RedLightGame extends GameBase {
    * one is done"; used at full opacity it is unambiguous at 3m, where a 45%
    * alpha version of a colour just reads as a rendering glitch. It also means
    * an eliminated lane spends nothing from the colour budget, which is what
-   * lets six live lanes be six different colours without the screen falling
+   * lets five live lanes be five different colours without the screen falling
    * apart.
    */
   private drawLane(fc: FrameContext, g: LaneGeom, r: Racer): void {
@@ -1690,7 +1703,7 @@ export class RedLightGame extends GameBase {
 
   /**
    * The identity chip: a live stick figure of that player, at the head of their
-   * own lane. Six people in a line all need to answer "which one is me" in
+   * own lane. Five people in a line all need to answer "which one is me" in
    * under a second, and their own colour plus their own silhouette moving in
    * time with them answers it without a word.
    */
@@ -1967,7 +1980,7 @@ export class RedLightGame extends GameBase {
     // gradient and a see-through brand colour, so it had to go either way. The
     // obvious flat replacement, two ink rays along the same edges, was built
     // and rejected on the screenshot: with no soft falloff to sell it as a
-    // cone, two hairlines crossing six lanes diagonally read as a rendering
+    // cone, two hairlines crossing five lanes diagonally read as a rendering
     // glitch, and they cut straight through the progress figures.
     //
     // Nothing replaced it because nothing needed to. "She can see you" is

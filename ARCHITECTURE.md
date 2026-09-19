@@ -69,7 +69,7 @@ Available on `this`: `tracker`, `proj`, `juice`, `particles`, `popups`,
 
 ### Two players is the default, and it is a state-shape decision
 
-Six of the seven games seat two; Red Light seats six. A game that can only be
+Six of the seven games seat two; Red Light seats five. A game that can only be
 played alone is a decision somebody has to write down — `tests/versus.test.ts`
 fails the build until they do.
 
@@ -88,7 +88,7 @@ protected scoreFor(slot: number): number { return this.slots[slot]?.score ?? 0; 
 Rules that follow from it:
 
 - **`scoreFor(slot)` must read `slot`.** Ignoring it is the exact bug Red Light
-  shipped: six people finished a round and saw six identical numbers.
+  shipped: a whole group finished a round and saw one identical number.
 - **Draw inside `slotRect(v, slot)`.** Clip to it if your playfield can spill —
   Pose Match's two walls punched holes in each other for exactly this reason.
   Width ceilings must be measured against the RECT, not the viewport, or a HUD

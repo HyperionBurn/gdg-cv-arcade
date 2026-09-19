@@ -30,6 +30,7 @@ import {
   MIN_CONTRAST,
 } from '../src/shell/theme.ts';
 import { FACTIONS } from '../src/meta/leaderboard.ts';
+import { GAME_SEATS } from '../src/meta/games.ts';
 
 const BRAND = [COLORS.yellow, COLORS.blue, COLORS.green, COLORS.red] as const;
 
@@ -135,14 +136,48 @@ describe('faction identities', () => {
 });
 
 describe('player colours', () => {
-  test('are all distinct — six players must be tellable apart', () => {
+  test('are all distinct — every player must be tellable apart', () => {
     const seen = new Set(PLAYER_COLORS);
     assert.equal(seen.size, PLAYER_COLORS.length);
   });
 
-  test('cover the max party size', () => {
-    // Red Light seats 6.
-    assert.ok(PLAYER_COLORS.length >= 6);
+  /**
+   * THE ONE THAT WAS MISSING, AND THE BUG IT WOULD HAVE CAUGHT.
+   *
+   * `PLAYER_COLORS` ended `...ink, muted` so that it would be six long, because
+   * Red Light seated six. But `redlight.ts` draws an eliminated lane with
+   * `out ? COLORS.muted : r.color` — so the sixth player's marker, chip and
+   * progress bar were the byte-identical grey the game uses for YOU ARE OUT,
+   * under a HUD reading 6/6 STILL IN. Two of the five other players could not
+   * tell whether the sixth was still in the round.
+   *
+   * The length assertion that used to live here actively caused it: it demanded
+   * a sixth entry and the palette had none to give, so one was borrowed from
+   * the disabled colour. Red Light seats five now, and the rule that holds is
+   * the semantic one, not the count.
+   */
+  test('none of them is the disabled colour', () => {
+    for (const c of PLAYER_COLORS) {
+      assert.notEqual(
+        c,
+        COLORS.muted,
+        'a live player is drawn in the colour this kit reserves for disabled — ' +
+          'and in Red Light, for eliminated'
+      );
+    }
+  });
+
+  /**
+   * The roster can only be as long as this array: a lane's identity IS its
+   * entry. Asserted against the real game configs rather than a number, so
+   * raising `maxPlayers` anywhere without a colour to go with it fails here.
+   */
+  test('cover the largest party on the roster', () => {
+    const biggest = Math.max(...Object.values(GAME_SEATS));
+    assert.ok(
+      PLAYER_COLORS.length >= biggest,
+      `a game seats ${biggest} but there are only ${PLAYER_COLORS.length} identities`
+    );
   });
 });
 

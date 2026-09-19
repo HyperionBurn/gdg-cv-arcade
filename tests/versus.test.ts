@@ -6,7 +6,7 @@
  * how the two-player path shipped with three separate faults that only a
  * second person could ever expose:
  *
- *   - Red Light returned ONE score for all six lanes (`laneScore` below).
+ *   - Red Light returned ONE score for all of its lanes (`laneScore` below).
  *   - Pose Match's two walls shared a canvas, so each punched a hole in the
  *     other's plane — covered in `posematch.test.ts`.
  *   - And the one that made the other two nearly unreachable: the countdown
@@ -358,7 +358,7 @@ describe('countdown — the friend who is half a step behind', () => {
   });
 
   test('a party game can absorb two arrivals, not just one', () => {
-    // Red Light holds six. Two people joining a lobby of one is ordinary.
+    // Red Light holds five. Two people joining a lobby of one is ordinary.
     const first = step(2, solo(1.0));
     assert.equal(first.playerCount, 2);
     const second = step(3, first);
@@ -371,7 +371,7 @@ describe('countdown — the friend who is half a step behind', () => {
 /* 3. Red Light — one score per lane                                   */
 /* ------------------------------------------------------------------ */
 
-describe('Red Light — six players, six scores', () => {
+describe('Red Light — one score per lane, not one score', () => {
   const racer = (lane: number, progress: number, finishedWith = 0): ScorableRacer => ({
     lane,
     progress,

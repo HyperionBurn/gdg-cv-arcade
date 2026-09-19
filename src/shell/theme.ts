@@ -86,31 +86,24 @@ export const COLORS = {
 } as const;
 
 /**
- * Per-player / per-faction colours, in order.
+ * THE IDENTITY COLOURS. FIVE, BECAUSE THE KIT HOLDS FIVE.
  *
- * Four flat brand colours, then ink, then muted. DESIGN.md caps a *component*
- * at two brand colours; a six-player game legitimately needs six identities,
- * which is a different thing — but no screen should ever draw more of these at
- * once than it has players.
+ * This was six, ending `...ink, muted`, and that sixth entry was a bug with a
+ * long apology attached rather than a fix. `muted` is this kit's DISABLED
+ * colour, and Red Light does not merely *resemble* it — `redlight.ts` sets
+ * `out ? COLORS.muted : r.color` for an eliminated lane, so player six
+ * rendered in the byte-identical grey the game uses to say YOU ARE OUT, on a
+ * screen simultaneously reporting 6/6 STILL IN.
  *
- * THE SIXTH IS MUTED AND THAT IS A KNOWN COMPROMISE, not an oversight.
+ * The apology proposed a ninth palette token or a second identity axis (a
+ * hollow marker, a striped chip) threaded through every call site. Both are
+ * real options. The one taken was neither: Red Light now seats FIVE, which is
+ * exactly how many unmistakable, full-strength identities four brand hues plus
+ * ink can carry. A fifth of the group waits ten more seconds; nobody spends a
+ * round wondering whether they are still playing.
  *
- * The kit has exactly five colours a player can be told apart by — yellow,
- * blue, green, red, ink — and Red Light seats six. All six ARE distinguishable
- * on screen, which is what `brand.test.ts` checks and what actually matters in
- * the lane. What is wrong with it is semantic: muted is this kit's DISABLED
- * colour everywhere else in the app, so the sixth racer's marker reads as
- * switched off to anybody who has learned the rest of the system. The factions
- * hit the identical wall and solved it with `factionSplit` — a four-colour
- * swatch for the one identity with no colour of its own — which works on a
- * faction tile and would be mud on a 2vh lane marker at three metres.
- *
- * Fixing it properly means either a ninth palette token, which is a decision
- * for the club's kit and not for this file, or a second identity axis (a
- * hollow marker, a striped chip) threaded through every call site that takes a
- * colour string. Neither is worth doing days before an event to improve a case
- * that is already legible. Written down so the next person does not have to
- * rediscover the constraint to reach the same answer.
+ * So: nothing in this array may be `COLORS.muted`, and `brand.test.ts` holds
+ * that line now instead of a comment.
  */
 export const PLAYER_COLORS = [
   COLORS.yellow,
@@ -118,7 +111,6 @@ export const PLAYER_COLORS = [
   COLORS.green,
   COLORS.red,
   COLORS.ink,
-  COLORS.muted,
 ] as const;
 
 /** Rank colours from the brand's ranked-list spec: 1st, 2nd, 3rd, then ink. */

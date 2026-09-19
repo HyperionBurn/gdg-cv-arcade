@@ -56,7 +56,7 @@ game logic, and it doubles as a demo mode if the camera dies at the stall.
 | `2` | 67 Speed Duel | 20s, 1–2P split screen |
 | `3` | Fruit Ninja | 45s, 1–2P split screen |
 | `4` | Balloon Pop | 30s, 1–2P, the accessible one |
-| `5` | Red Light, Green Light | 45s, up to **6 players**, 10s lobby |
+| `5` | Red Light, Green Light | 45s, up to **5 players**, 10s lobby |
 | `6` | Pose Match | 60s, 1–2P |
 | `7` | Runner | 60s, 1P, the only 3D game |
 
@@ -290,7 +290,7 @@ Red Light 0.98ms · Pose Match 0.49ms · Fruit Ninja 3.52ms per frame.
 | **67 Speed Duel** | playable 1P/2P |
 | **Fruit Ninja** | playable 1P/2P, real polygon slicing |
 | **Balloon Pop** | playable 1P/2P |
-| **Red Light, Green Light** | playable, up to 6, with lobby |
+| **Red Light, Green Light** | playable, up to 5, with lobby |
 | **Pose Match** | playable 1P/2P, 12 poses |
 | **Runner** | playable, 3D, **conditional — see go/no-go below** |
 | **Rhythm Punch** | playable 1P/2P, generated beat maps |

@@ -135,7 +135,9 @@ Not on anyone's list. **I think this is the single best addition to the roster.*
 
 - **Mechanic:** everyone advances on green. On red, freeze. Motion above threshold = out. Last one standing, or first to the line.
 - **Why it's exceptional here:**
-  - **Up to 6 players at once.** It converts the *queue itself* into the game. Nothing else on the list does this.
+  - **Up to 5 players at once.** It converts the *queue itself* into the game. Nothing else on the list does this.
+
+    > **Amended 2026-09-19, from six.** A lane's identity is its entry in `PLAYER_COLORS`, so the roster can only be as long as that array — and the array only held five real colours. The sixth entry was `COLORS.muted`, which is the *same value* `redlight.ts` uses to draw an ELIMINATED lane, so player six rendered in the game's own colour for YOU ARE OUT beneath a HUD reading `6/6 STILL IN`. The alternatives were a ninth palette token (a decision for the club's kit, not this repo) or a second identity axis — a striped or hollow marker — threaded through every call site that takes a colour string. Five unmistakable players beat six where one cannot tell whether they are playing. `tests/brand.test.ts` now asserts the semantic rule rather than the count.
   - Universally recognisable, zero explanation, zero skill barrier.
   - Peak spectator value — the whole crowd watches people frozen mid-step.
   - Room-scale, which is exactly what the confirmed floor space is for.
