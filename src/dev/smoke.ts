@@ -30,6 +30,7 @@
  */
 
 import type { GameId } from '../meta/leaderboard';
+import { GAME_SEATS } from '../meta/games';
 import type { PoseSimulator } from '../core/simulator';
 
 export interface SmokeCheck {
@@ -396,9 +397,15 @@ function resetSim(sim: PoseSimulator, players: number): void {
  * this file would notice, because every other check drives all the sim bodies
  * identically and only ever reads player 0.
  *
- * Six bodies, all pumping on green. On red, three of them freeze and three keep
- * going. The three who stopped must finish the round alive and the three who
- * did not must be out.
+ * A full lobby, all pumping on green. On red, half of them freeze and half keep
+ * going. The ones who stopped must finish the round alive and the ones who did
+ * not must be out.
+ *
+ * The roster size comes from `GAME_SEATS`, not from a literal. It was 6 and is
+ * now 5 — `PLAYER_COLORS` only holds five identities that are not the disabled
+ * colour — and this check hard-coded the 6 in three places, so a product
+ * decision made in `redlight.ts` failed a probe in `smoke.ts` for no reason a
+ * reader could see.
  *
  * `setFrozen` had never been called by anything when this was written — it
  * shipped with a doc comment promising exactly these semantics and a body that
@@ -407,7 +414,9 @@ function resetSim(sim: PoseSimulator, players: number): void {
  */
 async function checkRedLightFairness(host: ArcadeHost): Promise<SmokeCheck[]> {
   const sim = host.simulator;
-  resetSim(sim, 6);
+  const seats = GAME_SEATS.redlight;
+  const frozen = Math.floor(seats / 2);
+  resetSim(sim, seats);
   // Via the menu: `router.go(id)` when that screen is already active does NOT
   // remount it. Coming straight here after the standard probe leaves us holding
   // the finished round, still sitting in `results`, and the check reports "never
@@ -432,7 +441,7 @@ async function checkRedLightFairness(host: ArcadeHost): Promise<SmokeCheck[]> {
   for (let i = 0; i < 2000 && stateOf(game) === 'playing'; i++) {
     const red = game.light === 'red';
     sim.setPump(5, 1);
-    for (let p = 0; p < 6; p++) sim.setFrozen(p, red && p < 3);
+    for (let p = 0; p < seats; p++) sim.setFrozen(p, red && p < frozen);
     host.tick(3);
   }
 
@@ -445,32 +454,38 @@ async function checkRedLightFairness(host: ArcadeHost): Promise<SmokeCheck[]> {
   // Two properties, and between them they pin the thing that matters:
   //
   //   1. survivors all sit in ONE half of the lanes. The display is mirrored,
-  //      so the three honest bodies land in {3,4,5} rather than {0,1,2} — which
-  //      half does not matter, but a mix does: survivors scattered across both
-  //      would mean the detector is firing at random, and that passes any bare
-  //      count.
-  //   2. two or three of them survive. Collective judging — one person moving
-  //      takes the line out — shows up as 0 or 6, and both are excluded.
+  //      so the honest bodies land in the upper lanes rather than the lower —
+  //      which half does not matter, but a mix does: survivors scattered across
+  //      both would mean the detector is firing at random, and that passes any
+  //      bare count.
+  //   2. at least one survives and at least one does not. Collective judging —
+  //      one person moving takes the whole line out — shows up as nobody alive
+  //      or everybody alive, and both are excluded.
   //
   // Deliberately tolerant of ONE honest player being caught. This is a noisy
   // signal by construction (still and moving energy overlap; see the measured
   // table in redlight.ts) and a check that demands a perfect 3/3 every run is a
   // check that cries wolf. Collective judging cannot hide inside that slack.
+  const mid = seats / 2;
   const oneHalf =
-    aliveLanes.every((l) => l <= 2) || aliveLanes.every((l) => l >= 3);
-  // 1..4, not 2..3. Six bodies at once puts the outer lanes into the frame
-  // edges where `edgeBias` makes them measurably noisier than the middle, so
-  // one or two honest players being caught is within the signal's real spread —
-  // and the thing this check exists to catch, judging the LINE instead of the
-  // player, shows up as 0 or 6 and is excluded either way.
-  const ok = racers.length === 6 && oneHalf && aliveLanes.length >= 1 && aliveLanes.length <= 4;
+    aliveLanes.every((l) => l < mid) || aliveLanes.every((l) => l >= mid);
+  // 1..seats-1, not exactly `frozen`. A full lobby puts the outer lanes into
+  // the frame edges where `edgeBias` makes them measurably noisier than the
+  // middle, so one honest player being caught is within the signal's real
+  // spread — and the thing this check exists to catch, judging the LINE
+  // instead of the player, shows up as 0 or all and is excluded either way.
+  const ok =
+    racers.length === seats &&
+    oneHalf &&
+    aliveLanes.length >= 1 &&
+    aliveLanes.length < seats;
 
   return [
     check(
       'red light judges individually',
       ok,
       `survivors in lanes [${aliveLanes.join(',')}] of ${racers.length}; ` +
-        `expected 1-4, all in the half that stopped`
+        `expected 1-${seats - 1}, all in the half that stopped`
     ),
   ];
 }

@@ -37,6 +37,7 @@
  */
 
 import type { GameId } from '../meta/leaderboard';
+import { tunables } from '../meta/tunables';
 
 export interface TurnStep {
   name: string;
@@ -220,11 +221,30 @@ export async function runTurn(host: Host, only?: string[]): Promise<TurnReport> 
   const games = only?.length ? GAMES.filter((g) => only.includes(g as string)) : GAMES;
   const results: TurnResult[] = [];
 
-  for (const game of games) {
-    results.push(await oneTurn(host, game as string, 1));
-    if (VERSUS_GAMES.includes(game as string)) {
-      results.push(await oneTurn(host, game as string, 2));
+  // FAIR MODE OFF FOR THE DURATION, AND PUT BACK AFTERWARDS.
+  //
+  // `shell.menuSize` hides all but the first N games, and this probe reaches
+  // every game by hovering its MENU TILE. With the setting left at 4 the sweep
+  // reported six failures reading "never reached the game" for balloonpop,
+  // posematch and rhythm — which is not a bug, it is the feature working, but
+  // it looks exactly like three games being broken and it cost a real
+  // investigation to find out otherwise.
+  //
+  // A marshal is expected to leave this set between rushes, and the setting
+  // persists to localStorage, so the next person to run a sweep would hit the
+  // same wall. The probe tests the SHELL, not the roster on offer.
+  const prevMenuSize = tunables.get('shell.menuSize', 0);
+  tunables.set('shell.menuSize', 0);
+
+  try {
+    for (const game of games) {
+      results.push(await oneTurn(host, game as string, 1));
+      if (VERSUS_GAMES.includes(game as string)) {
+        results.push(await oneTurn(host, game as string, 2));
+      }
     }
+  } finally {
+    tunables.set('shell.menuSize', prevMenuSize);
   }
 
   const failed = results.filter((r) => !r.passed).length;
