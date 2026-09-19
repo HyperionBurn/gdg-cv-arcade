@@ -300,6 +300,23 @@ npm test             # headless unit tests, no browser
 npm run build
 ```
 
+### Are the guards real?
+
+`tests/brand.test.ts` and `tests/offline.test.ts` enforce the brand and the
+no-network rule by scanning source. A scanning test that matches nothing passes
+exactly like one that matches everything, so green is not evidence it works.
+
+```bash
+python scripts/verify-guards.py
+```
+
+It injects each violation in turn, requires the suite to FAIL, and restores.
+Run it after touching either file. Every guard currently reports `CAUGHT`.
+
+This is not hypothetical. Two guards written on Sept 19 passed vacuously, and
+one of them was hiding a live bug — a colour map pointing `good` at
+`COLORS.muted`, which put Rhythm's `<GOOD>` flash and its `+N` popup at 1.88:1.
+
 ### Regression sweep
 
 With the app open on any `?sim=1` page, in the browser console:
