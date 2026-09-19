@@ -421,6 +421,15 @@ All driven deterministically via `window.__arcade.tick()`:
   fallback, `?sim=1` and the `d` overlay both work, `window.__arcade` is
   correctly absent, frame time **6.0ms**.
 
+  **And zero external requests.** Re-checked on the final build of the day by
+  filtering `performance.getEntriesByType('resource')` for anything not on
+  `location.origin`: the list is empty. That is the step-5 check from "Prove it
+  runs with no wifi" done programmatically, in the bundle a marshal actually
+  runs, rather than by reading the source. It does not replace pulling the
+  ethernet out on the booth laptop — a dependency could still reach for the
+  network on a code path this session never took — but it is the strongest
+  evidence available without the physical test.
+
 - **67**: 4 Hz full reach × 5s = **exactly 40 reps**; 1.5 Hz × 4s = **exactly 12**;
   quarter-height twitching at the same rate = **0** (anti-cheat holds)
 - **Fruit Ninja**: hands still = **0** (activation gate); swiping sliced 11 with
