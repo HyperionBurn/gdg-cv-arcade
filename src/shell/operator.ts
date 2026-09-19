@@ -35,6 +35,7 @@
  * live readout is a 200ms interval that exists only while the console is open.
  */
 
+import { isSimEnabled } from '../core/simulator';
 import { camera } from '../core/camera';
 import { vision } from '../core/vision';
 import type { TrackedPlayer } from '../core/tracker';
@@ -740,6 +741,16 @@ export class OperatorOverlay {
           'Device names only appear once camera permission has been granted.'
       )
     );
+
+    // SAY WHEN THERE IS NOTHING TO REPORT ON, for the same reason the `d`
+    // overlay and the rig check do. Under `?sim=1` every row below reads IDLE
+    // or —, which is indistinguishable from a camera that failed to open — and
+    // the two buttons at the bottom of this tab invite a marshal to keep
+    // restarting a camera that was never asked for.
+    if (isSimEnabled()) {
+      const note = el('p', 'op-simnote', 'SIMULATOR — no camera by design. Reload without ?sim=1 to use one.');
+      pane.appendChild(note);
+    }
 
     const state = camera.getState();
     const info = el('div', 'op-kv');
