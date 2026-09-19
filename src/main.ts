@@ -271,7 +271,26 @@ function showBoot(
 ): void {
   const el = document.createElement('div');
   el.className = 'boot';
-  el.innerHTML = `<h1>${message}</h1><p>${detail}</p>`;
+
+  // THE TITLE IS TEXT, NOT MARKUP, AND THE BRAND IS WHY IT HAS TO BE.
+  //
+  // Every title this is called with is wrapped in angle brackets — that is the
+  // house style for a headline, from `<INSECURE CONTEXT>` to `<CAMERA ERROR>`.
+  // Assigned through `innerHTML` the browser reads that as a tag: the DOM came
+  // out as `<h1><startup failed=""></startup></h1>` and the heading rendered
+  // EMPTY. Both of the failure screens that predate this had invisible titles,
+  // on the two screens a marshal is most likely to be standing in front of.
+  //
+  // `detail` stays as markup on purpose — the callers pass `<code>` spans — so
+  // only the heading changes.
+  const h1 = document.createElement('h1');
+  h1.textContent = message;
+  el.appendChild(h1);
+
+  const p = document.createElement('p');
+  p.innerHTML = detail;
+  el.appendChild(p);
+
   if (action) {
     const btn = document.createElement('button');
     btn.textContent = action.label;
@@ -568,4 +587,30 @@ if (import.meta.env.DEV) {
   };
 }
 
-void boot();
+/**
+ * A BOOT THAT THROWS MUST NOT BE A BLACK SCREEN.
+ *
+ * `step()` has wrapped every frame in a try/catch for a long time, with the
+ * note that "a black screen that stays black is unrecoverable without someone
+ * who can read a console". `boot()` was launched with a bare `void` and had no
+ * such guard, so anything thrown before the first `router.go` — a module that
+ * failed to evaluate, a rejected font or worker load, an API missing on a
+ * borrowed laptop — left exactly that: black screen, no message, nothing to
+ * press.
+ *
+ * Seen for real. A stale dev-server module graph threw `probeStorage is not
+ * defined` out of `boot()` and the app rendered nothing at all; the only
+ * evidence anywhere was one line in a console nobody at a stall is going to
+ * open. The cause was not a real defect, but the failure mode it exposed is.
+ *
+ * `showBoot` is already the house style for every boot failure we anticipated
+ * — insecure context, camera error. This is the one we did not.
+ */
+void boot().catch((err: unknown) => {
+  const detail = err instanceof Error ? err.message : String(err);
+  console.error('[boot]', err);
+  showBoot('<STARTUP FAILED>', `The app could not start: <code>${detail}</code>`, {
+    label: '<TRY AGAIN>',
+    run: () => void boot(),
+  });
+});
