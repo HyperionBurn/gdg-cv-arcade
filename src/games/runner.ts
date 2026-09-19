@@ -225,49 +225,103 @@ const NEAR_MAX_BONUS = 12; // metres
  */
 const OOF: readonly string[] = ['OOF', 'WHOOPS', 'NOPE', 'SPLAT', 'YIKES', 'OUCH'];
 
+/**
+ * EVERYTHING ONE RUNNER OWNS.
+ *
+ * This game was the only one on the roster that could not be played with a
+ * friend, and the reason was structural rather than deliberate: every piece of
+ * state below was a field on the screen. One detector, one track, one clock,
+ * one streak. Nothing about the GAME is single-player — the track generator
+ * already proves each segment clearable, the collision test is per-body, the
+ * score is per-body — it was just that there was exactly one of each.
+ *
+ * So: one of these per player, and the screen holds an array of them.
+ *
+ * WHY EACH RUNNER GETS ITS OWN TRACK RATHER THAN SHARING ONE. `cell.destroyed`
+ * is mutated the instant a body hits an obstacle, and it is the flag that
+ * stops the same obstacle being hit twice. Sharing rows would mean the first
+ * player to clip a barrier deletes it out from under the second — the leader
+ * clearing the course for whoever is behind. Two generators seeded identically
+ * give both runners the SAME track and independent destruction, which is what
+ * "same race" actually means.
+ */
+interface RunnerLane {
+  lanes: LaneDetector;
+  vert: VerticalGestures;
+  gen: TrackGenerator;
+  rows: TrackRow[];
+
+  /** Seconds. Sim time while playing, real time otherwise, always monotonic. */
+  clock: number;
+  distance: number;
+  bonus: number;
+  /** Temporary speed cost from recent collisions, 0..PENALTY_CAP. */
+  penalty: number;
+  speed: number;
+
+  laneTarget: number;
+  laneX: number;
+  crouchVisual: number;
+
+  airStart: number;
+  wasAirborne: boolean;
+  slideStart: number;
+  slideHoldStart: number;
+  slideLockUntil: number;
+
+  /** Obstacle rows cleared without being hit. Drives momentum. */
+  streak: number;
+  bestStreak: number;
+  rowsCleared: number;
+  nearMisses: number;
+  hits: number;
+  lastMilestone: number;
+
+  /** Scroll position used for the attract/countdown idle. */
+  idleZ: number;
+}
+
+function makeLane(): RunnerLane {
+  return {
+    lanes: new LaneDetector({
+      enter: LANE_ENTER,
+      exit: LANE_EXIT,
+      laneCount: 3,
+      holdAt: LANE_HOLD_AT,
+      holdSec: LANE_HOLD_SEC,
+    }),
+    vert: new VerticalGestures(),
+    gen: new TrackGenerator(),
+    rows: [],
+    clock: 0,
+    distance: 0,
+    bonus: 0,
+    penalty: 0,
+    speed: START_SPEED,
+    laneTarget: 0,
+    laneX: 0,
+    crouchVisual: 0,
+    airStart: -99,
+    wasAirborne: false,
+    slideStart: -99,
+    slideHoldStart: -99,
+    slideLockUntil: -99,
+    streak: 0,
+    bestStreak: 0,
+    rowsCleared: 0,
+    nearMisses: 0,
+    hits: 0,
+    lastMilestone: 0,
+    idleZ: 0,
+  };
+}
+
 export class RunnerGame extends GameBase {
   private world: RunnerWorld | null = null;
   private worldFailed = false;
 
-  private lanes = new LaneDetector({
-    enter: LANE_ENTER,
-    exit: LANE_EXIT,
-    laneCount: 3,
-    holdAt: LANE_HOLD_AT,
-    holdSec: LANE_HOLD_SEC,
-  });
-  private vert = new VerticalGestures();
-  private gen = new TrackGenerator();
-  private rows: TrackRow[] = [];
-
-  /** Seconds. Sim time while playing, real time otherwise, always monotonic. */
-  private clock = 0;
-  private distance = 0;
-  private bonus = 0;
-  /** Temporary speed cost from recent collisions, 0..PENALTY_CAP. */
-  private penalty = 0;
-  private speed = START_SPEED;
-
-  private laneTarget = 0;
-  private laneX = 0;
-  private crouchVisual = 0;
-
-  private airStart = -99;
-  private wasAirborne = false;
-  private slideStart = -99;
-  private slideHoldStart = -99;
-  private slideLockUntil = -99;
-
-  /** Obstacle rows cleared without being hit. Drives momentum. */
-  private streak = 0;
-  private bestStreak = 0;
-  private rowsCleared = 0;
-  private nearMisses = 0;
-  private hits = 0;
-  private lastMilestone = 0;
-
-  /** Scroll position used for the attract/countdown idle. */
-  private idleZ = 0;
+  /** One per seat. Index is the base class's slot. */
+  private slots: RunnerLane[] = [makeLane(), makeLane()];
 
   constructor() {
     super({
@@ -278,16 +332,21 @@ export class RunnerGame extends GameBase {
       // stall gets told how to play.
       tagline: '<STEP TO MOVE — JUMP OVER — CROUCH TO SLIDE>',
       visionMode: 'pose',
-      maxPlayers: 1,
+      maxPlayers: 2,
       roundSeconds: 60,
       color: GAME_COLORS.runner,
-      supportsVersus: false,
+      // Two runners, two identical tracks, one WebGL context rendered twice
+      // through a scissor rect. See `RunnerLane` and `onRenderBackground`.
+      supportsVersus: true,
       // 3D camera: a camera-space ghost skeleton would straddle the track.
       // The ghost still races through the score line.
       ghostSilhouette: false,
       // Same reason: the track is not in camera space, so a mirrored webcam
       // image behind it is two incompatible spaces stacked on each other.
       cameraGhost: false,
+      // Two full-bleed 3D tracks need a hard ink rule between them, not the
+      // faint dashed one the other versus games use.
+      fullBleedSlots: true,
     });
   }
 
@@ -304,7 +363,7 @@ export class RunnerGame extends GameBase {
     super.unmount();
     this.world?.dispose();
     this.world = null;
-    this.rows = [];
+    for (const s of this.slots) s.rows = [];
   }
 
   private ensureWorld(width: number, height: number, dpr: number): RunnerWorld | null {
@@ -329,46 +388,57 @@ export class RunnerGame extends GameBase {
     // Re-read per round, not per frame: a marshal moving the slider between
     // plays has to see it take effect on the next go, and `LaneDetector` reads
     // its tunables out of a struct rather than a getter.
-    this.lanes.setTunables({
+    const tune = {
       enter: tunables.get('runner.laneEnter', LANE_ENTER),
       exit: tunables.get('runner.laneExit', LANE_EXIT),
       holdAt: tunables.get('runner.laneHoldAt', LANE_HOLD_AT),
       holdSec: tunables.get('runner.laneHoldSec', LANE_HOLD_SEC),
-    });
+    };
 
-    this.lanes.reset();
-    this.vert.reset();
-    this.gen.reset();
-    this.rows = [];
-    this.gen.fill(GENERATE_AHEAD, this.rows);
+    // ONE SEED FOR BOTH RUNNERS. Two independently seeded generators would be
+    // two different courses, and "I got the easy one" is the end of a race as
+    // a race. Same seed, same rows, separate `destroyed` flags.
+    const seed = (Math.random() * 0xffffffff) >>> 0;
 
-    this.distance = 0;
-    this.bonus = 0;
-    this.penalty = 0;
-    this.speed = START_SPEED;
-    this.laneTarget = 0;
-    this.laneX = 0;
-    this.crouchVisual = 0;
-    this.airStart = -99;
-    this.wasAirborne = false;
-    this.slideStart = -99;
-    this.slideHoldStart = -99;
-    this.slideLockUntil = -99;
-    this.streak = 0;
-    this.bestStreak = 0;
-    this.rowsCleared = 0;
-    this.nearMisses = 0;
-    this.hits = 0;
-    this.lastMilestone = 0;
-    this.idleZ = 0;
+    for (const s of this.slots) {
+      s.lanes.setTunables(tune);
+      s.lanes.reset();
+      s.vert.reset();
+      s.gen.reset(seed);
+      s.rows = [];
+      s.gen.fill(GENERATE_AHEAD, s.rows);
+
+      s.clock = 0;
+      s.distance = 0;
+      s.bonus = 0;
+      s.penalty = 0;
+      s.speed = START_SPEED;
+      s.laneTarget = 0;
+      s.laneX = 0;
+      s.crouchVisual = 0;
+      s.airStart = -99;
+      s.wasAirborne = false;
+      s.slideStart = -99;
+      s.slideHoldStart = -99;
+      s.slideLockUntil = -99;
+      s.streak = 0;
+      s.bestStreak = 0;
+      s.rowsCleared = 0;
+      s.nearMisses = 0;
+      s.hits = 0;
+      s.lastMilestone = 0;
+      s.idleZ = 0;
+    }
   }
 
-  protected scoreFor(): number {
-    return Math.floor(this.distance + this.bonus);
+  protected scoreFor(slot: number): number {
+    const s = this.slots[slot];
+    if (!s) return 0;
+    return Math.floor(s.distance + s.bonus);
   }
 
-  protected override primaryStat(): string {
-    return String(this.scoreFor());
+  protected override primaryStat(slot: number): string {
+    return String(this.scoreFor(slot));
   }
 
   protected override primaryLabel(): string {
@@ -377,22 +447,22 @@ export class RunnerGame extends GameBase {
 
   /* ---------------- player state ---------------- */
 
-  private airborneAt(t: number): boolean {
-    return t - this.airStart < JUMP_DURATION && t >= this.airStart;
+  private airborneAt(s: RunnerLane, t: number): boolean {
+    return t - s.airStart < JUMP_DURATION && t >= s.airStart;
   }
 
-  private slidingAt(t: number): boolean {
-    return t - this.slideStart < SLIDE_DURATION && t >= this.slideStart;
+  private slidingAt(s: RunnerLane, t: number): boolean {
+    return t - s.slideStart < SLIDE_DURATION && t >= s.slideStart;
   }
 
   /** Feet height above the track at time `t`. */
-  private feetAt(t: number): number {
-    if (!this.airborneAt(t)) return 0;
-    return jumpHeight((t - this.airStart) / JUMP_DURATION);
+  private feetAt(s: RunnerLane, t: number): number {
+    if (!this.airborneAt(s, t)) return 0;
+    return jumpHeight((t - s.airStart) / JUMP_DURATION);
   }
 
-  private headAt(t: number): number {
-    return this.feetAt(t) + (this.slidingAt(t) ? CROUCH_HEIGHT : STAND_HEIGHT);
+  private headAt(s: RunnerLane, t: number): number {
+    return this.feetAt(s, t) + (this.slidingAt(s, t) ? CROUCH_HEIGHT : STAND_HEIGHT);
   }
 
   /* ---------------- input ---------------- */
@@ -404,82 +474,84 @@ export class RunnerGame extends GameBase {
    * tutorial. Nobody at a stall reads a tagline; they step sideways, the shape
    * slides sideways, and now they understand the game.
    */
-  private updateInput(fc: FrameContext, players: TrackedPlayer[], dt: number): void {
-    const p = players[0];
+  private updateInput(fc: FrameContext, slot: number, p: TrackedPlayer | undefined, dt: number): void {
+    const s = this.slots[slot];
+    if (!s) return;
 
     if (p && p.scale.valid) {
       // `fc.now` so the hold timer is in SECONDS rather than in frames. The
       // detector falls back to assuming 60Hz, which is what its adaptation rate
       // has always assumed — but this game runs on whatever the TV gives us.
-      const lane = this.lanes.update(p, true, fc.now);
-      const changed = this.lanes.changed;
+      const lane = s.lanes.update(p, true, fc.now);
+      const changed = s.lanes.changed;
       if (changed !== 0) {
-        this.laneTarget = lane;
-        this.onLaneChange(fc, Math.sign(changed));
+        s.laneTarget = lane;
+        this.onLaneChange(fc, slot, Math.sign(changed));
       } else {
-        this.laneTarget = lane;
+        s.laneTarget = lane;
       }
 
-      this.vert.update(p, fc.now);
+      s.vert.update(p, fc.now);
 
-      if (this.vert.jumped && !this.airborneAt(this.clock)) {
-        this.airStart = this.clock;
+      if (s.vert.jumped && !this.airborneAt(s, s.clock)) {
+        s.airStart = s.clock;
         // A jump out of a slide is a legitimate cancel — the body cannot do
         // both, and forcing the player to wait for the slide to expire feels
         // like the game ignoring them.
-        this.slideStart = -99;
-        this.slideHoldStart = -99;
+        s.slideStart = -99;
+        s.slideHoldStart = -99;
         audio.play('whoosh', 1.25);
-        this.world?.impulseDip(-0.12);
+        this.world?.impulseDip(slot, -0.12);
       }
 
-      const canSlide = this.clock >= this.slideLockUntil;
-      if (this.vert.crouched && canSlide && !this.airborneAt(this.clock)) {
-        this.slideStart = this.clock;
-        this.slideHoldStart = this.clock;
+      const canSlide = s.clock >= s.slideLockUntil;
+      if (s.vert.crouched && canSlide && !this.airborneAt(s, s.clock)) {
+        s.slideStart = s.clock;
+        s.slideHoldStart = s.clock;
         audio.play('whoosh', 0.7);
-      } else if (this.vert.isCrouching && this.slidingAt(this.clock) && canSlide) {
+      } else if (s.vert.isCrouching && this.slidingAt(s, s.clock) && canSlide) {
         // Held crouch keeps the slide alive, up to the hold cap. Past the cap
         // you have to stand up again — squatting for a minute is not a strategy.
-        if (this.clock - this.slideHoldStart < MAX_SLIDE_HOLD) {
-          this.slideStart = Math.max(this.slideStart, this.clock - SLIDE_DURATION + 0.14);
+        if (s.clock - s.slideHoldStart < MAX_SLIDE_HOLD) {
+          s.slideStart = Math.max(s.slideStart, s.clock - SLIDE_DURATION + 0.14);
         } else {
-          this.slideStart = -99;
-          this.slideLockUntil = this.clock + SLIDE_LOCKOUT;
+          s.slideStart = -99;
+          s.slideLockUntil = s.clock + SLIDE_LOCKOUT;
         }
       }
     }
 
     // Landing. Detected from the arc, not the detector, so it always lands.
-    const airborne = this.airborneAt(this.clock);
-    if (this.wasAirborne && !airborne) {
-      this.world?.impulseDip(0.34);
+    const airborne = this.airborneAt(s, s.clock);
+    if (s.wasAirborne && !airborne) {
+      this.world?.impulseDip(slot, 0.34);
       this.juice.shake(0.05);
       audio.play('land', 0.9);
-      this.landingDust(fc);
+      this.landingDust(fc, slot);
     }
-    this.wasAirborne = airborne;
+    s.wasAirborne = airborne;
 
     // Lane tween. Fast enough to feel responsive, slow enough that the camera
     // roll has something to lean against.
-    const targetX = LANE_X[Math.max(0, Math.min(2, this.laneTarget + 1))] ?? 0;
-    this.laneX += (targetX - this.laneX) * (1 - Math.exp(-dt * 13));
+    const targetX = LANE_X[Math.max(0, Math.min(2, s.laneTarget + 1))] ?? 0;
+    s.laneX += (targetX - s.laneX) * (1 - Math.exp(-dt * 13));
 
-    const crouchTarget = this.slidingAt(this.clock) ? 1 : 0;
-    this.crouchVisual += (crouchTarget - this.crouchVisual) * (1 - Math.exp(-dt * 18));
+    const crouchTarget = this.slidingAt(s, s.clock) ? 1 : 0;
+    s.crouchVisual += (crouchTarget - s.crouchVisual) * (1 - Math.exp(-dt * 18));
   }
 
-  private onLaneChange(fc: FrameContext, dir: number): void {
-    this.world?.impulseRoll(dir * 0.9);
+  private onLaneChange(fc: FrameContext, slot: number, dir: number): void {
+    this.world?.impulseRoll(slot, dir * 0.9);
     audio.play('whoosh', 0.95);
     this.juice.shake(0.03);
     const { v } = fc;
+    const rect = this.slotRect(v, slot);
     // Ink, not `blueBright`. `*Bright` is the same blue again — it only existed
     // to make the hex read as neon — and flat blue sparks on a paper track are
     // a particle budget spent on almost nothing.
     BURST.spark(
       this.particles,
-      v.width / 2 - dir * vh(v, 6),
+      rect.centerX - dir * vh(v, 6),
       v.height * 0.62,
       dir > 0 ? Math.PI : 0,
       COLORS.ink,
@@ -487,10 +559,12 @@ export class RunnerGame extends GameBase {
     );
   }
 
-  private landingDust(fc: FrameContext): void {
+  private landingDust(fc: FrameContext, slot: number): void {
     const { v } = fc;
+    const rect = this.slotRect(v, slot);
+    const s = this.slots[slot];
     this.particles.emit({
-      x: v.width / 2 + this.laneX * vh(v, 4),
+      x: rect.centerX + (s?.laneX ?? 0) * vh(v, 4),
       y: v.height * 0.72,
       count: 12,
       color: COLORS.ink,
@@ -515,45 +589,56 @@ export class RunnerGame extends GameBase {
     const ramp = Math.max(0, Math.min(1, roundElapsed / SPEED_RAMP_SEC));
     const base = START_SPEED + (RAMP_SPEED - START_SPEED) * ramp;
 
-    this.penalty = Math.max(0, this.penalty - PENALTY_RECOVERY * dt);
-    this.speed = base * this.momentum();
+    // Each runner advances on its OWN speed. Two people on one shared scroll
+    // would mean the slower one is dragged along by the faster, which deletes
+    // the only thing momentum is for.
+    for (let slot = 0; slot < this.playerCount; slot++) {
+      const s = this.slots[slot];
+      if (!s) continue;
 
-    // Sub-step so nothing tunnels through a 1.4m-deep obstacle at 21 m/s, and
-    // so the near-miss sample lands at the true crossing instant.
-    const travel = this.speed * dt;
-    const steps = Math.max(1, Math.min(6, Math.ceil(travel / 0.4)));
-    const sdt = dt / steps;
+      s.penalty = Math.max(0, s.penalty - PENALTY_RECOVERY * dt);
+      s.speed = base * this.momentum(s);
 
-    for (let i = 0; i < steps; i++) {
-      this.clock += sdt;
-      const prev = this.distance;
-      this.distance += this.speed * sdt;
-      this.resolveRows(fc, prev, this.distance);
+      // Sub-step so nothing tunnels through a 1.4m-deep obstacle at 21 m/s, and
+      // so the near-miss sample lands at the true crossing instant.
+      const travel = s.speed * dt;
+      const steps = Math.max(1, Math.min(6, Math.ceil(travel / 0.4)));
+      const sdt = dt / steps;
+
+      for (let i = 0; i < steps; i++) {
+        s.clock += sdt;
+        const prev = s.distance;
+        s.distance += s.speed * sdt;
+        this.resolveRows(fc, slot, prev, s.distance);
+      }
+
+      this.extendTrack(s);
+      this.milestones(fc, slot);
     }
-
-    this.extendTrack();
-    this.milestones(fc);
   }
 
-  private extendTrack(): void {
-    if (this.gen.lastZ < this.distance + GENERATE_AHEAD) {
-      this.gen.fill(this.distance + GENERATE_AHEAD, this.rows);
+  private extendTrack(s: RunnerLane): void {
+    if (s.gen.lastZ < s.distance + GENERATE_AHEAD) {
+      s.gen.fill(s.distance + GENERATE_AHEAD, s.rows);
     }
     let drop = 0;
-    while (drop < this.rows.length && this.rows[drop]!.z < this.distance - RECYCLE_BEHIND) drop++;
-    if (drop > 0) this.rows.splice(0, drop);
+    while (drop < s.rows.length && s.rows[drop]!.z < s.distance - RECYCLE_BEHIND) drop++;
+    if (drop > 0) s.rows.splice(0, drop);
   }
 
-  private milestones(fc: FrameContext): void {
-    const m = Math.floor(this.distance / 250);
-    if (m > this.lastMilestone) {
-      this.lastMilestone = m;
+  private milestones(fc: FrameContext, slot: number): void {
+    const s = this.slots[slot];
+    if (!s) return;
+    const rect = this.slotRect(fc.v, slot);
+    const m = Math.floor(s.distance / 250);
+    if (m > s.lastMilestone) {
+      s.lastMilestone = m;
       // Every popup in this game is INK. PopupLayer draws flat text with no
       // outline behind it, and flat yellow type on white paper is the one brand
       // pairing that vanishes at three metres.
       this.popups.spawn(
         `${m * 250}m`,
-        fc.v.width / 2,
+        rect.centerX,
         fc.v.height * 0.32,
         COLORS.ink,
         vh(fc.v, 4.5)
@@ -575,45 +660,49 @@ export class RunnerGame extends GameBase {
    *   - centre crossing  → sample how close it was
    *   - fully behind     → retire, and pay out the near-miss
    */
-  private resolveRows(fc: FrameContext, prevZ: number, nowZ: number): void {
+  private resolveRows(fc: FrameContext, slot: number, prevZ: number, nowZ: number): void {
+    const s = this.slots[slot];
+    if (!s) return;
     const half = this.halfDepth();
 
-    for (const row of this.rows) {
+    for (const row of s.rows) {
       if (row.resolved) continue;
       const rel = row.z - nowZ;
       if (rel > half) break; // rows are ordered; nothing further is in range yet
 
       if (!row.resolved && Math.abs(rel) <= half) {
-        if (this.collide(fc, row)) continue;
+        if (this.collide(fc, slot, row)) continue;
       }
 
       // Centre crossing — the tightest point, so the honest place to measure.
       if (!row.resolved && prevZ < row.z && nowZ >= row.z) {
-        row.closeness = this.closenessAt(row);
+        row.closeness = this.closenessAt(s, row);
       }
 
       if (rel < -half) {
         row.resolved = true;
-        this.retireRow(fc, row);
+        this.retireRow(fc, slot, row);
         row.closeness = 0;
       }
     }
   }
 
   /** @returns true if the row was hit this sub-step. */
-  private collide(fc: FrameContext, row: TrackRow): boolean {
-    const feet = this.feetAt(this.clock);
-    const head = this.headAt(this.clock);
+  private collide(fc: FrameContext, slot: number, row: TrackRow): boolean {
+    const s = this.slots[slot];
+    if (!s) return false;
+    const feet = this.feetAt(s, s.clock);
+    const head = this.headAt(s, s.clock);
 
     for (const cell of row.cells) {
       if (cell.destroyed) continue;
       const ox = LANE_X[cell.lane + 1] ?? 0;
-      if (Math.abs(this.laneX - ox) >= OBSTACLE_HALF_W + PLAYER_HALF_W) continue;
+      if (Math.abs(s.laneX - ox) >= OBSTACLE_HALF_W + PLAYER_HALF_W) continue;
 
       if (cell.kind === 'low' && feet >= LOW_TOP) continue;
       if (cell.kind === 'high' && head <= HIGH_BOTTOM) continue;
 
-      this.onHit(fc, row, cell.kind);
+      this.onHit(fc, slot, row, cell.kind);
       cell.destroyed = true;
       return true;
     }
@@ -628,31 +717,31 @@ export class RunnerGame extends GameBase {
    * lateral gap. Both read to the player as "that was close", which is the only
    * definition that matters.
    */
-  private closenessAt(row: TrackRow): number {
+  private closenessAt(s: RunnerLane, row: TrackRow): number {
     let best = 0;
-    const t = this.clock;
+    const t = s.clock;
 
     for (const cell of row.cells) {
       if (cell.destroyed) continue;
       const ox = LANE_X[cell.lane + 1] ?? 0;
-      const overlap = Math.abs(this.laneX - ox) < OBSTACLE_HALF_W + PLAYER_HALF_W;
+      const overlap = Math.abs(s.laneX - ox) < OBSTACLE_HALF_W + PLAYER_HALF_W;
 
       if (overlap) {
         if (cell.kind === 'block') continue; // would have been a hit
         let start: number;
         let end: number;
         if (cell.kind === 'low') {
-          start = this.airStart + JUMP_DURATION * JUMP_CLEAR.from;
-          end = this.airStart + JUMP_DURATION * JUMP_CLEAR.to;
+          start = s.airStart + JUMP_DURATION * JUMP_CLEAR.from;
+          end = s.airStart + JUMP_DURATION * JUMP_CLEAR.to;
         } else {
-          start = this.slideStart;
-          end = this.slideStart + SLIDE_DURATION;
+          start = s.slideStart;
+          end = s.slideStart + SLIDE_DURATION;
         }
         const margin = Math.min(t - start, end - t);
         if (margin < 0) continue;
         best = Math.max(best, 1 - Math.min(1, margin / NEAR_TIME_WINDOW));
       } else {
-        const gap = Math.abs(this.laneX - ox) - (OBSTACLE_HALF_W + PLAYER_HALF_W);
+        const gap = Math.abs(s.laneX - ox) - (OBSTACLE_HALF_W + PLAYER_HALF_W);
         best = Math.max(best, 1 - Math.min(1, gap / NEAR_LATERAL_WINDOW));
       }
     }
@@ -664,15 +753,18 @@ export class RunnerGame extends GameBase {
    * A row has gone past without hitting the player. Bank the streak, and pay a
    * bonus if it was tight.
    */
-  private retireRow(fc: FrameContext, row: TrackRow): void {
+  private retireRow(fc: FrameContext, slot: number, row: TrackRow): void {
     if (row.cells.length === 0) return; // breather rows are not an achievement
+    const s = this.slots[slot];
+    if (!s) return;
+    const rect = this.slotRect(fc.v, slot);
 
-    const wasCapped = this.streak >= STREAK_CAP;
-    this.streak++;
-    this.rowsCleared++;
-    this.bestStreak = Math.max(this.bestStreak, this.streak);
-    if (!wasCapped && this.streak === STREAK_CAP) {
-      this.popups.spawn('<MAX SPEED>', fc.v.width / 2, fc.v.height * 0.38, COLORS.ink, vh(fc.v, 4.4));
+    const wasCapped = s.streak >= STREAK_CAP;
+    s.streak++;
+    s.rowsCleared++;
+    s.bestStreak = Math.max(s.bestStreak, s.streak);
+    if (!wasCapped && s.streak === STREAK_CAP) {
+      this.popups.spawn('<MAX SPEED>', rect.centerX, fc.v.height * 0.38, COLORS.ink, vh(fc.v, 4.4));
       this.juice.flash(COLORS.green, 0.18, 6);
       audio.play('record', 1.2);
     }
@@ -695,18 +787,18 @@ export class RunnerGame extends GameBase {
     //
     // Flat, and capped well below a gap, so it flavours the run instead of
     // dominating the score.
-    this.nearMisses++;
+    s.nearMisses++;
     const gained = NEAR_MAX_BONUS * closeness;
-    this.bonus += gained;
+    s.bonus += gained;
 
     const { v } = fc;
     const y = v.height * 0.55;
     const label = `+${Math.round(gained)}`;
-    this.popups.spawn(label, v.width / 2, y, COLORS.ink, vh(v, 3.4 + closeness * 1.8));
+    this.popups.spawn(label, rect.centerX, y, COLORS.ink, vh(v, 3.4 + closeness * 1.8));
 
-    audio.play('pop', 1 + Math.min(1.1, this.streak * 0.09 + closeness * 0.25));
+    audio.play('pop', 1 + Math.min(1.1, s.streak * 0.09 + closeness * 0.25));
     this.juice.shake(0.04 + closeness * 0.06);
-    BURST.spark(this.particles, v.width / 2, y, -Math.PI / 2, COLORS.ink, 0.5 + closeness);
+    BURST.spark(this.particles, rect.centerX, y, -Math.PI / 2, COLORS.ink, 0.5 + closeness);
 
     // A genuinely tight one earns the slow-mo. PLAN.md §5 reserves time
     // dilation for records and near misses; constant use makes it worthless.
@@ -722,51 +814,71 @@ export class RunnerGame extends GameBase {
    * Clamped to MOMENTUM_MAX because MAX_SPEED — the speed the generator proves
    * every segment clearable at — is derived from exactly that bound.
    */
-  private momentum(): number {
-    const boost = Math.min(STREAK_CAP, this.streak) * MOMENTUM_PER_STREAK;
-    return Math.max(MOMENTUM_FLOOR, Math.min(MOMENTUM_MAX, 1 + boost - this.penalty));
+  private momentum(s: RunnerLane): number {
+    const boost = Math.min(STREAK_CAP, s.streak) * MOMENTUM_PER_STREAK;
+    return Math.max(MOMENTUM_FLOOR, Math.min(MOMENTUM_MAX, 1 + boost - s.penalty));
   }
 
-  private onHit(fc: FrameContext, row: TrackRow, kind: ObstacleKind): void {
+  private onHit(fc: FrameContext, slot: number, row: TrackRow, kind: ObstacleKind): void {
+    const s = this.slots[slot];
+    if (!s) return;
     row.resolved = true;
     row.closeness = 0;
-    this.hits++;
-    this.streak = 0;
-    this.penalty = Math.min(PENALTY_CAP, this.penalty + HIT_PENALTY);
+    s.hits++;
+    s.streak = 0;
+    s.penalty = Math.min(PENALTY_CAP, s.penalty + HIT_PENALTY);
 
     const { v } = fc;
+    const rect = this.slotRect(v, slot);
     const colour = kind === 'block' ? COLORS.red : kind === 'low' ? COLORS.green : COLORS.yellow;
 
     this.juice.impact(0.95, COLORS.red);
     this.juice.slowMo(0.45, 2.4);
     this.juice.chromatic(5);
-    this.world?.impulseDip(-0.55);
+    this.world?.impulseDip(slot, -0.55);
     audio.play('bomb', 0.85);
 
-    BURST.splat(this.particles, v.width / 2 + this.laneX * vh(v, 4), v.height * 0.55, colour, 1.3);
+    BURST.splat(this.particles, rect.centerX + s.laneX * vh(v, 4), v.height * 0.55, colour, 1.3);
 
     // Red is the brand's "closed", it is legible flat on paper, and it is the
-    // one brand colour this moment is allowed. 'COMBO LOST' is the secondary
-    // line under it, so it is muted — `textDim` now resolves to ink, which
-    // would have made the small print as loud as the headline.
+    // one brand colour this moment is allowed.
     const word = OOF[Math.floor(Math.random() * OOF.length)] ?? 'OOF';
-    this.popups.spawn(word, v.width / 2, v.height * 0.46, COLORS.red, vh(v, 6));
+    this.popups.spawn(word, rect.centerX, v.height * 0.46, COLORS.red, vh(v, 6));
     // Ink, not muted: the sub-line stays quieter than the 6vh red word above
     // it by SIZE, which is the axis that survives being read from 3m.
-    this.popups.spawn('COMBO LOST', v.width / 2, v.height * 0.53, COLORS.ink, vh(v, 2.4));
+    this.popups.spawn('COMBO LOST', rect.centerX, v.height * 0.53, COLORS.ink, vh(v, 2.4));
   }
 
   /* ---------------- render ---------------- */
 
+  /**
+   * ONE WEBGL CONTEXT, RENDERED ONCE PER RUNNER.
+   *
+   * A second `RunnerWorld` would be a second WebGL context, and browsers kill
+   * the OLDEST context when they hit their cap (~16 in Chrome) with no error —
+   * the failure mode `RunnerWorld.liveCount` exists to catch. So both runners
+   * share one scene and one renderer, and the split is a scissor rect: update
+   * the scene for slot 0, render it into the left half, update it for slot 1,
+   * render into the right. The scene is fully rewritten between the two
+   * passes, which is exactly what `update` already did every frame.
+   *
+   * The only state that CANNOT be rewritten that way is the camera springs and
+   * the motion trail, because those are integrators — they carry history. Those
+   * live per-rig inside `RunnerWorld`; see the note there.
+   */
   protected override onRenderBackground(fc: FrameContext): void {
     const { ctx, v } = fc;
     const playing = this.state === 'playing';
+    const count = Math.max(1, this.playerCount);
 
     // Input runs every frame, in every state.
-    if (!playing) this.clock += fc.dt;
-    this.updateInput(fc, this.players, fc.dt);
-
-    if (!playing) this.idleZ += START_SPEED * fc.dt * (this.state === 'results' ? 0.35 : 0.6);
+    for (let slot = 0; slot < count; slot++) {
+      const s = this.slots[slot];
+      if (!s) continue;
+      if (!playing) s.clock += fc.dt;
+      this.updateInput(fc, slot, this.playerFor(slot), fc.dt);
+      if (!playing) s.idleZ += START_SPEED * fc.dt * (this.state === 'results' ? 0.35 : 0.6);
+    }
 
     const world = this.ensureWorld(v.width, v.height, v.dpr);
     if (!world) {
@@ -774,25 +886,31 @@ export class RunnerGame extends GameBase {
       return;
     }
 
-    const speedNorm = Math.max(
-      0,
-      Math.min(1, (this.speed - START_SPEED) / (MAX_SPEED - START_SPEED))
-    );
+    for (let slot = 0; slot < count; slot++) {
+      const s = this.slots[slot];
+      if (!s) continue;
 
-    const view: WorldView = {
-      distance: playing ? this.distance : this.idleZ,
-      playerX: this.laneX,
-      playerY: this.feetAt(this.clock),
-      crouch: this.crouchVisual,
-      speed: playing ? this.speed : START_SPEED * 0.6,
-      speedNorm: playing ? speedNorm : 0,
-      rows: playing ? this.rows : [],
-      time: fc.time,
-      active: playing,
-    };
+      const speedNorm = Math.max(
+        0,
+        Math.min(1, (s.speed - START_SPEED) / (MAX_SPEED - START_SPEED))
+      );
 
-    world.update(view, fc.dt);
-    world.render();
+      const view: WorldView = {
+        distance: playing ? s.distance : s.idleZ,
+        playerX: s.laneX,
+        playerY: this.feetAt(s, s.clock),
+        crouch: s.crouchVisual,
+        speed: playing ? s.speed : START_SPEED * 0.6,
+        speedNorm: playing ? speedNorm : 0,
+        rows: playing ? s.rows : [],
+        time: fc.time,
+        active: playing,
+      };
+
+      world.update(slot, view, fc.dt);
+      world.render(slot, count === 1 ? null : this.slotRect(v, slot));
+    }
+
     world.presentTo(ctx, v.width, v.height);
 
     // No vignette (a gradient, and a no-op in engine/draw.ts already) and no
@@ -848,11 +966,29 @@ export class RunnerGame extends GameBase {
     ctx.restore();
   }
 
+  /**
+   * The body driving a given track.
+   *
+   * Solo is ALWAYS slot 0 whoever the tracker calls primary — the same rule
+   * every other game on the roster follows, and the reason a bystander drifting
+   * into slot 1 cannot silently take the round away from the person playing.
+   */
+  private playerFor(slot: number): TrackedPlayer | undefined {
+    if (this.playerCount > 1) return this.players.find((p) => p.slot === slot);
+    return this.players[0];
+  }
+
   protected onRender(fc: FrameContext, _players: TrackedPlayer[]): void {
-    this.drawLaneIndicator(fc);
-    this.drawActionPills(fc);
-    this.drawSpeed(fc);
-    this.drawStreak(fc);
+    const count = Math.max(1, this.playerCount);
+    for (let slot = 0; slot < count; slot++) {
+      const s = this.slots[slot];
+      if (!s) continue;
+      const rect = this.slotRect(fc.v, slot);
+      this.drawLaneIndicator(fc, s, rect);
+      this.drawActionPills(fc, s, rect);
+      this.drawSpeed(fc, s, rect);
+      this.drawStreak(fc, s, rect);
+    }
   }
 
   /**
@@ -863,16 +999,18 @@ export class RunnerGame extends GameBase {
    * that from the game being broken, and at a stall there is nobody free to
    * explain the difference.
    */
-  private drawLaneIndicator(fc: FrameContext): void {
+  private drawLaneIndicator(fc: FrameContext, s: RunnerLane, rect: SlotRect): void {
     const { ctx, v } = fc;
     // vh is the right unit for a TV (ARCHITECTURE hard rule 7), but a narrow
     // aspect makes vh-wide rows collide, so widths also get a width-relative
-    // ceiling. The TV never hits it; a windowed operator screen does.
-    const w = Math.min(vh(v, 7), v.width * 0.16);
+    // ceiling. In versus the slot is HALF the screen, so the ceiling is
+    // measured against the slot rather than the viewport — otherwise three
+    // pills sized for a whole TV overflow their own half.
+    const w = Math.min(vh(v, 7), rect.width * 0.16);
     const h = vh(v, 1.5);
-    const gap = Math.min(vh(v, 1.4), v.width * 0.03);
+    const gap = Math.min(vh(v, 1.4), rect.width * 0.03);
     const y = v.height - vh(v, 9);
-    const cx = v.width / 2;
+    const cx = rect.centerX;
 
     // Three sticker pills. The occupied lane is a flat blue sticker with an ink
     // outline and a hard shadow; the other two are the brand's empty slot —
@@ -884,7 +1022,7 @@ export class RunnerGame extends GameBase {
     // thing and is effectively free.
     for (let lane = -1; lane <= 1; lane++) {
       const x = cx + lane * (w + gap) - w / 2;
-      const active = lane === this.laneTarget;
+      const active = lane === s.laneTarget;
       stickerPill(ctx, v, x, y, w, h, {
         fill: active ? COLORS.blue : COLORS.paper,
         outline: active ? COLORS.ink : COLORS.muted,
@@ -909,16 +1047,16 @@ export class RunnerGame extends GameBase {
     });
   }
 
-  private drawActionPills(fc: FrameContext): void {
+  private drawActionPills(fc: FrameContext, s: RunnerLane, rect: SlotRect): void {
     const { v } = fc;
     const y = v.height - vh(v, 9) + vh(v, 0.75);
-    const offset = Math.min(vh(v, 20), v.width * 0.34);
+    const offset = Math.min(vh(v, 20), rect.width * 0.34);
 
     // Colours match the obstacles they clear: green pill / green barrier,
     // yellow pill / yellow barrier. The mapping is never written down anywhere,
     // it is just consistently true, which is how a stranger picks it up.
-    this.actionPill(fc, v.width / 2 - offset, y, 'JUMP', COLORS.green, this.airborneAt(this.clock));
-    this.actionPill(fc, v.width / 2 + offset, y, 'SLIDE', COLORS.yellow, this.slidingAt(this.clock));
+    this.actionPill(fc, rect, rect.centerX - offset, y, 'JUMP', COLORS.green, this.airborneAt(s, s.clock));
+    this.actionPill(fc, rect, rect.centerX + offset, y, 'SLIDE', COLORS.yellow, this.slidingAt(s, s.clock));
   }
 
   /**
@@ -935,6 +1073,7 @@ export class RunnerGame extends GameBase {
    */
   private actionPill(
     fc: FrameContext,
+    rect: SlotRect,
     cx: number,
     cy: number,
     label: string,
@@ -942,7 +1081,7 @@ export class RunnerGame extends GameBase {
     active: boolean
   ): void {
     const { ctx, v } = fc;
-    const w = Math.min(vh(v, 13), v.width * 0.22);
+    const w = Math.min(vh(v, 13), rect.width * 0.22);
     const h = vh(v, 4.2);
 
     stickerPill(ctx, v, cx - w / 2, cy - h / 2, w, h, {
@@ -977,18 +1116,18 @@ export class RunnerGame extends GameBase {
    * palette at all. It is now flat blue, or flat red while a collision penalty
    * is still being paid off — two brand colours, never both at once.
    */
-  private drawSpeed(fc: FrameContext): void {
+  private drawSpeed(fc: FrameContext, s: RunnerLane, rect: SlotRect): void {
     const { ctx, v } = fc;
-    const x = v.width - Math.min(vh(v, 6), v.width * 0.09);
+    const x = rect.x + rect.width - Math.min(vh(v, 6), rect.width * 0.09);
     const top = vh(v, 30);
     const height = vh(v, 26);
     const width = vh(v, 1.6);
 
     const norm = Math.max(
       0,
-      Math.min(1, (this.speed - START_SPEED * MOMENTUM_FLOOR) / (MAX_SPEED - START_SPEED * MOMENTUM_FLOOR))
+      Math.min(1, (s.speed - START_SPEED * MOMENTUM_FLOOR) / (MAX_SPEED - START_SPEED * MOMENTUM_FLOOR))
     );
-    const slowed = this.penalty > 0.01;
+    const slowed = s.penalty > 0.01;
     const color = slowed ? COLORS.red : COLORS.blue;
 
     ctx.save();
@@ -1015,7 +1154,7 @@ export class RunnerGame extends GameBase {
 
     // Tabular: this number changes every frame, and in proportional figures a
     // decimal readout shuffles sideways the whole round.
-    drawTabularNumber(ctx, this.speed.toFixed(1), x, top + height + vh(v, 3), {
+    drawTabularNumber(ctx, s.speed.toFixed(1), x, top + height + vh(v, 3), {
       size: vh(v, 2.4),
       color: COLORS.ink,
       font: FONTS.body,
@@ -1036,20 +1175,20 @@ export class RunnerGame extends GameBase {
    * the number that separates a good run from a flailing one, and it is the
    * thing the player can see climbing while they play.
    */
-  private drawStreak(fc: FrameContext): void {
+  private drawStreak(fc: FrameContext, s: RunnerLane, rect: SlotRect): void {
     const { ctx, v } = fc;
-    const x = Math.min(vh(v, 4), v.width * 0.06);
+    const x = rect.x + Math.min(vh(v, 4), rect.width * 0.06);
     // Below the HUD band's ink rule, which sits at `hudBottom`.
     const y = vh(v, 34);
     const h = vh(v, 5.4);
-    const maxed = this.streak >= STREAK_CAP;
-    const running = this.streak >= 1;
+    const maxed = s.streak >= STREAK_CAP;
+    const running = s.streak >= 1;
 
     // Red while a collision is still being paid off, green at the cap, yellow
     // climbing. One at a time, always flat, so the component never carries more
     // than one brand colour plus ink.
-    const color = this.penalty > 0.01 ? COLORS.red : maxed ? COLORS.green : COLORS.yellow;
-    const text = `×${(running ? this.momentum() : 1).toFixed(2)}`;
+    const color = s.penalty > 0.01 ? COLORS.red : maxed ? COLORS.green : COLORS.yellow;
+    const text = `×${(running ? this.momentum(s) : 1).toFixed(2)}`;
 
     // A number PILL rather than coloured type. Flat yellow and flat green are
     // unreadable as text on paper, so the colour becomes the surface and the
@@ -1082,7 +1221,7 @@ export class RunnerGame extends GameBase {
     });
     ctx.restore();
 
-    const label = !running ? 'CLEAR TO SPEED UP' : maxed ? 'MAX SPEED' : `${this.streak} CLEAN`;
+    const label = !running ? 'CLEAR TO SPEED UP' : maxed ? 'MAX SPEED' : `${s.streak} CLEAN`;
     drawText(ctx, label, x, y + h * 0.5 + vh(v, 2.6), {
       size: vh(v, 1.9),
       color: COLORS.ink,
@@ -1093,8 +1232,8 @@ export class RunnerGame extends GameBase {
     });
   }
 
-  protected override onRenderHud(fc: FrameContext, _slot: number, rect: SlotRect): void {
-    const score = this.scoreFor();
+  protected override onRenderHud(fc: FrameContext, slot: number, rect: SlotRect): void {
+    const score = this.scoreFor(slot);
     const preview = leaderboard.previewRank('runner', score);
     if (preview.pointsToNext !== null && preview.nextRank !== null && score > 0) {
       this.drawTargetMarker(
@@ -1117,53 +1256,57 @@ export class RunnerGame extends GameBase {
    * Everything the "does the input actually move the player" question needs to
    * be answered numerically rather than by squinting at a screenshot.
    */
-  debugState(): Record<string, unknown> {
-    const next = this.rows.find((r) => r.z >= this.distance && !r.resolved);
+  debugState(slot = 0): Record<string, unknown> {
+    const s = this.slots[slot] ?? this.slots[0]!;
+    const next = s.rows.find((r) => r.z >= s.distance && !r.resolved);
     return {
       state: this.state,
+      playerCount: this.playerCount,
+      slot,
       timeLeft: +this.timeLeft.toFixed(3),
-      clock: +this.clock.toFixed(3),
-      distance: +this.distance.toFixed(3),
-      bonus: +this.bonus.toFixed(3),
-      score: this.scoreFor(),
-      speed: +this.speed.toFixed(3),
-      momentum: +this.momentum().toFixed(3),
-      penalty: +this.penalty.toFixed(3),
-      lane: this.laneTarget,
-      laneX: +this.laneX.toFixed(3),
-      detectorLane: this.lanes.current,
-      airborne: this.airborneAt(this.clock),
-      sliding: this.slidingAt(this.clock),
-      feet: +this.feetAt(this.clock).toFixed(3),
-      head: +this.headAt(this.clock).toFixed(3),
-      crouchVisual: +this.crouchVisual.toFixed(3),
-      hits: this.hits,
-      rowsCleared: this.rowsCleared,
-      nearMisses: this.nearMisses,
-      streak: this.streak,
-      bestStreak: this.bestStreak,
-      rows: this.rows.length,
-      generatorRejected: this.gen.rejected,
-      generatorPushed: this.gen.pushed,
+      clock: +s.clock.toFixed(3),
+      distance: +s.distance.toFixed(3),
+      bonus: +s.bonus.toFixed(3),
+      score: this.scoreFor(slot),
+      speed: +s.speed.toFixed(3),
+      momentum: +this.momentum(s).toFixed(3),
+      penalty: +s.penalty.toFixed(3),
+      lane: s.laneTarget,
+      laneX: +s.laneX.toFixed(3),
+      detectorLane: s.lanes.current,
+      airborne: this.airborneAt(s, s.clock),
+      sliding: this.slidingAt(s, s.clock),
+      feet: +this.feetAt(s, s.clock).toFixed(3),
+      head: +this.headAt(s, s.clock).toFixed(3),
+      crouchVisual: +s.crouchVisual.toFixed(3),
+      hits: s.hits,
+      rowsCleared: s.rowsCleared,
+      nearMisses: s.nearMisses,
+      streak: s.streak,
+      bestStreak: s.bestStreak,
+      rows: s.rows.length,
+      generatorRejected: s.gen.rejected,
+      generatorPushed: s.gen.pushed,
       worlds: RunnerWorld.liveCount,
       gfx: this.world?.stats ?? null,
       nextRow: next
-        ? { z: +next.z.toFixed(2), rel: +(next.z - this.distance).toFixed(2), cells: next.cells.map((c) => `${c.lane}:${c.kind}`) }
+        ? { z: +next.z.toFixed(2), rel: +(next.z - s.distance).toFixed(2), cells: next.cells.map((c) => `${c.lane}:${c.kind}`) }
         : null,
     };
   }
 
   /** Replaces the live track with a hand-built one. Test hook. */
-  debugSetRows(rows: TrackRow[]): void {
-    this.rows = rows;
+  debugSetRows(rows: TrackRow[], slot = 0): void {
+    const s = this.slots[slot];
+    if (s) s.rows = rows;
   }
 
-  debugRows(): TrackRow[] {
-    return this.rows;
+  debugRows(slot = 0): TrackRow[] {
+    return this.slots[slot]?.rows ?? [];
   }
 
-  debugValidate(): ReturnType<typeof validateRows> {
-    return validateRows(this.rows);
+  debugValidate(slot = 0): ReturnType<typeof validateRows> {
+    return validateRows(this.debugRows(slot));
   }
 
   debugSelfTest(runs?: number, metres?: number): ReturnType<typeof selfTestGeneration> {

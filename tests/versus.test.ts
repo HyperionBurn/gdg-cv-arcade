@@ -78,7 +78,7 @@ describe('roster — capacity is one fact, not three', () => {
 
   test('a versus game takes the second person and refuses the third', () => {
     const versus = GAMES.filter(([, c]) => c.supportsVersus);
-    assert.equal(versus.length, 5, 'five split-screen games — update this if that changes');
+    assert.equal(versus.length, 6, 'six split-screen games — update this if that changes');
 
     for (const [name, cfg] of versus) {
       assert.equal(rosterSize(1, cfg), 1, `${name} solo`);
@@ -97,12 +97,17 @@ describe('roster — capacity is one fact, not three', () => {
     assert.equal(rosterSize(99, redlight), redlight.maxPlayers, 'a crowd cannot overflow the lanes');
   });
 
-  test('a solo game stays solo no matter how many people crowd in', () => {
+  test('every game on the roster can be played with somebody', () => {
+    // The Runner was the last hold-out and the reason was structural rather
+    // than deliberate — see `RunnerLane`. If a future game ships solo-only
+    // that is a decision, not an accident, and this test is where it gets
+    // written down.
     const solo = GAMES.filter(([, c]) => !c.supportsVersus && !c.partyMode);
-    assert.ok(solo.length > 0);
-    for (const [name, cfg] of solo) {
-      assert.equal(rosterSize(4, cfg), 1, `${name} must not split`);
-    }
+    assert.deepEqual(
+      solo.map(([n]) => n),
+      [],
+      'a solo-only game is fine, but say so here and say why'
+    );
   });
 
   test('the menu badge agrees with what the game will actually do', () => {

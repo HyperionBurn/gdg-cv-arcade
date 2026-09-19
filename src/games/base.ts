@@ -99,6 +99,16 @@ export interface GameConfig {
    */
   ghostSilhouette?: boolean;
   /**
+   * This game's playfield fills its whole slot, edge to edge.
+   *
+   * Changes the split-screen divider from the usual faint dashed rule to a
+   * full-height ink one. Only the Runner needs it today: every other versus
+   * game leaves white space either side of its playfield, so the halves are
+   * already visually separate and a loud divider would be the noisiest object
+   * on the screen.
+   */
+  fullBleedSlots?: boolean;
+  /**
    * Put the HUD on a solid paper shelf with a hard ink rule, and shrink it to
    * fit above that rule.
    *
@@ -1895,13 +1905,27 @@ export abstract class GameBase implements Screen {
 
     if (this.playerCount === 2) {
       ctx.save();
-      ctx.strokeStyle = COLORS.grid;
-      ctx.lineWidth = 2;
-      ctx.setLineDash([12, 10]);
-      ctx.beginPath();
-      ctx.moveTo(v.width / 2, vh(v, this.config.hudShelf ? m.bottom : 10));
-      ctx.lineTo(v.width / 2, v.height);
-      ctx.stroke();
+      if (this.config.fullBleedSlots) {
+        // A HARD RULE, NOT A HINT. The dashed grid line below is drawn in
+        // `COLORS.grid` at 1.18:1 against paper — deliberately, because for
+        // every other versus game the two halves are already separated by
+        // their own white space and a loud divider would be the noisiest
+        // object on screen. The Runner has no white space: two perspective
+        // tracks meet in the middle, and without an ink rule they read as one
+        // wide track with a kink in it. Full height, because the tracks go all
+        // the way to the top of the frame.
+        ctx.fillStyle = COLORS.ink;
+        const w = vh(v, STROKE.base);
+        ctx.fillRect(v.width / 2 - w / 2, 0, w, v.height);
+      } else {
+        ctx.strokeStyle = COLORS.grid;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([12, 10]);
+        ctx.beginPath();
+        ctx.moveTo(v.width / 2, vh(v, this.config.hudShelf ? m.bottom : 10));
+        ctx.lineTo(v.width / 2, v.height);
+        ctx.stroke();
+      }
       ctx.restore();
     }
   }

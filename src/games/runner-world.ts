@@ -730,6 +730,49 @@ class ObstacleView {
   }
 }
 
+/**
+ * One runner's camera, as state rather than as a THREE object.
+ *
+ * There is exactly one `PerspectiveCamera` in this file and there always will
+ * be: a camera is cheap, but two of them would still be one scene and one
+ * renderer, and the thing that actually has to be duplicated is not the object
+ * — it is the SPRINGS. `camX`, `camRoll`, `dip` and `fov` are integrators, each
+ * frame's value computed from the last, so they cannot be recomputed from
+ * scratch the way the track and the player mesh are. `update` advances one
+ * rig, `render` loads that rig into the shared camera and draws.
+ */
+interface CameraRig {
+  camX: number;
+  camY: number;
+  camZ: number;
+  camRoll: number;
+  camRollVel: number;
+  dip: number;
+  dipVel: number;
+  fov: number;
+  /** Where the camera is aimed, resolved in `update`, applied in `render`. */
+  lookX: number;
+  lookY: number;
+  /** Motion trail, in world space. Also an integrator — it is history. */
+  trailHistory: Array<{ x: number; y: number; z: number }>;
+}
+
+function makeRig(): CameraRig {
+  return {
+    camX: 0,
+    camY: 2.45,
+    camZ: 6.3,
+    camRoll: 0,
+    camRollVel: 0,
+    dip: 0,
+    dipVel: 0,
+    fov: 68,
+    lookX: 0,
+    lookY: 1.25,
+    trailHistory: [],
+  };
+}
+
 export class RunnerWorld {
   readonly canvas: HTMLCanvasElement;
   private renderer: THREE.WebGLRenderer;
@@ -748,16 +791,24 @@ export class RunnerWorld {
   private playerRing: THREE.Mesh;
   private trail: THREE.LineSegments;
   private trailPos: Float32Array;
-  private trailHistory: Array<{ x: number; y: number; z: number }> = [];
 
-  /** Camera spring state. */
-  private camX = 0;
-  private camY = 2.45;
-  private camRoll = 0;
-  private camRollVel = 0;
-  private dip = 0;
-  private dipVel = 0;
-  private fov = 68;
+  /**
+   * PER-RUNNER STATE, AND THE ONLY STATE THAT CANNOT BE SHARED.
+   *
+   * Two players share this scene: `update` rewrites the track, the obstacle
+   * pool, the player mesh and the trail buffer from scratch every call, so the
+   * second runner's pass simply overwrites the first's and both render
+   * correctly out of one WebGL context.
+   *
+   * The camera springs and the motion trail are the exception, because they
+   * are INTEGRATORS - each frame's value is a function of the last one. Shared,
+   * the two runners' cameras would fight over one position: every frame slot 0
+   * would pull it toward its own lane and slot 1 would pull it back, and both
+   * halves would render from whichever pass ran last. Hence one rig each.
+   */
+  private rigs: CameraRig[] = [makeRig(), makeRig()];
+  /** The rig the current `update` pass belongs to. */
+  private rig: CameraRig = this.rigs[0]!;
 
   private width = 1280;
   private height = 720;
@@ -782,7 +833,7 @@ export class RunnerWorld {
     this.renderer.setClearColor(new THREE.Color(COLORS.paper), 1);
     this.renderer.autoClear = true;
 
-    this.camera = new THREE.PerspectiveCamera(this.fov, 16 / 9, 0.1, VIEW_DISTANCE + 60);
+    this.camera = new THREE.PerspectiveCamera(this.rigs[0]!.fov, 16 / 9, 0.1, VIEW_DISTANCE + 60);
     // No fog: see the note at the top of the file. Distance fading toward the
     // paper is a tint of a brand colour, which the brand forbids outright.
 
@@ -1097,17 +1148,22 @@ export class RunnerWorld {
   }
 
   /** Kick the camera downward — landings, collisions. */
-  impulseDip(amount: number): void {
-    this.dipVel -= amount * 14;
+  impulseDip(slot: number, amount: number): void {
+    const rig = this.rigs[slot];
+    if (rig) rig.dipVel -= amount * 14;
   }
 
   /** Kick the camera roll — lane changes lean into the turn. */
-  impulseRoll(amount: number): void {
-    this.camRollVel += amount;
+  impulseRoll(slot: number, amount: number): void {
+    const rig = this.rigs[slot];
+    if (rig) rig.camRollVel += amount;
   }
 
-  update(view: WorldView, dt: number): void {
+  update(slot: number, view: WorldView, dt: number): void {
     if (this.disposed) return;
+    const rig = this.rigs[slot];
+    if (!rig) return;
+    this.rig = rig;
     const step = Math.min(dt, 1 / 20);
 
     this.updateScroll(view);
@@ -1173,16 +1229,17 @@ export class RunnerWorld {
     this.playerRing.scale.set(shrink, 1, shrink);
 
     // Trail. History is in world space and scrolls backwards with the track.
-    this.trailHistory.unshift({ x: view.playerX, y: centreY, z: 0 });
+    const history = this.rig.trailHistory;
+    history.unshift({ x: view.playerX, y: centreY, z: 0 });
     const SEGMENTS = this.trailPos.length / 6;
-    if (this.trailHistory.length > SEGMENTS + 1) this.trailHistory.pop();
+    if (history.length > SEGMENTS + 1) history.pop();
     const drop = view.speed * dt;
-    for (let i = 1; i < this.trailHistory.length; i++) {
-      this.trailHistory[i]!.z += drop;
+    for (let i = 1; i < history.length; i++) {
+      history[i]!.z += drop;
     }
     for (let i = 0; i < SEGMENTS; i++) {
-      const a = this.trailHistory[Math.min(i, this.trailHistory.length - 1)]!;
-      const b = this.trailHistory[Math.min(i + 1, this.trailHistory.length - 1)]!;
+      const a = history[Math.min(i, history.length - 1)]!;
+      const b = history[Math.min(i + 1, history.length - 1)]!;
       const o = i * 6;
       this.trailPos[o] = a.x;
       this.trailPos[o + 1] = a.y;
@@ -1202,45 +1259,93 @@ export class RunnerWorld {
    * the feeling.
    */
   private updateCamera(view: WorldView, dt: number): void {
+    const rig = this.rig;
     const followX = view.playerX * 0.72;
-    const lag = followX - this.camX;
-    this.camX += lag * Math.min(1, dt * 7.5);
+    const lag = followX - rig.camX;
+    rig.camX += lag * Math.min(1, dt * 7.5);
 
     // Roll is driven by how far the camera is TRAILING the player, so it leans
     // into a lane change and unwinds as it catches up.
     const rollTarget = -lag * 0.16;
-    this.camRollVel += (rollTarget - this.camRoll) * 120 * dt;
-    this.camRollVel *= Math.exp(-7 * dt);
-    this.camRoll += this.camRollVel * dt;
+    rig.camRollVel += (rollTarget - rig.camRoll) * 120 * dt;
+    rig.camRollVel *= Math.exp(-7 * dt);
+    rig.camRoll += rig.camRollVel * dt;
 
-    this.dipVel += -this.dip * 90 * dt;
-    this.dipVel *= Math.exp(-6.5 * dt);
-    this.dip += this.dipVel * dt;
-    this.dip = Math.max(-1.2, Math.min(1.2, this.dip));
+    rig.dipVel += -rig.dip * 90 * dt;
+    rig.dipVel *= Math.exp(-6.5 * dt);
+    rig.dip += rig.dipVel * dt;
+    rig.dip = Math.max(-1.2, Math.min(1.2, rig.dip));
 
     const baseY = 2.5 + view.playerY * 0.34 - view.crouch * 0.4;
-    this.camY += (baseY - this.camY) * Math.min(1, dt * 9);
+    rig.camY += (baseY - rig.camY) * Math.min(1, dt * 9);
 
-    const camZ = 6.3 + view.speedNorm * 2.5;
+    rig.camZ = 6.3 + view.speedNorm * 2.5;
     const fovTarget = 66 + view.speedNorm * 15;
-    this.fov += (fovTarget - this.fov) * Math.min(1, dt * 3);
+    rig.fov += (fovTarget - rig.fov) * Math.min(1, dt * 3);
 
-    this.camera.position.set(this.camX, this.camY + this.dip, camZ);
-    this.camera.lookAt(
-      view.playerX * 0.3,
-      1.25 + view.playerY * 0.28 + this.dip * 0.5,
-      -16
-    );
-    this.camera.rotation.z += this.camRoll;
-
-    if (Math.abs(this.camera.fov - this.fov) > 0.01) {
-      this.camera.fov = this.fov;
-      this.camera.updateProjectionMatrix();
-    }
+    // Aim point only. The camera object itself is one shared THREE object, so
+    // pointing it here would be pointless: the second runner's update would
+    // move it before either of them rendered. `render` positions it.
+    rig.lookX = view.playerX * 0.3;
+    rig.lookY = 1.25 + view.playerY * 0.28 + rig.dip * 0.5;
   }
 
-  render(): void {
+  /**
+   * Draw the scene as ONE runner sees it.
+   *
+   * `rect` is the slice of the canvas this pass owns, in the same logical
+   * pixels the 2D layer uses, or null for the whole thing. The scissor test is
+   * what makes two passes into one buffer safe: `renderer.render` clears
+   * first, and a clear obeys the scissor box, so the second pass cannot wipe
+   * out the first.
+   *
+   * The projection aspect comes from the RECT, not the canvas. A camera left
+   * at 16:9 while drawing into an 8:9 half stretches the track sideways, which
+   * is not merely ugly - it changes how wide a lane looks and therefore how
+   * far a player thinks they have to step.
+   */
+  render(
+    slot = 0,
+    rect: { x: number; y: number; width: number; height: number } | null = null
+  ): void {
     if (this.disposed) return;
+    const rig = this.rigs[slot];
+    if (!rig) return;
+
+    this.camera.position.set(rig.camX, rig.camY + rig.dip, rig.camZ);
+    this.camera.lookAt(rig.lookX, rig.lookY, -16);
+    this.camera.rotation.z += rig.camRoll;
+
+    const aspect = rect
+      ? rect.width / Math.max(1, rect.height)
+      : this.width / Math.max(1, this.height);
+    if (
+      Math.abs(this.camera.fov - rig.fov) > 0.01 ||
+      Math.abs(this.camera.aspect - aspect) > 1e-4
+    ) {
+      this.camera.fov = rig.fov;
+      this.camera.aspect = aspect;
+      this.camera.updateProjectionMatrix();
+    }
+
+    if (rect) {
+      // LOGICAL pixels, NOT device ones. `setViewport` multiplies by the
+      // renderer's own pixel ratio internally, so scaling here first applies it
+      // twice — which on any DPR above 1 renders the scene into a viewport
+      // larger than the buffer and magnifies the whole track. It does not look
+      // like a viewport bug when it happens; it looks like the camera broke.
+      //
+      // The y flip is the other half: WebGL's origin is bottom-left and the 2D
+      // layer's rects are top-left.
+      const y = this.height - rect.y - rect.height;
+      this.renderer.setViewport(rect.x, y, rect.width, rect.height);
+      this.renderer.setScissor(rect.x, y, rect.width, rect.height);
+      this.renderer.setScissorTest(true);
+    } else {
+      this.renderer.setViewport(0, 0, this.width, this.height);
+      this.renderer.setScissorTest(false);
+    }
+
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -1294,7 +1399,7 @@ export class RunnerWorld {
     for (const m of this.materials) m.dispose();
     this.geometries = [];
     this.materials = [];
-    this.trailHistory = [];
+    for (const rig of this.rigs) rig.trailHistory = [];
 
     this.renderer.dispose();
     this.renderer.forceContextLoss();

@@ -74,8 +74,11 @@ export const GAME_SEATS: Record<GameId, number> = {
   /** Six lanes. The only game on the roster that takes a whole group. */
   redlight: 6,
   posematch: 2,
-  /** One track, one camera, one runner. See PLAN.md and runner-world.ts. */
-  runner: 1,
+  /**
+   * Two runners, two identically seeded tracks, one WebGL context rendered
+   * twice through a scissor rect. See `RunnerLane` in games/runner.ts.
+   */
+  runner: 2,
   rhythm: 2,
 };
 
