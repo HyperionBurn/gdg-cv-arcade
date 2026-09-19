@@ -951,8 +951,11 @@ export class OperatorOverlay {
         // Its own class: `op-entry-rank` is sized for "#12" and a round name
         // wrapped to two lines inside it.
         rowEl.appendChild(el('span', 'op-entry-round', roundName(m.round, rounds)));
+        // Its own class, not `op-entry-initials`: that one is pinned to 60px so
+        // the SCORES tab's three-glyph column stays tidy, and "WAS v CAT" in a
+        // 60px box wraps onto two lines mid-match-name.
         rowEl.appendChild(
-          el('span', 'op-entry-initials', `${a?.label ?? '—'} v ${b?.label ?? '—'}`)
+          el('span', 'op-entry-match', `${a?.label ?? '—'} v ${b?.label ?? '—'}`)
         );
         rowEl.appendChild(
           el(

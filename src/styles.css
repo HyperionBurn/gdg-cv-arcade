@@ -918,6 +918,18 @@ body.op-open {
   letter-spacing: 0.1em;
 }
 
+/* A match label is two names and a separator, not three glyphs. Grows to fit
+   rather than wrapping "WAS v CAT" onto two lines. */
+.op-entry-match {
+  flex: 1 1 auto;
+  min-width: 120px;
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
 .op-entry-score {
   flex: 0 0 90px;
   font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
