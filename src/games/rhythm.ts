@@ -67,6 +67,7 @@ import { GameBase, type SlotRect } from './base';
 import {
   generateBeatmap,
   gradeFor,
+  judgeOffset,
   handForSlot,
   laneXForSlot,
   GRADE_ACCURACY,
@@ -947,7 +948,7 @@ export class RhythmGame extends GameBase {
     for (let i = 0; i < this.runtime.length; i++) {
       const rt = this.runtime[i]!;
       const note = this.map.notes[i]!;
-      const delta = note.time - this.songTime + latency;
+      const delta = judgeOffset(note.time, this.songTime, latency);
 
       if (delta > APPROACH_SEC) break; // notes are time-sorted
       for (let slot = 0; slot < this.playerCount; slot++) {

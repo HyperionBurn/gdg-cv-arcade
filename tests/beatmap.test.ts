@@ -23,6 +23,7 @@ import {
   handForSlot,
   laneXForSlot,
   gradeFor,
+  judgeOffset,
   TIMING,
   MAX_PUNCHES_PER_BAR,
   MIN_SAME_HAND_BEATS,
@@ -445,5 +446,79 @@ describe('option handling', () => {
     for (const seed of [-1, -99999, 0.5, 3.7]) {
       assert.deepEqual(validateBeatmap(generateBeatmap({ ...ROUND, seed })), [], `seed ${seed}`);
     }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Hit judging                                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * EVERYTHING ABOVE TESTS THE CHART. NOTHING TESTED THE JUDGING.
+ *
+ * Determinism, impossible pairs, wall-versus-punch separation — all of it is
+ * about what the game ASKS for. What it does with a punch once it arrives was
+ * covered by a README measurement and nothing else, and it contains the number
+ * that file calls "the single most sensitive timing number in the app".
+ *
+ * Its tuning instruction is "punch deliberately early and late and check the
+ * grades come out symmetric". That is a property, so here it is as one.
+ */
+describe('judging a punch', () => {
+  /**
+   * THE SIGN OF THE LATENCY TERM.
+   *
+   * A punch is detected `latency` after it happened, so the song time to judge
+   * against is earlier than now. Backwards, and every grade in the game is
+   * wrong in the same direction by TWICE the latency — which does not read as
+   * a bug, it reads as the game being slightly off, and the natural response
+   * is to tune the number that was already right.
+   */
+  /** Float arithmetic: `10 - (10 + 0.067) + 0.067` is -1.7e-16, not 0. */
+  const near = (a: number, b: number, why: string): void =>
+    assert.ok(Math.abs(a - b) < 1e-9, `${why}: ${a} vs ${b}`);
+
+  test('input lag is compensated, not doubled', () => {
+    const L = 0.067;
+    // A punch that LANDS on the beat is DETECTED L later. At that moment the
+    // song has moved on by L, and the offset must come out at zero.
+    near(judgeOffset(10, 10 + L, L), 0, 'a punch on the beat did not read as on the beat');
+    assert.equal(gradeFor(judgeOffset(10, 10 + L, L)), 'perfect');
+
+    // With the sign flipped it would read as 2L late — which at L = 0.067 is
+    // 0.134s, straight past the perfect window.
+    assert.ok(Math.abs(-2 * L) > TIMING.perfect, 'the wrong sign would be invisible');
+  });
+
+  test('with no latency configured it is just the raw distance to the beat', () => {
+    near(judgeOffset(10, 9.9, 0), 0.1, 'early');
+    near(judgeOffset(10, 10.1, 0), -0.1, 'late');
+  });
+
+  /** Early and late must grade identically. The tuning advice, as a test. */
+  test('grades are symmetric about the beat', () => {
+    for (const d of [0, 0.05, 0.109, 0.11, 0.15, 0.2, 0.25, 0.32, 0.4]) {
+      assert.equal(gradeFor(d), gradeFor(-d), `asymmetric at ${d}s`);
+    }
+  });
+
+  test('the window boundaries are inclusive, and past them is a miss', () => {
+    assert.equal(gradeFor(TIMING.perfect), 'perfect');
+    assert.equal(gradeFor(TIMING.perfect + 1e-6), 'great');
+    assert.equal(gradeFor(TIMING.great), 'great');
+    assert.equal(gradeFor(TIMING.great + 1e-6), 'good');
+    assert.equal(gradeFor(TIMING.good), 'good');
+    assert.equal(gradeFor(TIMING.good + 1e-6), null);
+    assert.equal(gradeFor(-TIMING.good - 1e-6), null);
+  });
+
+  /**
+   * The windows have to widen outwards. If two ever crossed, a grade would be
+   * unreachable and the scoring would quietly lose a tier.
+   */
+  test('the windows nest, so every grade is reachable', () => {
+    assert.ok(TIMING.perfect < TIMING.great);
+    assert.ok(TIMING.great < TIMING.good);
+    assert.ok(TIMING.good < TIMING.wall);
   });
 });

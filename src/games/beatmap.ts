@@ -93,6 +93,34 @@ export const WALL_POINTS = 90;
  * window. Shared by the game and the tests so "what counts as a hit" has
  * exactly one definition.
  */
+/**
+ * HOW EARLY OR LATE THIS PUNCH WAS, once the input lag is accounted for.
+ *
+ * Positive means the note is still coming; negative means it has passed. Zero
+ * is dead on the beat.
+ *
+ * THE SIGN IS THE WHOLE THING. By the moment a punch is DETECTED it already
+ * happened `latency` seconds ago — the filter, the capture and the inference
+ * all sit between the fist and this line — so the song time to judge against
+ * is `songTime - latency`, which is why the term is ADDED here. Get it
+ * backwards and every grade in the game is wrong in the same direction by
+ * twice the latency, which does not look like a bug. It looks like the game
+ * being slightly off, and the natural response is to tune the number that is
+ * already correct.
+ *
+ * README.md calls `inputLatencySec` the single most sensitive timing number in
+ * the app and says to tune it by punching deliberately early and late and
+ * checking the grades come out symmetric. That is a property, so it is tested
+ * rather than left as advice.
+ *
+ * Deliberately NOT applied to the render delta — the note must cross the
+ * strike line on the beat the music plays. Only the moment the game DECIDES
+ * moves.
+ */
+export function judgeOffset(noteTime: number, songTime: number, latency: number): number {
+  return noteTime - songTime + latency;
+}
+
 export function gradeFor(deltaSeconds: number): Grade | null {
   const d = Math.abs(deltaSeconds);
   if (d <= TIMING.perfect) return 'perfect';
