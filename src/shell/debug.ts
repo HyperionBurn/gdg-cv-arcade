@@ -18,6 +18,7 @@
 
 import { camera } from '../core/camera';
 import { vision } from '../core/vision';
+import { isSimEnabled } from '../core/simulator';
 import { selectCandidates } from '../core/candidates';
 import { POSE } from '../core/types';
 import { COLORS, FONTS } from './theme';
@@ -72,37 +73,55 @@ interface Row {
 function rows(fc: FrameContext): Row[] {
   const cam = camera.getState();
   const vs = vision.getStats();
+  const sim = isSimEnabled();
   const out: Row[] = [];
 
   out.push({ label: 'build', value: __BUILD_STAMP__ });
+
+  // 0. SAY WHEN THERE IS NO CAMERA BY DESIGN.
+  //
+  // The day-of card sends a marshal to `?sim=1` when the camera dies, and in
+  // that mode the three rows below read "idle", "loading" and "0fps 0ms"
+  // forever — every one of them true, and together indistinguishable from a
+  // pipeline that has failed. Somebody debugging a dead stall does not need a
+  // second thing that looks broken.
+  if (sim) out.push({ label: 'mode', value: 'SIMULATOR — no camera by design' });
 
   // 1. Camera.
   const live = camera.isLive();
   out.push({
     label: 'camera',
-    value: live ? `${cam.width}x${cam.height}` : (cam.error ?? cam.status),
-    bad: !live,
+    value: sim ? 'not used (sim)' : live ? `${cam.width}x${cam.height}` : (cam.error ?? cam.status),
+    bad: !live && !sim,
   });
 
   // 2. Worker + model.
   out.push({
     label: 'vision',
-    value: vs.error ? vs.error : vs.ready ? `ready ${vs.delegate ?? '?'}` : 'loading',
-    bad: !!vs.error || (!vs.ready && live),
+    value: sim
+      ? 'not used (sim)'
+      : vs.error
+        ? vs.error
+        : vs.ready
+          ? `ready ${vs.delegate ?? '?'}`
+          : 'loading',
+    bad: !sim && (!!vs.error || (!vs.ready && live)),
   });
 
   // 3. Inference throughput. CPU fallback is the usual cause of "laggy", and it
   //    is invisible without this row.
-  out.push({
-    label: 'inference',
-    value: `${vs.inferenceFps.toFixed(0)}fps ${vs.inferenceMs.toFixed(0)}ms`,
-    bad: vs.ready && live && (vs.inferenceFps < 12 || vs.inferenceMs > 45),
-  });
-  out.push({
-    label: 'latency',
-    value: `${vs.latencyMs.toFixed(0)}ms  drop ${vs.dropped}`,
-    bad: vs.latencyMs > 160,
-  });
+  if (!sim) {
+    out.push({
+      label: 'inference',
+      value: `${vs.inferenceFps.toFixed(0)}fps ${vs.inferenceMs.toFixed(0)}ms`,
+      bad: vs.ready && live && (vs.inferenceFps < 12 || vs.inferenceMs > 45),
+    });
+    out.push({
+      label: 'latency',
+      value: `${vs.latencyMs.toFixed(0)}ms  drop ${vs.dropped}`,
+      bad: vs.latencyMs > 160,
+    });
+  }
 
   // 4. What MediaPipe returned vs what survived the filters. This is the row
   //    that makes "one person read as four" visible: raw 4, people 1.
