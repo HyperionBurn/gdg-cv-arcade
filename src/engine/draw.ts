@@ -366,52 +366,48 @@ export function drawTabularNumber(
   text: string,
   x: number,
   y: number,
-  opts: TextOptions
+  /**
+   * `maxWidth` IS DELIBERATELY NOT ACCEPTED, and the type is the guard.
+   *
+   * This function draws glyph by glyph, so a forwarded `maxWidth` would fit
+   * each CHARACTER to the full width independently and therefore never fire —
+   * a number that overflowed would look fitted and keep overflowing.
+   *
+   * I handled that at runtime first, measuring and scaling the whole number.
+   * It worked and had zero callers: measured at 1024x768, the widest realistic
+   * figure in the app (a six-digit score with separators, at TYPE.score = 9vh)
+   * comes to 28% of the width. Nothing here is close to needing it.
+   *
+   * So the runtime handling is gone and the option is forbidden instead.
+   * Passing it is now a compile error rather than a silent no-op, which is the
+   * stronger of the two guarantees and the one that costs no code. If a
+   * tabular figure ever does need fitting, size it with `fitText` — passing
+   * `TRACK.number`, or whatever spacing the draw uses.
+   */
+  opts: Omit<TextOptions, 'maxWidth'>
 ): void {
   const weight = opts.weight ?? WEIGHT.black;
   const font = opts.font ?? FONTS.display;
 
+  ctx.save();
+  ctx.font = `${weight} ${opts.size}px ${font}`;
+  if (opts.letterSpacing) ctx.letterSpacing = opts.letterSpacing;
+  const digitW = ctx.measureText('0').width;
+
   const chars = [...text];
-
-  // MEASURE, THEN FIT THE WHOLE NUMBER, THEN MEASURE AGAIN.
-  //
-  // `maxWidth` has to be handled here rather than left to the per-glyph
-  // `drawText` calls below. Forwarded as-is it would fit each CHARACTER to the
-  // full width independently — which never fires, so a number that overflows
-  // would silently keep overflowing while looking like it had been fitted.
-  let size = opts.size;
-  let digitW = 0;
-  let widths: number[] = [];
-  let total = 0;
-
-  const measure = (): void => {
-    ctx.save();
-    ctx.font = `${weight} ${size}px ${font}`;
-    if (opts.letterSpacing) ctx.letterSpacing = opts.letterSpacing;
-    digitW = ctx.measureText('0').width;
-    widths = chars.map((c) => (c >= '0' && c <= '9' ? digitW : ctx.measureText(c).width));
-    total = widths.reduce((a, b) => a + b, 0);
-    ctx.restore();
-  };
-
-  measure();
-  if (opts.maxWidth !== undefined && opts.maxWidth > 0 && total > opts.maxWidth) {
-    size = Math.max(1, size * (opts.maxWidth / total));
-    measure();
-  }
+  const widths = chars.map((c) => (c >= '0' && c <= '9' ? digitW : ctx.measureText(c).width));
+  const total = widths.reduce((a, b) => a + b, 0);
+  ctx.restore();
 
   const align = opts.align ?? 'center';
   let cursor = align === 'right' ? x - total : align === 'center' ? x - total / 2 : x;
 
   // Each glyph is centred in its own fixed-width cell, so '1' sits where '8'
   // would and the number stops dancing as it rolls.
-  //
-  // `maxWidth` is stripped from the per-glyph options for the reason above.
-  const glyphOpts = { ...opts, size, align: 'center' as const, maxWidth: undefined };
   for (let i = 0; i < chars.length; i++) {
     const c = chars[i]!;
     const w = widths[i]!;
-    drawText(ctx, c, cursor + w / 2, y, glyphOpts);
+    drawText(ctx, c, cursor + w / 2, y, { ...opts, align: 'center' });
     cursor += w;
   }
 }

@@ -131,7 +131,8 @@ vh(v, units)                                  // vh units -> logical px
 drawText(ctx, text, x, y, { size, maxWidth?, color?, font?, weight?, align?,
                             baseline?, letterSpacing?, alpha?, shadow?,
                             shadowColor?, knockout? })
-drawTabularNumber(ctx, text, x, y, opts)      // same opts; fixed digit advance
+drawTabularNumber(ctx, text, x, y, opts)      // same opts MINUS maxWidth;
+                                              // fixed digit advance
 measureText(ctx, text, size, weight?, font?, letterSpacing?)
 measureTabularNumber(ctx, text, size, weight?, font?, letterSpacing?)
 fitText(ctx, text, maxWidth, size, weight?, font?, letterSpacing?)
@@ -163,6 +164,12 @@ separates type from whatever is drawn BEHIND it. It is free on paper (paper on
 paper) so it is safe to leave on anywhere; it earns its place over a camera
 ghost, a 3D track or a moving playfield. It does NOT help against something
 drawn on top — for that you want an opaque band, which is what `hudShelf` is.
+
+`drawTabularNumber` draws glyph by glyph, so it does NOT take `maxWidth` —
+forwarded per glyph it would fit each character to the full width and never
+fire, leaving an overflowing number looking fitted. The type forbids it rather
+than the runtime handling it, so passing it is a compile error. If a tabular
+figure ever needs fitting, size it with `fitText` and pass the spacing.
 
 Text shadows are capped at 8% of the type size. `SHADOW.base` is a fixed vh
 offset, which reads as a lift on a 108px score and as the word printed twice on
