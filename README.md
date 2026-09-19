@@ -572,12 +572,13 @@ rebuild to change, which is the whole point of them being on this list:
 
 Found by review and left deliberately. Each needs a call, not a patch.
 
-- **The tournament bracket is unreachable.** `src/meta/tournament.ts` is ~710
-  lines, fully built and covered by 56 tests, and `drawBracket` has exactly one
-  reference in the whole tree: its own definition. No `'tournament'` screen is
-  registered in `main.ts`, and nothing calls `start()` or `addPlayer()`.
-  PLAN.md §4's "opt in via the menu, bracket on the attract screen" was never
-  wired. Either wire it or cut it — but it currently ships as dead weight.
+- ~~**The tournament bracket is unreachable.**~~ **Wired 2026-09-19** and
+  verified end to end through the operator console: four players seeded, a real
+  2P round reporting itself into the bracket, the winner propagating, UNDO on a
+  played match, the whole thing surviving a reload, and the next pair on the
+  attract headline. Started from the BRACKET tab rather than "opt in via the
+  menu" — see the amendment in PLAN.md §4 for why. Kept in this list because
+  the call it needed has now been made, and that is worth being able to see.
 - **Highlight clips never reach a passer-by.** `attract.ts` imports nothing from
   `meta/highlights.ts`, so a clip only ever replays on the same player's own
   results screen, seconds after their own round. PLAN.md §6 wanted them looping
@@ -591,6 +592,16 @@ Found by review and left deliberately. Each needs a call, not a patch.
 - **Every abandoned initials entry defaults to `AAA`.** A queue that mostly
   walks away after seeing its score will fill the boards with indistinguishable
   rows, which undercuts the rivalry the leaderboard exists to create.
+
+  **This got more likely on 2026-09-19, not less.** SKIP now makes leaving
+  without a name one dwell instead of a 16-second wait, which is the right call
+  for throughput and was asked for directly in the playtest feedback — but the
+  cheaper an exit is, the more people take it. The options, none of which is
+  obviously right and none of which I have taken unilaterally: store nothing
+  for a skip (clean boards, but a real score vanishes); keep `AAA` (honest
+  about what happened, ugly in a column); or seed the field with the last
+  initials so confirming is cheaper than skipping. It is a product call about
+  what the leaderboard is FOR.
 
 ### Runner go/no-go — Sept 21
 
