@@ -65,6 +65,7 @@ import {
   drawText,
   drawTabularNumber,
   measureText,
+  fitText,
   graphPaper,
   stickerPill,
   vh,
@@ -2011,7 +2012,13 @@ export class RedLightGame extends GameBase {
     const h = vh(v, 13) + slam * 2;
     const y = cy - h / 2;
 
-    let size = vh(v, 8.6);
+    // THE OPENING GREEN IS A TWO-LINE BAND. See the teach line below for why
+    // the second line cannot live anywhere else. The word gives up 2.2vh for
+    // the duration of one light, and gets it back the instant the game stops
+    // explaining itself and starts shouting — which is its own piece of
+    // choreography, and free.
+    const teaching = !red && this.firstGreen;
+    let size = vh(v, teaching ? 6.4 : 8.6);
     const maxW = v.width - vh(v, 8);
     const measured = measureText(ctx, word, size, WEIGHT.extrabold);
     if (measured > maxW) size *= maxW / measured;
@@ -2030,7 +2037,7 @@ export class RedLightGame extends GameBase {
 
     // Ink on a saturated field, no shadow — an ink shadow under ink type is a
     // smudge, and the band behind it is already all the separation it needs.
-    drawText(ctx, word, v.width / 2, cy, {
+    drawText(ctx, word, v.width / 2, teaching ? cy - vh(v, 2.1) : cy, {
       size,
       color: COLORS.ink,
       weight: WEIGHT.extrabold,
@@ -2053,10 +2060,24 @@ export class RedLightGame extends GameBase {
     // definition the person who has not acted on it yet, so a behavioural gate
     // is always aimed at the wrong player. The opening green is 3.4-4.2s and
     // there is exactly one of them; that is the window.
-    if (!red && this.firstGreen) {
-      drawText(ctx, 'SWING YOUR ARMS — DO NOT WALK', v.width / 2, y + h + vh(v, 3.4), {
-        size: vh(v, 2.6),
+    //
+    // INSIDE THE BAND, NOT UNDER IT. It used to be drawn at `y + h + 3.4vh`,
+    // which is 42.3vh — and the comment on `slam` two screens up already knew
+    // that the first lane's progress figure sits at 40.9vh. So the one line
+    // that explains the game was laid directly across lane one's track, during
+    // the only light in the round when lane one's token is guaranteed to be
+    // travelling through it. Worse on a slam, which pushes the line DOWN.
+    //
+    // There is no free paper anywhere near the band: 38.9vh to 40.4vh is the
+    // whole gap, and above the band is the HUD. The band itself is the only
+    // surface on this screen that nothing moves across — a flat green field,
+    // ink on it at 6.2:1 — so the line belongs in it.
+    if (teaching) {
+      const line = 'SWING YOUR ARMS — DO NOT WALK';
+      drawText(ctx, line, v.width / 2, cy + vh(v, 3.6), {
+        size: fitText(ctx, line, maxW, vh(v, 2.5), 700, FONTS.body),
         color: COLORS.ink,
+        font: FONTS.body,
         weight: 700,
         letterSpacing: TRACK.body,
       });
