@@ -166,6 +166,11 @@ export class SixtySevenGame extends GameBase {
       gameId: 'sixtyseven',
       title: '67 SPEED',
       tagline: '<PUMP YOUR ARMS>',
+      // The same failure Red Light had: testers read an instruction to move and
+      // WALKED. There is no floor space at a stall, and stepping toward the
+      // camera changes the body scale this game divides every delta by — so
+      // walking does not score badly, it scores *nothing*.
+      avoid: "DON'T WALK — STAY PUT",
       visionMode: 'pose',
       maxPlayers: 2,
       roundSeconds: 20,

@@ -371,6 +371,63 @@ describe('countdown — the friend who is half a step behind', () => {
 /* 3. Red Light — one score per lane                                   */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* The countdown teaches, or the player concludes the camera is broken  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `GameConfig.avoid` is read off a television by somebody who is simultaneously
+ * watching a numeral count down from three. It is not a place for a sentence.
+ *
+ * The limits are not arbitrary: the pill that carries it is sized to its own
+ * text, so a long string is a wide pill, and the countdown's widest plausible
+ * screen is a 4:3 projector, not this repo's 16:9 monitor. Six words is also
+ * roughly what a person reads off a TV mid-queue before looking back at the
+ * numeral — the same figure the invitation badge was written to.
+ */
+describe('the gotcha line stays readable at three metres', () => {
+  const withAvoid = GAMES.filter(([, c]) => c.avoid);
+
+  test('at least one game declares one — the field is not dead code', () => {
+    assert.ok(withAvoid.length >= 1);
+  });
+
+  for (const [name, cfg] of GAMES) {
+    const avoid = cfg.avoid;
+    if (!avoid) continue;
+
+    test(`${name}: short enough to read while counting down`, () => {
+      assert.ok(
+        avoid.length <= 30,
+        `${name} avoid is ${avoid.length} chars — the pill will run wide on 4:3`
+      );
+      assert.ok(
+        avoid.split(/\s+/).length <= 6,
+        `${name} avoid is ${avoid.split(/\s+/).length} words — nobody reads that off a TV`
+      );
+    });
+
+    test(`${name}: says something the tagline does not`, () => {
+      // Two lines one above the other saying the same thing is worse than one,
+      // because the player spends the second line working out that it is a
+      // repeat rather than reading the numeral.
+      assert.notEqual(avoid, cfg.tagline);
+      assert.ok(
+        !cfg.tagline.toUpperCase().includes(avoid.toUpperCase()),
+        `${name}: the tagline already contains it verbatim`
+      );
+    });
+
+    test(`${name}: is the avoidance, not a second instruction`, () => {
+      // The tagline directly above already carries the positive instruction and
+      // owns the brand's bracket form. A second bracketed line reads as a
+      // second game.
+      assert.ok(!avoid.includes('<'), `${name}: brackets belong to the tagline`);
+      assert.equal(avoid, avoid.toUpperCase(), `${name}: caps, like every pill`);
+    });
+  }
+});
+
 describe('Red Light — one score per lane, not one score', () => {
   const racer = (lane: number, progress: number, finishedWith = 0): ScorableRacer => ({
     lane,

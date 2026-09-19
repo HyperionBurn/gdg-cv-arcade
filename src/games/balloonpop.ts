@@ -264,6 +264,11 @@ export class BalloonPopGame extends GameBase {
       gameId: 'balloonpop',
       title: 'BALLOON POP',
       tagline: '<POP THEM WITH YOUR HANDS>',
+      // The arming line. `drawArmHint` says this in-round, but only once the
+      // round is already running and only to a player standing with their
+      // hands down — by which point they have spent several seconds watching
+      // a grey field ignore them.
+      avoid: 'GREY MEANS TOO LOW',
       visionMode: 'pose',
       maxPlayers: 2,
       roundSeconds: 30,

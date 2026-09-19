@@ -27,6 +27,7 @@ import { audio } from '../engine/audio';
 import {
   clearFrame,
   drawText,
+  fitText,
   vh,
   progressBar,
   roundRect,
@@ -65,6 +66,28 @@ export interface GameConfig {
   title: string;
   /** One line, shown during the countdown. Must explain the game completely. */
   tagline: string;
+  /**
+   * THE ONE THING THAT MAKES A NEW PLAYER THINK THE GAME IS BROKEN.
+   *
+   * Not a second tagline and not a tip. Every game here has at most one rule
+   * that, unmet, produces *silence* rather than a wrong result — balloons that
+   * will not pop, an arm-pump game that ignores you because you walked. A
+   * player who gets a wrong result learns; a player who gets nothing concludes
+   * the camera is broken and leaves, and the queue behind them watches them do
+   * it.
+   *
+   * Four or five words. It is read off a television by somebody who is also
+   * watching a numeral count down, and it is phrased as the AVOIDANCE, because
+   * the tagline directly above it already carries the positive instruction.
+   *
+   * OMIT IT when the game teaches the rule in the moment and teaches it well.
+   * Rhythm pops `<LEFT!>` on a wrong-fist reach and leaves the note live;
+   * Runner is fully playable during the countdown, which is a better tutorial
+   * than any sentence. Pose Match's meter is red / yellow / green. A line on
+   * the countdown for any of those is clutter charged against the three games
+   * that genuinely need one.
+   */
+  avoid?: string;
   visionMode: VisionMode;
   maxPlayers: number;
   roundSeconds: number;
@@ -1072,8 +1095,13 @@ export abstract class GameBase implements Screen {
       weight: 600,
       letterSpacing: '0.18em',
     });
+    // FITTED, because the fair's television is not this developer's monitor.
+    // MEASURED across the plausible hardware: every tagline clears 16:9 with
+    // room, but on a 4:3 or 5:4 projector — the thing a club fair actually
+    // gets handed — Red Light's runs to 88% of the width and Pose Match's and
+    // Rhythm's to ~75%. `fitText` is a no-op until it isn't.
     drawText(ctx, this.config.tagline, v.width / 2, v.height * 0.66, {
-      size: vh(v, 2.2),
+      size: fitText(ctx, this.config.tagline, v.width - vh(v, 8), vh(v, 2.2), 400, FONTS.body),
       // Sits over the pre-round camera ghost at its strongest.
       knockout: true,
       color: COLORS.ink,
@@ -1244,7 +1272,7 @@ export abstract class GameBase implements Screen {
     ctx.restore();
 
     drawText(ctx, this.config.tagline, v.width / 2, v.height * 0.74, {
-      size: vh(v, 3),
+      size: fitText(ctx, this.config.tagline, v.width - vh(v, 8), vh(v, 3), 600, FONTS.body),
       // Sits over the pre-round camera ghost at its strongest.
       knockout: true,
       color: COLORS.text,
@@ -1283,6 +1311,28 @@ export abstract class GameBase implements Screen {
         // thing on the roster — and a badge that also moved would be two
         // things competing for the same second of attention.
         tilt: -4,
+      });
+    }
+
+    // THE GOTCHA, UNDER THE TAGLINE. See `GameConfig.avoid`.
+    //
+    // RED, and a pill rather than a line. Red is already this app's colour for
+    // the thing that costs you — OUT, NOT YET, the bombs — so a passer-by has
+    // learned it before they reach this screen. The pill is the same object as
+    // the yellow action badge above; they read as a matched pair, DO THIS and
+    // NOT THIS, which is the whole content of a first round.
+    //
+    // Below the tagline at 0.74 and above nothing, so it cannot collide: the
+    // numeral is at 0.45 and the badges are at 0.2.
+    if (this.config.avoid) {
+      labelPill(ctx, v, v.width / 2, v.height * 0.84, this.config.avoid, vh(v, 5.2), {
+        size: vh(v, 2.6),
+        fill: COLORS.red,
+        color: COLORS.ink,
+        outline: COLORS.ink,
+        outlineWidth: vh(v, STROKE.base),
+        shadow: vh(v, SHADOW.base),
+        tilt: 3,
       });
     }
 

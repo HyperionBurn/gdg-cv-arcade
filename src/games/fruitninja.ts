@@ -332,6 +332,9 @@ export class FruitNinjaGame extends GameBase {
       gameId: 'fruitninja',
       title: 'FRUIT NINJA',
       tagline: '<SLICE THE FRUIT — DODGE THE BOMBS>',
+      // "Dodge" says avoid; it does not say what happens if you do not, and for
+      // 1.2s afterwards the blades genuinely stop working. See BOMB_STUN_MS.
+      avoid: 'BOMBS FREEZE YOUR HANDS',
       visionMode: 'pose',
       maxPlayers: 2,
       roundSeconds: 45,
