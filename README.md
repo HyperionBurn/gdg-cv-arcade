@@ -416,8 +416,14 @@ All driven deterministically via `window.__arcade.tick()`:
   medium+wide 165, slow+wide 130, fast+narrow 50, frantic+narrow 45**. Big
   committed swings win, and mashing *harder* pays *less* — which is the shape it
   should be
-- **Balloon Pop**: hands down = **0**; hand on an armed balloon = **+66**; hand on
-  a balloon below the shoulder line = **+0**
+- **Balloon Pop**: hands down = **0** (re-confirmed 2026-09-19 after the HUD
+  shelf landed). The per-hand figures that used to sit here — "+66 on an armed
+  balloon, +0 below the shoulder line" — have been replaced by
+  `tests/balloonpop.test.ts`, which checks the rule itself rather than one
+  sample of it. They could not be re-run: `PoseSimulator` eases a wrist toward
+  a target over several seconds and cannot place it at a chosen point, so
+  driving a hand onto a specific balloon is not something the harness can do,
+  and a measurement nobody can repeat is a claim rather than a check.
 - **Red Light**: 0 false eliminations in a full 45s round; progress gained only
   during green (0.00% change during red); body-scale fair to ~2% across a 1.6×
   height ratio.

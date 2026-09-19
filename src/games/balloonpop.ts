@@ -104,6 +104,36 @@ const ARM_FALLBACK = 0.55;
 const BALLOON_COLORS = [COLORS.blue, COLORS.red, COLORS.green] as const;
 
 /**
+ * IS THIS BALLOON IN PLAY?
+ *
+ * The whole visible contract of this game in one expression: a balloon can be
+ * popped exactly when it is between the shelf and the player's shoulder line.
+ * Above the shelf it is behind an opaque band; below the shoulder line it is
+ * drawn flat grey. Both states are deliberate and both are visible — the rule
+ * a player learns is "if you can see it in colour, you can pop it".
+ *
+ * EXTRACTED BECAUSE IT HAD NO TEST AND IS THE GAME'S PROMISE. The arming line
+ * was only ever recorded as a hand-run measurement in README.md, which cannot
+ * be reproduced from the harness — `PoseSimulator` eases a wrist toward a
+ * target over several seconds and cannot place it at a chosen point, so
+ * driving a hand onto a specific balloon is not something the simulator can
+ * do. The condition itself is two comparisons, so it belongs here where it can
+ * be checked directly. Same move as `laneScore` in redlight.ts, for the same
+ * reason.
+ *
+ * `shelfBottom` is `hudBottom(v)`; `armLine` is the player's own shoulder line
+ * plus ARM_OFFSET_TORSOS of forgiveness, or ARM_FALLBACK of the screen before
+ * a body has been seen.
+ */
+export function isPoppable(balloonY: number, armLine: number, shelfBottom: number): boolean {
+  // Below the shoulder line: grey, and not yet in play.
+  if (balloonY > armLine) return false;
+  // Behind the HUD band: retired, and no longer in play.
+  if (balloonY < shelfBottom) return false;
+  return true;
+}
+
+/**
  * How long into a round the "hands up" hint can still appear.
  *
  * Long enough for somebody who spent the countdown reading the tagline rather
@@ -685,7 +715,9 @@ export class BalloonPopGame extends GameBase {
         // is not a line at the top of the screen, it is an unwritten entry, and
         // the two paths disagreeing is what made balloons look armed while
         // being unhittable.
-        if (b.y > (this.armLine[slot] || fc.v.height * ARM_FALLBACK)) continue;
+        if (!isPoppable(b.y, this.armLine[slot] || fc.v.height * ARM_FALLBACK, this.hudBottom(fc.v))) {
+          continue;
+        }
 
         // The drawn balloon, plus a fixed body-relative margin. Still forgiving
         // — this game is about inclusion, not precision — but the forgiveness
