@@ -1038,8 +1038,19 @@ export class RunnerGame extends GameBase {
     // enough to sit in the gap; at a size anyone can actually read it is ~300px
     // wide and runs straight under JUMP and SLIDE, which sit at +-34% of the
     // width with a 4.2vh pill body. Pills bottom out at height-6.15vh.
+    // KNOCKOUT, like every other HUD string in this file.
+    //
+    // Runner had none at all — the only game whose playfield is a full-bleed
+    // 3D scene, and therefore the one where it matters most. Balloon Pop, whose
+    // balloons merely drift past, has four. Every label here sits on a moving
+    // track with obstacles sliding under it; the speed readout in particular
+    // spends a good part of each round on top of a green pad.
+    //
+    // On paper the knockout is paper-on-paper and draws nothing, so it costs
+    // two strokeText calls and only shows up when it is earning its place.
     drawText(ctx, '<STEP LEFT OR RIGHT>', cx, y + vh(v, 5.6), {
       size: vh(v, 2),
+      knockout: true,
       color: COLORS.ink,
       font: FONTS.body,
       weight: WEIGHT.bold,
@@ -1097,6 +1108,7 @@ export class RunnerGame extends GameBase {
     // were supposed to be teaching. The pill still reads as not-firing from
     // its paper fill, thin outline and missing lift.
     drawText(ctx, label, cx, cy, {
+      knockout: true,
       size: vh(v, 1.9),
       color: COLORS.ink,
       font: FONTS.body,
@@ -1156,6 +1168,7 @@ export class RunnerGame extends GameBase {
     // decimal readout shuffles sideways the whole round.
     drawTabularNumber(ctx, s.speed.toFixed(1), x, top + height + vh(v, 3), {
       size: vh(v, 2.4),
+      knockout: true,
       color: COLORS.ink,
       font: FONTS.body,
       weight: WEIGHT.black,
@@ -1163,6 +1176,7 @@ export class RunnerGame extends GameBase {
     });
     drawText(ctx, 'M/S', x, top + height + vh(v, 5.5), {
       size: vh(v, 1.8),
+      knockout: true,
       color: COLORS.ink,
       font: FONTS.body,
       weight: WEIGHT.bold,
@@ -1213,6 +1227,7 @@ export class RunnerGame extends GameBase {
       shadow: running ? vh(v, SHADOW.base) : 0,
     });
     drawTabularNumber(ctx, text, 0, 0, {
+      knockout: true,
       size,
       color: COLORS.ink,
       font: FONTS.body,
@@ -1223,6 +1238,7 @@ export class RunnerGame extends GameBase {
 
     const label = !running ? 'CLEAR TO SPEED UP' : maxed ? 'MAX SPEED' : `${s.streak} CLEAN`;
     drawText(ctx, label, x, y + h * 0.5 + vh(v, 2.6), {
+      knockout: true,
       size: vh(v, 1.9),
       color: COLORS.ink,
       font: FONTS.body,
