@@ -256,13 +256,19 @@ export class RigCheckScreen implements Screen {
         <button id="rig-reset">Reset counters</button>
       </div>
       <hr>
-      <div class="rig-stat"><span>resolution</span><b>${cam.width}×${cam.height}</b></div>
+      <div class="rig-stat"><span>resolution</span><b>${
+        // `—` under sim: there is no camera to have a resolution, and `0×0`
+        // reads as a camera that failed to open. Built once rather than
+        // updated, because it cannot change without a re-open.
+        isSimEnabled() ? '—' : `${cam.width}×${cam.height}`
+      }</b></div>
       <div class="rig-stat"><span>delegate</span><b>${stats.delegate ?? '—'}</b></div>
       <div class="rig-stat"><span>inference</span><b id="rig-fps">—</b></div>
       <div class="rig-stat"><span>latency</span><b id="rig-lat">—</b></div>
       <div class="rig-stat"><span>dropped</span><b id="rig-drop">—</b></div>
       <div class="rig-stat"><span>camera</span><b id="rig-cam">—</b></div>
       <div class="rig-stat"><span>vision</span><b id="rig-ready">—</b></div>
+      <div class="rig-mode" id="rig-mode"></div>
       <div class="rig-fault" id="rig-fault"></div>
       <div class="rig-stat"><span>build</span><b>${__BUILD_STAMP__}</b></div>
       <hr>
@@ -308,9 +314,23 @@ export class RigCheckScreen implements Screen {
     const fps = this.panel.querySelector('#rig-fps');
     const lat = this.panel.querySelector('#rig-lat');
     const drop = this.panel.querySelector('#rig-drop');
-    if (fps) fps.textContent = `${s.inferenceFps.toFixed(0)} fps / ${s.inferenceMs.toFixed(0)}ms`;
-    if (lat) lat.textContent = `${s.latencyMs.toFixed(0)}ms`;
-    if (drop) drop.textContent = String(s.dropped);
+
+    // A MEASUREMENT OF NOTHING IS NOT ZERO, IT IS ABSENT.
+    //
+    // Under `?sim=1` these read `0 fps / 0ms`, `0ms`, `0×0` — each true, and
+    // each indistinguishable from a pipeline that has broken. `—` is the
+    // placeholder this panel already uses for `delegate`, and it is the honest
+    // answer: there is no camera to measure, on purpose. Same argument as the
+    // `d` overlay, which suppresses these rows outright; here the rows stay so
+    // the panel does not change height as a marshal switches modes.
+    const simDash = isSimEnabled();
+    if (fps) {
+      fps.textContent = simDash
+        ? '—'
+        : `${s.inferenceFps.toFixed(0)} fps / ${s.inferenceMs.toFixed(0)}ms`;
+    }
+    if (lat) lat.textContent = simDash ? '—' : `${s.latencyMs.toFixed(0)}ms`;
+    if (drop) drop.textContent = simDash ? '—' : String(s.dropped);
 
     // THE WHOLE POINT OF A DIAGNOSTIC SCREEN IS THAT IT NAMES THE FAULT.
     //
@@ -323,25 +343,57 @@ export class RigCheckScreen implements Screen {
     const camEl = this.panel.querySelector('#rig-cam');
     const readyEl = this.panel.querySelector('#rig-ready');
     const fault = this.panel.querySelector('#rig-fault');
-    if (camEl) camEl.textContent = camera.isLive() ? `live ${cam.width}×${cam.height}` : cam.status;
-    if (readyEl) readyEl.textContent = s.ready ? `ready (${s.delegate ?? '?'})` : 'NOT READY';
+    // SIMULATOR IS NOT A FAULT, AND THIS SCREEN EXISTS TO TELL FAULTS APART.
+    //
+    // The day-of card sends a marshal to `?sim=1` when the webcam dies, and
+    // rig check is the next key they press. Everything below then reported the
+    // truth in the most alarming way available: a red CAMERA: idle — no frames
+    // are being captured, vision NOT READY, resolution 0×0. All accurate, and
+    // between them they bury the one number the marshal came here for.
+    //
+    // `debug.ts` was fixed for exactly this an hour earlier and this screen was
+    // not, which is worse than either being wrong on its own: the overlay says
+    // the camera is deliberately unused and the rig check calls it a fault, on
+    // the same machine, about the same camera.
+    const sim = isSimEnabled();
+
+    if (camEl) {
+      camEl.textContent = sim
+        ? 'not used (sim)'
+        : camera.isLive()
+          ? `live ${cam.width}×${cam.height}`
+          : cam.status;
+    }
+    if (readyEl) {
+      readyEl.textContent = sim ? 'not used (sim)' : s.ready ? `ready (${s.delegate ?? '?'})` : 'NOT READY';
+    }
 
     if (fault) {
       // Ordered by what has to be true first: no camera means the fps reading
       // is meaningless, and no worker means framing advice is premature.
-      const msg = cam.error
-        ? `CAMERA: ${cam.error}`
-        : !camera.isLive()
-          ? `CAMERA: ${cam.status} — no frames are being captured`
-          : s.error
-            ? `VISION: ${s.error}`
-            : !s.ready
-              ? 'VISION: worker has not finished loading the model'
-              : s.inferenceFps < 1
-                ? 'VISION: model loaded but no frames are coming back'
-                : (s.warning ?? '');
+      const msg = sim
+        ? ''
+        : cam.error
+          ? `CAMERA: ${cam.error}`
+          : !camera.isLive()
+            ? `CAMERA: ${cam.status} — no frames are being captured`
+            : s.error
+              ? `VISION: ${s.error}`
+              : !s.ready
+                ? 'VISION: worker has not finished loading the model'
+                : s.inferenceFps < 1
+                  ? 'VISION: model loaded but no frames are coming back'
+                  : (s.warning ?? '');
       fault.textContent = msg;
       (fault as HTMLElement).style.display = msg ? 'block' : 'none';
+    }
+
+    // A banner saying what mode this is, so "not used (sim)" above reads as an
+    // answer rather than as a second fault.
+    const mode = this.panel.querySelector('#rig-mode');
+    if (mode) {
+      mode.textContent = sim ? 'SIMULATOR — no camera by design' : '';
+      (mode as HTMLElement).style.display = sim ? 'block' : 'none';
     }
   }
 
@@ -530,9 +582,26 @@ export class RigCheckScreen implements Screen {
     const primary = this.tracker.getPrimary();
     const verdict = this.judgeFraming(primary);
 
+    // CENTRED IN THE SPACE THE PANEL LEAVES, NOT ON THE CANVAS.
+    //
+    // The control panel is a DOM element pinned to the right, about a third of
+    // the width at 1024. The banner was centred on the full canvas, so it ran
+    // underneath it and the detail line lost its last word: the verdict read
+    // "TAPE THE FLOOR HERE AND LOCK THE LID" with ANGLE. hidden behind the
+    // panel — on the screen whose entire job is telling an operator how to
+    // place the camera before doors open.
+    //
+    // Measured off the element rather than hard-coded from the CSS, so moving
+    // or resizing the panel cannot desynchronise the two. `getBoundingClientRect`
+    // is in CSS pixels and the canvas is laid out in the same logical space.
     const boxH = vh(v, 13);
-    const boxW = Math.min(v.width * 0.62, vh(v, 90));
-    const x = (v.width - boxW) / 2;
+    const panelLeft = this.panel
+      ? this.panel.getBoundingClientRect().left
+      : v.width;
+    const usable = Math.max(vh(v, 40), Math.min(v.width, panelLeft - vh(v, 2)));
+    const boxW = Math.min(usable * 0.94, vh(v, 90));
+    const cx = usable / 2;
+    const x = cx - boxW / 2;
     const y = vh(v, 3);
 
     // THE VERDICT IS THE SURFACE, NOT THE OUTLINE.
@@ -552,13 +621,15 @@ export class RigCheckScreen implements Screen {
       shadow: vh(v, SHADOW.lifted),
     });
 
-    drawText(ctx, verdict.headline, v.width / 2, y + boxH * 0.34, {
+    drawText(ctx, verdict.headline, cx, y + boxH * 0.34, {
       size: vh(v, 4.2),
+      maxWidth: boxW - vh(v, 4),
       color: COLORS.ink,
       letterSpacing: '0.04em',
     });
-    drawText(ctx, verdict.detail, v.width / 2, y + boxH * 0.68, {
+    drawText(ctx, verdict.detail, cx, y + boxH * 0.68, {
       size: vh(v, 2),
+      maxWidth: boxW - vh(v, 4),
       color: COLORS.ink,
       font: FONTS.body,
       weight: WEIGHT.bold,

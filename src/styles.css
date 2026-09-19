@@ -210,6 +210,22 @@ body.kiosk {
 
 /* The named fault, when there is one. Red surface with ink on it — the kit's
    rule is that colour is a surface and text on it is ink, never the reverse. */
+/* Information, not a fault — so deliberately not the red box below.
+   Blue is this kit's "info" colour and ink on it is 4.6:1. */
+.rig-mode {
+  display: none;
+  margin-top: 6px;
+  padding: 7px 9px;
+  border: 2px solid var(--ink);
+  border-radius: 6px;
+  background: var(--blue);
+  color: var(--paper);
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
 .rig-fault {
   display: none;
   margin-top: 6px;
