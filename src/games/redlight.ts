@@ -112,6 +112,57 @@ function markOn(fill: string): string {
  */
 const LANES = 5;
 
+/**
+ * THE ELIMINATION DECISION, FOR ONE RACER, FOR ONE FRAME.
+ *
+ * Extracted for the same reason `laneScore` was: this is the rule the whole
+ * game is judged on, it is four lines, and it had no test. What covered it was
+ * the smoke probe — which is a real end-to-end check and deliberately tolerant
+ * ("one honest player being caught is within the signal's spread") — and a
+ * README line reading "0 false eliminations in a full 45s round", measured
+ * once. Neither pins the three properties that decide whether this game is
+ * funny or infuriating:
+ *
+ *   BREACH RESETS ON ANY STILL FRAME. You have to move CONTINUOUSLY for
+ *   `breachSec`. A noise spike cannot accumulate across the still frames
+ *   between spikes, which is the entire reason the game does not eliminate
+ *   people for standing still.
+ *
+ *   NOTHING IS JUDGED BEFORE THE GRACE EXPIRES. `judging` is false for
+ *   `graceSec` after the light turns, because judging the instant it turns
+ *   punishes reaction time rather than obedience.
+ *
+ *   A NEWLY-ADMITTED PLAYER IS IMMUNE. Walking into frame must never mean
+ *   walking straight out of the round.
+ *
+ * `settled` is `settle <= 0` — the immunity has expired. Returns the per-frame
+ * near-miss flag rather than latching it; the caller ORs it, because a near
+ * miss is worth celebrating for the rest of the light.
+ */
+export function judgeRedLight(
+  breach: number,
+  o: {
+    moving: boolean;
+    judging: boolean;
+    settled: boolean;
+    dt: number;
+    breachSec: number;
+  }
+): { breach: number; eliminate: boolean; nearMiss: boolean } {
+  // Still immune: carry the breach unchanged rather than resetting it, which
+  // is what the guard this replaced did by skipping the branch entirely.
+  if (!o.settled) return { breach, eliminate: false, nearMiss: false };
+
+  const next = o.moving ? breach + o.dt : 0;
+  return {
+    breach: next,
+    eliminate: o.judging && next >= o.breachSec,
+    // Inside the grace window movement is not a foul, but it IS the near miss
+    // worth celebrating when they survive the light.
+    nearMiss: o.moving && !o.judging,
+  };
+}
+
 /** Seconds a newly-seen player is immune. Walking in must never mean walking out. */
 const SETTLE_SEC = 0.6;
 
@@ -950,16 +1001,17 @@ export class RedLightGame extends GameBase {
           r.wobble = Math.min(1, r.wobble + drive * dt * 4);
         }
         if (r.progress >= 100) this.win(fc, r, true);
-      } else if (this.light === 'red' && r.settle <= 0) {
-        if (moving) {
-          r.breach += dt;
-          // Inside the grace window this is not a foul, but it IS the near
-          // miss we want to celebrate when they survive the light.
-          if (!judging) r.nearMiss = true;
-        } else {
-          r.breach = 0;
-        }
-        if (judging && r.breach >= tun.breachSec) this.eliminate(fc, r);
+      } else if (this.light === 'red') {
+        const j = judgeRedLight(r.breach, {
+          moving,
+          judging,
+          settled: r.settle <= 0,
+          dt,
+          breachSec: tun.breachSec,
+        });
+        r.breach = j.breach;
+        if (j.nearMiss) r.nearMiss = true;
+        if (j.eliminate) this.eliminate(fc, r);
       }
     }
 
