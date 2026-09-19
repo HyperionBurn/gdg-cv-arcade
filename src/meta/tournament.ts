@@ -18,8 +18,8 @@
  */
 
 import type { GameId } from './leaderboard';
-import { vh, drawText, roundRect, type Viewport } from '../engine/draw';
-import { COLORS, FONTS, PLAYER_COLORS, withAlpha } from '../shell/theme';
+import { vh, drawText, roundRect, stickerCard, type Viewport } from '../engine/draw';
+import { COLORS, FONTS, PLAYER_COLORS, SHADOW, STROKE, WEIGHT } from '../shell/theme';
 
 /* ------------------------------------------------------------------ *
  * Types
@@ -750,9 +750,9 @@ export function drawBracket(
   if (bracket.rounds.length === 0) {
     drawText(ctx, 'NO BRACKET YET', x0 + w / 2, y0 + h / 2, {
       size: vh(v, 3),
-      color: COLORS.textFaint,
+      color: COLORS.ink,
       font: FONTS.body,
-      weight: 600,
+      weight: WEIGHT.bold,
       letterSpacing: '0.2em',
     });
     return;
@@ -781,7 +781,10 @@ export function drawBracket(
   /* --- connectors, drawn first so cards sit on top --- */
   ctx.save();
   ctx.lineWidth = Math.max(1, vh(v, 0.18));
-  ctx.strokeStyle = withAlpha(COLORS.text, 0.14);
+  // GRID, not ink at 14%. A see-through brand colour is the first thing the
+  // kit rules out, and `grid` is the exact weight this wants: structure you
+  // read past rather than structure you read.
+  ctx.strokeStyle = COLORS.grid;
   ctx.beginPath();
   for (let r = 0; r + 1 < cols; r++) {
     const round = bracket.rounds[r];
@@ -805,10 +808,10 @@ export function drawBracket(
     const round = bracket.rounds[r];
     if (!round) continue;
     drawText(ctx, round.name, colX(r) + cardW / 2, y0 + headerH * 0.4, {
-      size: vh(v, 1.7),
-      color: COLORS.textFaint,
+      size: vh(v, 1.9),
+      color: COLORS.ink,
       font: FONTS.body,
-      weight: 700,
+      weight: WEIGHT.bold,
       letterSpacing: '0.18em',
     });
   }
@@ -825,37 +828,41 @@ export function drawBracket(
       const cy = centreY(r, m.indexInRound);
       const top = cy - cardH / 2;
 
-      // Card surface is a tint of the TEXT colour, not a named surface colour.
-      // `COLORS.bgRaised` is only distinguishable from `COLORS.bg` on a dark
-      // art direction; a few percent of ink reads as a raised card on paper and
-      // as a raised card on black, so the bracket survives a retheme.
-      ctx.save();
-      ctx.fillStyle = withAlpha(COLORS.text, m.done ? 0.03 : 0.07);
-      roundRect(ctx, cx, top, cardW, cardH, vh(v, 0.7));
-      ctx.fill();
-      ctx.strokeStyle = withAlpha(COLORS.text, 0.12);
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.restore();
+      // A STICKER, like every other card in the app. The original drew a few
+      // percent of ink as a surface and a 12% stroke as an edge — a
+      // see-through colour twice over, written before the paper/ink pass and
+      // never converted because nothing ever drew this.
+      //
+      // The match that is ON NEXT is the only thing on a bracket anybody is
+      // looking for across a room, so it gets the full lift: thick outline and
+      // a hard shadow. Everything else sits flat on the page.
+      const radius = vh(v, 0.7);
+      stickerCard(ctx, v, cx, top, cardW, cardH, {
+        radius,
+        fill: COLORS.paper,
+        outline: COLORS.ink,
+        outlineWidth: vh(v, m.live ? STROKE.thick : STROKE.thin),
+        shadow: m.live ? vh(v, SHADOW.lifted) : 0,
+        shadowColor: COLORS.ink,
+      });
 
-      // Live match emphasis: three concentric translucent strokes read as a
-      // glow from 3m and cost three plain strokes, not three blurs.
+      // Live match: a full-width accent bar along the top edge, the same
+      // object the menu tiles use. Replaces three concentric translucent
+      // strokes pretending to be a glow — which is a blur with extra steps,
+      // and invisible on paper anyway.
       if (m.live) {
         ctx.save();
-        for (let pass = 0; pass < 3; pass++) {
-          const grow = vh(v, 0.9) * (1 - pass / 3);
-          ctx.lineWidth = Math.max(1, vh(v, 0.22) + grow * 0.5);
-          ctx.strokeStyle = withAlpha(accent, (0.1 + pass * 0.16) * pulse);
-          roundRect(ctx, cx - grow, top - grow, cardW + grow * 2, cardH + grow * 2, vh(v, 0.7) + grow);
-          ctx.stroke();
-        }
+        roundRect(ctx, cx, top, cardW, cardH, radius);
+        ctx.clip();
+        ctx.fillStyle = accent;
+        ctx.fillRect(cx, top, cardW, vh(v, 0.9) * (0.75 + pulse * 0.25));
         ctx.restore();
       }
 
       // Divider between the two slots.
       ctx.save();
-      ctx.strokeStyle = withAlpha(COLORS.text, 0.1);
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = COLORS.grid;
+      ctx.lineWidth = Math.max(1, vh(v, STROKE.thin));
       ctx.beginPath();
       ctx.moveTo(cx, cy);
       ctx.lineTo(cx + cardW, cy);
@@ -865,37 +872,42 @@ export function drawBracket(
       for (let i = 0; i < 2; i++) {
         const s = m.slots[i as 0 | 1];
         const sy = top + slotH * (i + 0.5);
-        const color = s.isBye || s.pending ? COLORS.textFaint : COLORS.text;
-        // Alpha, not a second colour: some art directions alias `textDim` to
-        // `text`, and a loser that reads exactly like a winner is the one
-        // mistake a bracket on a wall cannot afford.
-        const slotAlpha = s.pending ? 0.5 : s.lost ? 0.42 : 1;
+
+        // THREE STATES, THREE TREATMENTS, NO ALPHA.
+        //
+        // A bye or a "winner of match 3" is genuinely a placeholder, which is
+        // the one thing `muted` is for. A LOSER is not a placeholder — they
+        // played — so they stay ink and are told apart from the winner by the
+        // winner being on a flat brand-colour surface. The original used 42%
+        // alpha for a loser and 18% alpha behind a winner, which on paper is
+        // two shades of nearly-white and the one mistake a bracket on a wall
+        // cannot afford.
+        const placeholder = s.isBye || s.pending;
 
         if (s.won) {
           ctx.save();
-          ctx.fillStyle = withAlpha(PLAYER_COLORS[i] ?? COLORS.blue, 0.18);
           roundRect(ctx, cx, top + slotH * i, cardW, slotH, vh(v, 0.5));
-          ctx.fill();
+          ctx.clip();
+          ctx.fillStyle = PLAYER_COLORS[i] ?? COLORS.blue;
+          ctx.fillRect(cx, top + slotH * i, cardW, slotH);
           ctx.restore();
         }
 
         drawText(ctx, s.label, cx + vh(v, 0.9), sy, {
           size: fontSize,
-          color,
+          color: placeholder ? COLORS.muted : COLORS.ink,
           font: FONTS.display,
-          weight: s.won ? 700 : 500,
+          weight: s.won ? WEIGHT.black : WEIGHT.medium,
           align: 'left',
-          alpha: slotAlpha,
         });
 
         if (s.score !== null) {
           drawText(ctx, String(s.score), cx + cardW - vh(v, 0.9), sy, {
             size: fontSize * 0.95,
-            color: s.won ? COLORS.yellow : COLORS.text,
+            color: COLORS.ink,
             font: FONTS.mono,
-            weight: 700,
+            weight: WEIGHT.bold,
             align: 'right',
-            alpha: slotAlpha,
           });
         }
       }
@@ -916,10 +928,10 @@ export function drawBracket(
       letterSpacing: '0.12em',
     });
     drawText(ctx, 'CHAMPION', fx, fy + vh(v, 6), {
-      size: vh(v, 1.6),
-      color: COLORS.textDim,
+      size: vh(v, 1.8),
+      color: COLORS.ink,
       font: FONTS.body,
-      weight: 700,
+      weight: WEIGHT.bold,
       letterSpacing: '0.3em',
     });
   }

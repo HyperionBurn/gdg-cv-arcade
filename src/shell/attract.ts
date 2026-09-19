@@ -52,6 +52,7 @@ import { Projection } from '../engine/projection';
 import { drawPose, SKELETON_STYLES } from '../engine/skeleton';
 import { FACTIONS, leaderboard } from '../meta/leaderboard';
 import { MENU_TILES, isTileAvailable, type MenuTile } from './menu';
+import { drawBracket, tournament } from '../meta/tournament';
 import {
   COLORS,
   DUR,
@@ -932,6 +933,65 @@ export class AttractScreen implements Screen {
    * A seven-column table is unreadable from 3m; one game filling a whole card
    * is not, and cycling adds the motion that catches a passing eye.
    */
+  /**
+   * The bracket, in the rail's card, on its turn in the cycle.
+   *
+   * WHAT THE CROWD NEEDS IS ONE LINE, and it is not the tree. "WAS vs AMY,
+   * semi-final" is what makes two people put their drinks down; the tree is
+   * what makes everyone else understand why. So the line is the headline and
+   * the bracket fills whatever is left.
+   */
+  private drawBracketRail(
+    fc: FrameContext,
+    box: ReturnType<AttractScreen['frame']>
+  ): void {
+    const { ctx, v } = fc;
+    const { railX: x, railW: w, railY: y, railH: h } = box;
+
+    stickerCard(ctx, v, x, y, w, h, {
+      fill: COLORS.paper,
+      outlineWidth: vh(v, STROKE.thick),
+      shadow: vh(v, SHADOW.lifted),
+    });
+
+    const cx = x + w / 2;
+    const bracket = tournament.toRender();
+    const champ = bracket.champion;
+    const [a, b] = tournament.nextMatchPlayers();
+
+    drawText(ctx, champ ? 'CHAMPION' : 'BRACKET', cx, y + vh(v, 4.8), {
+      size: vh(v, TYPE.label),
+      color: COLORS.ink,
+      font: FONTS.body,
+      weight: WEIGHT.bold,
+      letterSpacing: '0.3em',
+    });
+
+    // The headline. A champion once there is one, the next pair until then.
+    const headline = champ
+      ? champ.label
+      : a && b
+        ? `${a.label}  v  ${b.label}`
+        : 'WAITING FOR A RESULT';
+    drawText(ctx, headline, cx, y + vh(v, 10.4), {
+      size: fitText(ctx, headline, w - vh(v, 6), vh(v, 5.2)),
+      color: COLORS.ink,
+      shadow: vh(v, SHADOW.base),
+      shadowColor: COLORS.yellow,
+      letterSpacing: TRACK.h2,
+    });
+
+    const top = y + vh(v, 14.5);
+    drawBracket(ctx, v, bracket, {
+      x: x + vh(v, 2),
+      y: top,
+      width: w - vh(v, 4),
+      height: y + h - top - vh(v, 3),
+      time: fc.time,
+      accent: COLORS.yellow,
+    });
+  }
+
   private drawLeaderboardRail(
     fc: FrameContext,
     dt: number,
@@ -946,14 +1006,32 @@ export class AttractScreen implements Screen {
     const shown = MENU_TILES.filter(isTileAvailable);
     const tiles: readonly MenuTile[] = shown.length > 0 ? shown : MENU_TILES;
 
+    // A LIVE BRACKET TAKES A TURN IN THE CYCLE.
+    //
+    // PLAN.md §4: "bracket displays on the attract screen between rounds". It
+    // shares the rail rather than taking the screen, because the other half of
+    // attract is the live silhouette and STEP IN TO PLAY — the recruitment,
+    // which a stall cannot afford to switch off for the people who are not in
+    // the tournament.
+    //
+    // FIRST in the cycle, so the moment a marshal starts one it is on screen
+    // rather than up to thirty seconds later.
+    const live = tournament.active;
+    const slots = live ? 1 + tiles.length : tiles.length;
+
     this.railTime += dt;
     if (this.railTime > RAIL_CYCLE_SEC) {
       this.railTime = 0;
       this.railIndex = this.railIndex + 1;
     }
-    this.railIndex %= tiles.length;
+    this.railIndex %= slots;
 
-    const tile = tiles[this.railIndex];
+    if (live && this.railIndex === 0) {
+      this.drawBracketRail(fc, box);
+      return;
+    }
+
+    const tile = tiles[live ? this.railIndex - 1 : this.railIndex];
     if (!tile) return;
 
     // Slide in, hold — position only. The old version cross-faded the whole

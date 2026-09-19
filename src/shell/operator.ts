@@ -41,6 +41,12 @@ import type { TrackedPlayer } from '../core/tracker';
 import { audio } from '../engine/audio';
 import { leaderboard, type GameId } from '../meta/leaderboard';
 import { tunables, type TunableSpec } from '../meta/tunables';
+import {
+  TOURNAMENT_GAMES,
+  roundName,
+  tournament,
+  type TournamentGameId,
+} from '../meta/tournament';
 import { router } from './router';
 
 /* ------------------------------------------------------------------ */
@@ -87,12 +93,13 @@ const MODIFIER_CODES = new Set([
 
 /* ------------------------------------------------------------------ */
 
-type TabId = 'tuning' | 'camera' | 'scores' | 'data';
+type TabId = 'tuning' | 'camera' | 'scores' | 'bracket' | 'data';
 
 const TABS: ReadonlyArray<{ id: TabId; label: string }> = [
   { id: 'tuning', label: 'TUNING' },
   { id: 'camera', label: 'CAMERA' },
   { id: 'scores', label: 'SCORES' },
+  { id: 'bracket', label: 'BRACKET' },
   { id: 'data', label: 'DATA' },
 ];
 
@@ -251,6 +258,8 @@ export class OperatorOverlay {
 
   private tuneRows = new Map<string, TuneRow>();
   private scoresGame: GameId = 'sixtyseven';
+  /** The game a bracket will be started on. See `buildBracket`. */
+  private bracketGame: TournamentGameId = TOURNAMENT_GAMES[0];
 
   /** Physical keys currently held. The anti-lean guard reads this. */
   private downKeys = new Set<string>();
@@ -597,6 +606,9 @@ export class OperatorOverlay {
       case 'scores':
         this.body.appendChild(this.buildScores());
         break;
+      case 'bracket':
+        this.body.appendChild(this.buildBracket());
+        break;
       case 'data':
         this.body.appendChild(this.buildData());
         break;
@@ -797,6 +809,191 @@ export class OperatorOverlay {
   private onLeaderboardChanged(): void {
     if (!this.open) return;
     if (this.tab === 'scores' || this.tab === 'data') this.renderTab();
+  }
+
+  /* ---------------- bracket ---------------- */
+
+  /**
+   * THE ONLY WAY A TOURNAMENT EVER STARTS.
+   *
+   * `meta/tournament.ts` has been a complete, tested single-elimination engine
+   * — seeding, byes, propagation, persistence, `drawBracket` — with nothing in
+   * the app able to set it running. PLAN.md §4 wants "bracket at 2pm" to be a
+   * scheduled thing the events team can post about; this is the marshal's end
+   * of that.
+   *
+   * Deliberately a console tab rather than a player-facing flow. A bracket is
+   * run BY somebody: names get typed in from a clipboard, a late arrival gets
+   * added, a match gets replayed because the camera dropped. None of that is a
+   * hand-dwell interaction, and putting it on the TV would mean a stranger
+   * could wander into it.
+   *
+   * Results arrive by themselves — `GameBase.finishRound` reports a versus
+   * round into the live bracket — so the marshal's job during play is to call
+   * the next pair up, which is the line at the top of this pane.
+   */
+  private buildBracket(): HTMLElement {
+    const pane = el('div', 'op-pane');
+    const live = tournament.active;
+
+    pane.appendChild(
+      el(
+        'p',
+        'op-hint',
+        live
+          ? 'Results report themselves when a versus round ends. A dead heat is NOT ' +
+            'advanced — the pair replays.'
+          : 'Type the players in, pick a game, START. The bracket shows on the attract ' +
+            'screen between rounds and survives a reload.'
+      )
+    );
+
+    /* --- what is on next --- */
+    if (live) {
+      const [a, b] = tournament.nextMatchPlayers();
+      const m = tournament.nextMatch();
+      const champ = tournament.champion();
+      const now = el('div', 'op-now');
+      if (champ) {
+        now.appendChild(el('span', 'op-now-label', 'CHAMPION'));
+        now.appendChild(el('span', 'op-now-match', champ.label));
+      } else if (m && a && b) {
+        const rounds = tournament.getMatches().reduce((x, y) => Math.max(x, y.round), 0) + 1;
+        now.appendChild(el('span', 'op-now-label', roundName(m.round, rounds)));
+        now.appendChild(el('span', 'op-now-match', `${a.label}  vs  ${b.label}`));
+      } else {
+        now.appendChild(el('span', 'op-now-label', 'WAITING'));
+        now.appendChild(el('span', 'op-now-match', 'no playable match'));
+      }
+      pane.appendChild(now);
+    }
+
+    /* --- game picker --- */
+    const picker = el('div', 'op-picker');
+    for (const id of TOURNAMENT_GAMES) {
+      const name = GAMES.find((g) => g.id === id)?.name ?? id.toUpperCase();
+      const on = live ? tournament.game === id : this.bracketGame === id;
+      const b = button(on ? 'op-pick op-pick-on' : 'op-pick', name, () => {
+        if (live) return;
+        this.bracketGame = id;
+        this.renderTab();
+      });
+      b.disabled = live;
+      picker.appendChild(b);
+    }
+    pane.appendChild(picker);
+
+    /* --- entry --- */
+    if (!live) {
+      const row = el('div', 'op-entry-row');
+      const input = el('input', 'op-input');
+      input.type = 'text';
+      input.maxLength = 3;
+      input.placeholder = 'ABC';
+      input.autocapitalize = 'characters';
+
+      const add = (): void => {
+        const added = tournament.addPlayer(input.value);
+        input.value = '';
+        if (added) this.renderTab();
+        input.focus();
+      };
+      input.addEventListener('keydown', (e) => {
+        // The console swallows keys globally so a stray letter cannot mute the
+        // stall mid-round; this field needs them back.
+        e.stopPropagation();
+        if (e.key === 'Enter') add();
+      });
+      row.appendChild(input);
+      row.appendChild(button('op-mini', 'ADD', add));
+      pane.appendChild(row);
+    }
+
+    /* --- players --- */
+    const players = tournament.getPlayers();
+    const list = el('div', 'op-board');
+    if (players.length === 0) {
+      list.appendChild(el('p', 'op-empty', 'Nobody entered yet.'));
+    } else {
+      for (const pl of players) {
+        const rowEl = el('div', 'op-entry');
+        rowEl.appendChild(el('span', 'op-entry-rank', `#${pl.seed}`));
+        rowEl.appendChild(el('span', 'op-entry-initials', pl.label));
+        if (!live) {
+          rowEl.appendChild(
+            button('op-mini op-mini-danger', 'REMOVE', () => {
+              tournament.removePlayer(pl.id);
+              this.renderTab();
+            })
+          );
+        }
+        list.appendChild(rowEl);
+      }
+    }
+    pane.appendChild(list);
+
+    /* --- matches --- */
+    if (live) {
+      pane.appendChild(el('p', 'op-hint', 'MATCHES'));
+      const matches = tournament.getMatches();
+      const rounds = matches.reduce((x, y) => Math.max(x, y.round), 0) + 1;
+      const board = el('div', 'op-board');
+      for (const m of matches) {
+        const [a, b] = tournament.matchPlayers(m);
+        const rowEl = el('div', 'op-entry');
+        // Its own class: `op-entry-rank` is sized for "#12" and a round name
+        // wrapped to two lines inside it.
+        rowEl.appendChild(el('span', 'op-entry-round', roundName(m.round, rounds)));
+        rowEl.appendChild(
+          el('span', 'op-entry-initials', `${a?.label ?? '—'} v ${b?.label ?? '—'}`)
+        );
+        rowEl.appendChild(
+          el(
+            'span',
+            'op-entry-score',
+            m.winner === null ? '' : `${m.scores[0] ?? ''}:${m.scores[1] ?? ''}`
+          )
+        );
+        rowEl.appendChild(
+          el(
+            'span',
+            'op-entry-faction',
+            m.auto ? 'BYE' : m.winner === null ? '' : ((m.winner === 0 ? a : b)?.label ?? '')
+          )
+        );
+        // A match decided by a camera glitch has to be undoable, in front of a
+        // crowd, without resetting the bracket.
+        if (m.winner !== null && !m.auto) {
+          rowEl.appendChild(
+            button('op-mini', 'UNDO', () => {
+              tournament.undo(m.id);
+              this.renderTab();
+            })
+          );
+        }
+        board.appendChild(rowEl);
+      }
+      pane.appendChild(board);
+    }
+
+    /* --- actions --- */
+    const actions = el('div', 'op-actions');
+    if (!live) {
+      const start = button('op-action', `START ${players.length}-PLAYER BRACKET`, () => {
+        if (tournament.start(this.bracketGame)) this.renderTab();
+      });
+      start.disabled = players.length < 2;
+      actions.appendChild(start);
+    }
+    actions.appendChild(
+      confirmable('op-action op-action-danger', 'RESET BRACKET', 'CONFIRM?', () => {
+        tournament.reset();
+        this.renderTab();
+      })
+    );
+    pane.appendChild(actions);
+
+    return pane;
   }
 
   private buildScores(): HTMLElement {

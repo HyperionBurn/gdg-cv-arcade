@@ -150,6 +150,26 @@ How it works, so nobody has to explain it twice:
 Red Light is the exception and it runs a real lobby — it counts people in and
 starts when nobody new has joined for a couple of seconds.
 
+### Running a bracket
+
+`CTRL+SHIFT+` `` ` `` → **BRACKET**. Type the players in three letters at a
+time, pick a game, **START**. Duplicate initials are disambiguated for you
+(`WAS`, `WAS·2`), so nobody has to be turned away for having a common name.
+
+From then on the marshal's whole job is calling the next pair up — it is the
+yellow line at the top of the tab, and it is also the headline on the attract
+screen between rounds. **Results report themselves**: play the match as a
+normal versus round and the bracket advances when the round ends.
+
+- **A dead heat is NOT advanced.** The pair replay. Coin-tossing a tie in
+  front of a crowd is indefensible.
+- **UNDO** on any played match reverses it and everything that followed, for
+  when the camera drops somebody mid-round.
+- The bracket **survives a reload**, so an F5 mid-event costs nothing.
+
+Three games are eligible — 67 Speed Duel, Pose Match and Fruit Ninja — because
+a bracket wants short, loud, head-to-head matches.
+
 ### The mouse works too
 
 Move the trackpad and the hand cursor follows the mouse for 2.5 seconds, then
@@ -170,9 +190,11 @@ If Red Light specifically is misbehaving: **MOVE THRESHOLD** (raise it if people
 are eliminated while standing still) and **STOPPING GRACE** (raise it if people
 are caught while visibly already stopping).
 
-**Before the doors open, press RESET ALL TUNING.** Slider changes are saved in
-the browser and survive a reload, so a laptop used for tuning last week will
-otherwise still be running last week's numbers.
+**Before the doors open, press RESET ALL TUNING** — and **RESET BRACKET** if
+one was ever started. Both are saved in the browser and survive a reload, so a
+laptop used for tuning last week will otherwise still be running last week's
+numbers, and a half-finished bracket from a rehearsal will sit on the attract
+screen all morning.
 
 ## Rig Check — read this before Sept 18
 

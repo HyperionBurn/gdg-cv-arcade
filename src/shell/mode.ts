@@ -66,6 +66,7 @@ import {
 import { GAME_SEATS, gameColor } from '../meta/games';
 import { setPlayMode, type PlayMode } from '../meta/mode';
 import { MENU_TILES } from './menu';
+import { tournament } from '../meta/tournament';
 import type { GameId } from '../meta/leaderboard';
 import { DWELL, HoverCursor, type HoverTarget } from './hover';
 import { router } from './router';
@@ -95,6 +96,13 @@ export function takePendingGame(): GameId | null {
  * than no screen at all — it is a delay dressed as agency.
  */
 export function modeScreenApplies(id: GameId): boolean {
+  // NEITHER DOES A BRACKET MATCH. A tournament match is by definition a versus
+  // round: the marshal has called two names, the crowd is watching, and the
+  // bracket only advances from a `playerCount === 2` round. Asking the pair how
+  // many are playing is a delay in front of an audience AND a way to break the
+  // bracket — one hover on JUST ME and the match is played, won, and silently
+  // not reported, with no diagnosis available short of reading the source.
+  if (tournament.active && tournament.game === id) return false;
   return (GAME_SEATS[id] ?? 1) > 1;
 }
 

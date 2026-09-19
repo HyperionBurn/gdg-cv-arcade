@@ -518,6 +518,13 @@ body.op-open {
   }
 }
 
+/* A WHITE FILL ON A WHITE PANEL IS NOT A BUTTON.
+ *
+ * These were written for the console's dark era and never converted: an
+ * `rgba(255,255,255,0.06)` fill with a 14%-white border is invisible against
+ * `--bg-raised`, which is now paper. Every small button in the console was a
+ * bare word floating in space, and on the BRACKET tab that meant ADD — the
+ * control the whole tab is built around — had no edges at all. */
 .op-mini {
   padding: 5px 10px;
   min-height: 28px;
@@ -526,8 +533,8 @@ body.op-open {
   font-weight: 700;
   letter-spacing: 0.08em;
   color: var(--text-dim);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: var(--paper);
+  border: 1px solid var(--muted);
   border-radius: 6px;
   cursor: pointer;
   white-space: nowrap;
@@ -535,7 +542,8 @@ body.op-open {
 
 .op-mini:hover {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.16);
+  background: var(--grid-line);
+  border-color: var(--ink);
 }
 
 .op-mini-danger {
@@ -940,4 +948,119 @@ body.op-open {
   font-size: 11px;
   color: var(--text-faint);
   letter-spacing: 0.04em;
+}
+
+/* ---- bracket tab ----------------------------------------------------
+ *
+ * The tournament's operator end. Reuses .op-board / .op-entry / .op-pick so
+ * the pane reads as the same object as the leaderboard moderation next to it;
+ * only the three controls that have no equivalent elsewhere are new.
+ * ------------------------------------------------------------------- */
+
+/* WHAT IS ON NEXT — the one line a marshal reads across the table, because
+ * calling the next pair up is their whole job while a bracket is running. */
+.op-now {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 12px 16px;
+  border: 2px solid var(--ink);
+  border-radius: 10px;
+  /* Yellow is a SURFACE and never a text colour — 1.7:1 on paper. The whole
+   * row is the action colour and the words on it are ink. */
+  background: var(--yellow);
+}
+
+.op-now-label {
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.op-now-match {
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+}
+
+.op-entry-row {
+  display: flex;
+  gap: 8px;
+}
+
+/* Sized for "QUARTER-FINAL". `.op-entry-rank` is sized for "#12", and a round
+ * name inside it wraps to two lines and doubles the height of every row. */
+.op-entry-round {
+  flex: 0 0 104px;
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+/* Three glyphs, so it is sized for three glyphs. A wide box invites a name. */
+.op-input {
+  width: 108px;
+  padding: 9px 12px;
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text);
+  background: var(--paper);
+  border: 2px solid var(--ink);
+  border-radius: 8px;
+}
+
+.op-input:focus {
+  outline: none;
+  border-color: var(--blue);
+}
+
+.op-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.op-action {
+  flex: 1 1 200px;
+  padding: 12px 16px;
+  min-height: 46px;
+  font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+  background: var(--green);
+  border: 2px solid var(--ink);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.op-action:disabled {
+  color: var(--text-faint);
+  background: var(--paper);
+  border: 1px solid var(--muted);
+  cursor: default;
+}
+
+.op-action-danger {
+  color: var(--ink);
+  background: var(--paper);
+  border: 2px solid var(--red);
+}
+
+.op-action.op-armed {
+  color: var(--paper);
+  background: var(--red);
+  border-color: var(--ink);
 }

@@ -36,6 +36,7 @@ import {
 import { GAME_SEATS, seatBadge } from '../src/meta/games.ts';
 import { setPlayMode, takePlayMode } from '../src/meta/mode.ts';
 import { modeScreenApplies } from '../src/shell/mode.ts';
+import { TOURNAMENT_GAMES, isTournamentGame, tournament } from '../src/meta/tournament.ts';
 import type { GameId } from '../src/meta/leaderboard.ts';
 import { laneScore, type ScorableRacer } from '../src/games/redlight.ts';
 import { BalloonPopGame } from '../src/games/balloonpop.ts';
@@ -605,5 +606,83 @@ describe('the play mode caps the round, and only downward', () => {
     setPlayMode('solo');
     assert.equal(takePlayMode(), 'solo');
     assert.equal(takePlayMode(), null, 'the choice outlived the turn it was made for');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* 6. The bracket's one hard dependency                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A bracket only ever advances from `GameBase.finishRound`, and that branch is
+ * gated on `playerCount === 2`. So a tournament game that cannot seat two is a
+ * bracket that can never produce a result: the marshal starts one at 2pm, the
+ * pair play, nothing happens, and the only diagnosis available is reading the
+ * source.
+ *
+ * `TOURNAMENT_GAMES` is a hand-written list in another module. This is the
+ * thing that stops it drifting away from the roster it names.
+ */
+describe('every tournament game can actually be played head to head', () => {
+  test('all of them seat exactly two and support versus', () => {
+    const byId = new Map(GAMES.map(([, c]) => [c.gameId, c]));
+    for (const id of TOURNAMENT_GAMES) {
+      const cfg = byId.get(id);
+      assert.ok(cfg, `TOURNAMENT_GAMES names "${id}", which is not a game`);
+      assert.equal(cfg.supportsVersus, true, `${id} is in the bracket but is not versus`);
+      assert.equal(cfg.maxPlayers, 2, `${id} seats ${cfg.maxPlayers}`);
+      assert.notEqual(cfg.partyMode, true, `${id} is a party game; a bracket needs a duel`);
+    }
+  });
+
+  test('and the guard that reports into the bracket agrees', () => {
+    // `isTournamentGame` is what `finishRound` actually calls.
+    for (const [name, cfg] of GAMES) {
+      const listed = (TOURNAMENT_GAMES as readonly string[]).includes(cfg.gameId);
+      assert.equal(isTournamentGame(cfg.gameId), listed, `${name}`);
+    }
+  });
+});
+
+/**
+ * The mode screen and the bracket have one interaction, and it is a silent
+ * failure if it is wrong.
+ */
+describe('a bracket match is never asked how many are playing', () => {
+  test('the screen steps aside while a bracket is live on that game', () => {
+    const game = TOURNAMENT_GAMES[0];
+    tournament.reset();
+    assert.equal(modeScreenApplies(game), true, 'it should ask when no bracket is running');
+
+    tournament.addPlayer('WAS');
+    tournament.addPlayer('AMY');
+    assert.equal(tournament.start(game), true);
+
+    assert.equal(
+      modeScreenApplies(game),
+      false,
+      'a pair called up by name would have been asked to choose, and one hover ' +
+        'on JUST ME plays the match, wins it, and reports nothing'
+    );
+  });
+
+  test('but every other game still asks', () => {
+    // The bracket owns ONE game. A visitor who wanders onto Balloon Pop while
+    // a 67 Speed bracket is running is not in the tournament.
+    const game = TOURNAMENT_GAMES[0];
+    tournament.reset();
+    tournament.addPlayer('WAS');
+    tournament.addPlayer('AMY');
+    tournament.start(game);
+
+    for (const [name, cfg] of GAMES) {
+      if (cfg.gameId === game) continue;
+      assert.equal(
+        modeScreenApplies(cfg.gameId),
+        cfg.maxPlayers > 1,
+        `${name} stopped asking because an unrelated bracket is running`
+      );
+    }
+    tournament.reset();
   });
 });
