@@ -125,6 +125,21 @@ const COUNTDOWN_VISIBLE_SEC = 8;
  */
 const ABANDONED_SEC = 3.5;
 /**
+ * How long a returning player's remembered faction is shown before it commits
+ * itself.
+ *
+ * The picker is not skipped for them, it is PRE-ANSWERED. Skipping it outright
+ * was the first shape of this fix and it took away the only place a player can
+ * change sides — somebody who joined ENGINEERING on day one and switched
+ * course would have been stuck there for the rest of the event with no route
+ * back to the question.
+ *
+ * Hovering anything cancels the countdown, so the moment a player shows any
+ * interest in the screen it stops hurrying them. 1.6s is long enough to read
+ * six words and short enough that a queue does not feel it.
+ */
+const FACTION_CONFIRM_SEC = 1.6;
+/**
  * Age at which a vision frame stops counting as evidence that anyone is there.
  * Same figure as `GameBase`; see the guard in `updateTracking`.
  */
@@ -167,6 +182,12 @@ export class InitialsScreen implements Screen {
   private phase: Phase = 'letters';
   private letters: string[] = [];
   private faction: string | null = null;
+  /**
+   * Seconds left on the auto-confirm for a remembered faction, or -1 when
+   * there is no countdown running (a new player, or one who has started
+   * reaching for a tile).
+   */
+  private factionHold = -1;
   /** True once the letters are settled and only the faction step remains. */
   private awaitingFaction = false;
 
@@ -214,9 +235,11 @@ export class InitialsScreen implements Screen {
       this.next = handoff.next ?? 'menu';
     }
 
-    // Repeat players skip the faction step entirely — that is most of the
-    // speed win on day 2, when a good share of the queue has played before.
-    this.faction = leaderboard.getLastFaction();
+    // NOT `getLastFaction()`. That is one value for the whole kiosk, so
+    // defaulting to it credited every player after the first to whichever
+    // faction the first person picked — see `factionFor`. The faction is
+    // resolved in `settleLetters` instead, once we know WHOSE score this is.
+    this.faction = null;
 
     if (!isSimEnabled()) {
       await vision.start({ mode: 'pose', numPoses: 1, poseModel: 'lite' });
@@ -315,6 +338,19 @@ export class InitialsScreen implements Screen {
       this.drawGrid(fc, state.hovered, state.progress);
       this.drawFactionLine(fc, state.hovered, state.progress);
     } else if (this.phase === 'faction') {
+      // The remembered faction confirms itself, unless the player reaches for
+      // the screen — any hover means they are considering it, and hurrying
+      // somebody who is mid-decision is how you get the wrong answer.
+      if (this.factionHold >= 0) {
+        if (state.hovered) this.factionHold = -1;
+        else {
+          this.factionHold -= fc.dt;
+          if (this.factionHold <= 0) {
+            this.factionHold = -1;
+            this.finish();
+          }
+        }
+      }
       this.drawFactionPicker(fc, state.hovered, state.progress);
     } else {
       this.drawDone(fc);
@@ -544,15 +580,25 @@ export class InitialsScreen implements Screen {
     }
   }
 
-  /** Letters are done. Either pick a faction or submit. */
+  /** Letters are done. Pick a faction, or confirm the one on file. */
   private settleLetters(): void {
+    // A repeat player is somebody whose initials are already on a board, and
+    // what they skip is being ASKED a question they have already answered —
+    // not the ability to answer it differently. Their faction arrives
+    // pre-selected with a short countdown; everybody else picks from cold,
+    // which on day one is nearly everyone and is the only way the totals mean
+    // anything by day two.
     if (!this.faction) {
-      this.awaitingFaction = true;
-      this.phase = 'faction';
-      this.cursor.reset();
-      return;
+      const known = leaderboard.factionFor(this.letters.join(''));
+      if (known) {
+        this.faction = known;
+        this.factionHold = FACTION_CONFIRM_SEC;
+      }
     }
-    this.finish();
+
+    this.awaitingFaction = true;
+    this.phase = 'faction';
+    this.cursor.reset();
   }
 
   /**
@@ -836,7 +882,14 @@ export class InitialsScreen implements Screen {
   private drawFactionPicker(fc: FrameContext, hovered: string | null, progress: number): void {
     const { ctx, v } = fc;
     const radius = vh(v, RADIUS.card);
-    const title = '<WHO ARE YOU PLAYING FOR?>';
+    // Two different questions, and they must not look like the same one. A
+    // returning player is being asked to CONFIRM; asking "who are you playing
+    // for?" over an answer that is already ticking down reads as a screen that
+    // has not noticed it knows.
+    const confirming = this.factionHold >= 0;
+    const title = confirming
+      ? `<STILL PLAYING FOR ${this.faction ?? ''}?>`
+      : '<WHO ARE YOU PLAYING FOR?>';
 
     drawText(ctx, title, v.width / 2, vh(v, 21), {
       size: fitText(ctx, title, v.width - vh(v, SAFE * 4), vh(v, TYPE.title)),
@@ -847,6 +900,30 @@ export class InitialsScreen implements Screen {
       knockout: true,
       letterSpacing: TRACK.h1,
     });
+
+    if (confirming) {
+      drawText(ctx, 'HOVER ANOTHER TO SWITCH', v.width / 2, vh(v, 25.4), {
+        size: vh(v, TYPE.label),
+        color: COLORS.ink,
+        font: FONTS.body,
+        weight: WEIGHT.bold,
+        letterSpacing: TRACK.pill,
+      });
+      // A bar, not a number. Nobody reads a countdown they did not ask for;
+      // everybody understands a bar running out.
+      progressBar(
+        ctx,
+        v.width * 0.33,
+        // The tile grid starts at 30vh (`layoutFactions`), so this sits in the
+        // 3vh of clear space between the sub-line and the first card.
+        vh(v, 27.4),
+        v.width * 0.34,
+        vh(v, 0.8),
+        1 - Math.max(0, this.factionHold) / FACTION_CONFIRM_SEC,
+        COLORS.blue,
+        0
+      );
+    }
 
     const totals = new Map(leaderboard.getFactionTotals().map((f) => [f.name, f.total]));
     const anyScored = [...totals.values()].some((t) => t > 0);

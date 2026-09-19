@@ -76,6 +76,9 @@ interface ScreenLike {
   score?: number;
   letters?: string[];
   phase?: string;
+  /** How many seats the live round actually opened. See the 2P pass. */
+  playerCount?: number;
+  scoreFor?: (slot: number) => number;
 }
 
 interface CursorLike {
@@ -196,6 +199,19 @@ const GAMES: GameId[] = [
   'runner',
 ] as unknown as GameId[];
 
+/**
+ * The games that seat two, run a SECOND time with two bodies in frame.
+ *
+ * Every one of these was shipped two-player and never driven by a second body
+ * in any harness, which is how Red Light came to give six people one score and
+ * Pose Match's two walls came to punch holes in each other. The 1P pass cannot
+ * see any of it: the code paths that break are the ones guarded by
+ * `playerCount > 1`.
+ *
+ * Red Light is absent because its 1P pass already runs three bodies.
+ */
+const VERSUS_GAMES = ['sixtyseven', 'fruitninja', 'balloonpop', 'posematch', 'rhythm', 'runner'];
+
 /** A turn that has not finished in three minutes of game time is a stall. */
 const MAX_TURN_FRAMES = 60 * 180;
 
@@ -205,7 +221,10 @@ export async function runTurn(host: Host, only?: string[]): Promise<TurnReport> 
   const results: TurnResult[] = [];
 
   for (const game of games) {
-    results.push(await oneTurn(host, game as string));
+    results.push(await oneTurn(host, game as string, 1));
+    if (VERSUS_GAMES.includes(game as string)) {
+      results.push(await oneTurn(host, game as string, 2));
+    }
   }
 
   const failed = results.filter((r) => !r.passed).length;
@@ -218,7 +237,8 @@ export async function runTurn(host: Host, only?: string[]): Promise<TurnReport> 
   };
 }
 
-async function oneTurn(host: Host, game: string): Promise<TurnResult> {
+async function oneTurn(host: Host, game: string, players = 1): Promise<TurnResult> {
+  const label = players > 1 ? `${game} (${players}P)` : game;
   const steps: TurnStep[] = [];
   const errors: string[] = [];
   const trail: string[] = [];
@@ -317,7 +337,7 @@ async function oneTurn(host: Host, game: string): Promise<TurnResult> {
     sim.setPoseAll(null);
     sim.setHandTarget?.(null);
     sim.clearWristTargets?.();
-    sim.setPlayerCount(game === 'redlight' ? 3 : 1);
+    sim.setPlayerCount(players > 1 ? players : game === 'redlight' ? 3 : 1);
 
     // ── attract ──────────────────────────────────────────────────────────
     host.router.go('attract');
@@ -353,6 +373,33 @@ async function oneTurn(host: Host, game: string): Promise<TurnResult> {
 
     const played = host.router.active;
     if (typeof played?.score === 'number') score = played.score;
+
+    // ── two seats, two scores ────────────────────────────────────────────
+    //
+    // Only meaningful while the game screen is still up: `results` still has
+    // `playerCount` and `scoreFor`, `initials` and `attract` do not.
+    if (players > 1 && landed === 'results') {
+      const seated = played?.playerCount ?? 0;
+      step('opened two seats', seated === 2, `playerCount=${seated}`);
+
+      const a = played?.scoreFor?.(0);
+      const b = played?.scoreFor?.(1);
+      step(
+        'both seats have a real score',
+        Number.isFinite(a) && Number.isFinite(b) && (a ?? -1) >= 0 && (b ?? -1) >= 0,
+        `slot0=${a} slot1=${b}`
+      );
+      // The failure this is really for: `scoreFor` ignoring its argument, which
+      // is what Red Light shipped and what nothing but a second body can see.
+      // Both bodies are driven identically by the simulator, so equal scores
+      // are expected — what is NOT acceptable is a second seat stuck at zero
+      // while the first one scored.
+      step(
+        'the second seat is not dead',
+        !((a ?? 0) > 0 && (b ?? 0) === 0),
+        `slot0=${a} slot1=${b}`
+      );
+    }
 
     // ── initials, when the score earned one ───────────────────────────────
     if (id() === 'initials') {
@@ -396,7 +443,7 @@ async function oneTurn(host: Host, game: string): Promise<TurnResult> {
   }
 
   return {
-    game,
+    game: label,
     passed: steps.every((s) => s.ok),
     steps,
     trail,

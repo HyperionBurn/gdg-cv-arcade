@@ -422,6 +422,45 @@ class Leaderboard {
     }
   }
 
+  /**
+   * The faction THESE INITIALS played for last time, or null.
+   *
+   * `getLastFaction` is one value for the whole kiosk, and using it as the
+   * default is how the attract screen ended up reading
+   * "BUSINESS 9,357 · ENGINEERING 0 · CS 0 · MEDIA 0": the first person of the
+   * day picks, and every player after them is silently credited to that same
+   * faction unless they notice a small "hover to change" line and act on it.
+   * A faction competition whose totals are decided by whoever played first is
+   * not a competition.
+   *
+   * The comment on `getLastFaction` says the point is that "repeat players
+   * skip the picker". This is that, meant literally: a repeat player is
+   * somebody whose initials are already on a board, and what they skip is
+   * being asked a question they have already answered.
+   *
+   * Newest entry wins, so somebody who switched allegiance keeps the switch.
+   * Validated against the live FACTIONS list for the same reason
+   * `getLastFaction` is — the club edits that list between Day 1 and Day 2,
+   * and an unknown value has to mean "ask again" rather than "credit points
+   * to a bucket nothing can look up".
+   */
+  factionFor(initials: string): Faction | null {
+    const key = initials.trim().toUpperCase();
+    if (!key) return null;
+
+    let best: { faction: string; at: number } | null = null;
+    for (const board of Object.values(this.store.boards)) {
+      for (const e of board) {
+        if (e.initials !== key || !e.faction) continue;
+        if (!best || e.at > best.at) best = { faction: e.faction, at: e.at };
+      }
+    }
+    if (!best) return null;
+    return (FACTIONS as readonly string[]).includes(best.faction)
+      ? (best.faction as Faction)
+      : null;
+  }
+
   setLastFaction(faction: string): void {
     try {
       localStorage.setItem(FACTION_KEY, faction);
