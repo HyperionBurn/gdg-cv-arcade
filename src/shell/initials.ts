@@ -466,6 +466,23 @@ export class InitialsScreen implements Screen {
     else if (this.phase === 'faction') this.layoutFactions(fc);
   }
 
+  /**
+   * What the OK key says right now.
+   *
+   * SKIP while the entry is empty, OK once there is something to confirm. Same
+   * key, same place, same one dwell — the word just stops lying about what
+   * pressing it will do. A player who does not care about the board gets off
+   * this screen in 0.95s instead of 16, which at a stall is a whole extra turn
+   * every few players.
+   *
+   * It still SUBMITS: `settleLetters` pads what is there, so an empty entry is
+   * stored exactly as the hard deadline would have stored it. The score is
+   * never lost, only the name.
+   */
+  private keyLabel(key: string): string {
+    return key === 'OK' && this.letters.length === 0 ? 'SKIP' : key;
+  }
+
   /** A–Z plus DEL and OK, 7 x 4. Every cell is the same size, so the grid is
    *  predictable and nobody has to hunt for the delete key. */
   private layoutGrid(fc: FrameContext): void {
@@ -490,7 +507,14 @@ export class InitialsScreen implements Screen {
         y: top + row * (cellH + gap),
         w: cellW,
         h: cellH,
-        enabled: key === 'DEL' ? this.letters.length > 0 : key === 'OK' ? this.letters.length > 0 : true,
+        // OK IS NEVER DISABLED. See `keyLabel`.
+        //
+        // It used to need a letter before it would light up, which left a
+        // player who did not want a leaderboard entry with no way off this
+        // screen at all — they had to stand and wait out the 16s deadline, or
+        // walk out of frame and hope, with a queue watching them do either.
+        // The exit existed; it was simply not offered.
+        enabled: key === 'DEL' ? this.letters.length > 0 : true,
         dwell: DWELL.fast,
       });
     }
@@ -560,7 +584,18 @@ export class InitialsScreen implements Screen {
         return;
       }
       if (key === 'OK') {
-        this.settleLetters();
+        // SKIP MEANS SKIP, NOT "SKIP THE LETTERS".
+        //
+        // `settleLetters` advances to the faction picker, which is the right
+        // next step for somebody who typed a name and wrong for somebody who
+        // declined to. Asking a player who just said they do not want to be on
+        // the board which team to put them on is a second dwell for nothing,
+        // and it is the dwell a queue is waiting through.
+        //
+        // Submits exactly as the 16s deadline would have: same padded entry,
+        // same score, same everything except sixteen seconds.
+        if (this.letters.length === 0) this.finish();
+        else this.settleLetters();
         return;
       }
       if (this.letters.length < MAX_INITIALS) {
@@ -811,7 +846,17 @@ export class InitialsScreen implements Screen {
       // and every letter key is plain paper-and-ink. A 28-key grid where each
       // key carried a colour would be exactly the noise the palette rules are
       // there to prevent.
-      const accent = key === 'OK' ? COLORS.green : key === 'DEL' ? COLORS.red : COLORS.yellow;
+      // Green means "this confirms what you typed". While the key says SKIP
+      // there is nothing to confirm, so it takes the neutral action colour
+      // instead — a green SKIP reads as the recommended choice, and it is not.
+      const accent =
+        key === 'OK'
+          ? this.letters.length === 0
+            ? COLORS.yellow
+            : COLORS.green
+          : key === 'DEL'
+            ? COLORS.red
+            : COLORS.yellow;
       const fill = disabled ? COLORS.paper : special ? accent : COLORS.paper;
 
       const drop = disabled ? 0 : isHovered ? vh(v, SHADOW.lifted) : vh(v, SHADOW.base);
@@ -849,10 +894,11 @@ export class InitialsScreen implements Screen {
       }
 
       const dwellInverted = isHovered && progress > 0.5;
+      const label = this.keyLabel(key);
       const size = special
-        ? fitTextSize(ctx, key, target.w * 0.72, vh(v, 3.4), WEIGHT.black, FONTS.body)
+        ? fitTextSize(ctx, label, target.w * 0.72, vh(v, 3.4), WEIGHT.black, FONTS.body)
         : vh(v, 4.8);
-      drawText(ctx, key, target.x + target.w / 2, ty + target.h / 2, {
+      drawText(ctx, label, target.x + target.w / 2, ty + target.h / 2, {
         size,
         color: disabled
           ? COLORS.muted
