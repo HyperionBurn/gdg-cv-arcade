@@ -50,8 +50,8 @@ import { tunables } from '../meta/tunables';
 import { POSE } from '../core/types';
 import type { TrackedPlayer } from '../core/tracker';
 import { audio } from '../engine/audio';
-import { measureText, roundRect, vh } from '../engine/draw';
-import { COLORS, EASE, FONTS } from './theme';
+import { roundRect, vh } from '../engine/draw';
+import { COLORS, EASE } from './theme';
 import type { FrameContext } from './screen';
 
 /* ------------------------------------------------------------------ */
@@ -964,27 +964,6 @@ export function drawDwellFill(
   ctx.restore();
 }
 
-/**
- * Largest size at or below `size` that fits `maxWidth`.
- *
- * Every string on these screens is data — a game name, a player's initials, a
- * faction the club might rename the night before — and a TV's resolution is
- * unknown. Overflowing text is the most likely way this looks broken on the
- * day, and it is one measure call to prevent.
- */
-export function fitTextSize(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  maxWidth: number,
-  size: number,
-  weight: number | string = 700,
-  font: string = FONTS.display
-): number {
-  if (!text) return size;
-  const w = measureText(ctx, text, size, weight, font);
-  if (w <= maxWidth || w === 0) return size;
-  return Math.max(1, size * (maxWidth / w));
-}
 
 /* ------------------------------------------------------------------ */
 

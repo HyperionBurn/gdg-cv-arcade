@@ -585,7 +585,20 @@ describe('styles.css obeys the same colour rules as the canvas', () => {
  * they pass the spacing.
  */
 describe('fitted text is measured the way it is drawn', () => {
-  const sep = process.platform === 'win32' ? '\\\\' : '/';
+  /**
+   * Path check that does not depend on the platform separator.
+   *
+   * This was `file.endsWith(...)` against a `sep` constant that had been
+   * escaped as if it were going into a regex, so on Windows it held four
+   * backslashes and matched nothing. draw.ts was therefore never actually
+   * skipped; the older guard survived only because draw.ts's own fitText
+   * calls mention `letterSpacing` and were skipped by the content rule.
+   *
+   * A test whose exclusion silently does nothing is worse than no
+   * exclusion, because it reads as deliberate.
+   */
+  const isDrawTs = (file: string): boolean =>
+    file.split(/[\\/]/).join('/').endsWith('engine/draw.ts');
   const read = async (): Promise<Array<{ file: string; lines: string[] }>> => {
     const { readdir, readFile } = await import('node:fs/promises');
     const { join } = await import('node:path');
@@ -636,7 +649,7 @@ describe('fitted text is measured the way it is drawn', () => {
     const offenders: string[] = [];
 
     for (const { file, lines } of await read()) {
-      if (file.endsWith(`engine${sep}draw.ts`)) continue; // the definition
+      if (isDrawTs(file)) continue; // the definition
       const text = lines.join('\n');
       let from = 0;
       for (;;) {
@@ -668,6 +681,38 @@ describe('fitted text is measured the way it is drawn', () => {
       "fitText's last argument is the letter spacing, and omitting it measures " +
         'the string narrower than it will be drawn. Pass what the draw uses — ' +
         "or `'0px'` if it genuinely uses none."
+    );
+  });
+
+  /**
+   * ONE TEXT-FITTING HELPER, AND IT LIVES IN draw.ts.
+   *
+   * `hover.ts` had grown its own `fitTextSize` — the same six lines as
+   * `fitText`, with the same letterSpacing blind spot, and completely
+   * invisible to the guard above because that scans for the NAME `fitText`.
+   * Its two callers both drew with tracking it never measured.
+   *
+   * A duplicate of a function whose whole problem is "the caller has to
+   * remember four things" is the worst possible thing to have two of, so the
+   * rule is structural: the measuring and fitting primitives live in
+   * `engine/draw.ts` and nowhere else. ARCHITECTURE.md already says draw.ts is
+   * the drawing API; this makes it true rather than aspirational.
+   */
+  test('nothing outside engine/draw.ts defines a text-fitting helper', async () => {
+    const offenders: string[] = [];
+    for (const { file, lines } of await read()) {
+      if (isDrawTs(file)) continue;
+      lines.forEach((line, i) => {
+        if (/export function (fit|measure)\w*(Text|Size|Number)\s*\(/.test(line)) {
+          offenders.push(`${file}:${i + 1}  ${line.trim().slice(0, 60)}`);
+        }
+      });
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      'text measuring and fitting belongs in engine/draw.ts — a second copy ' +
+        'is a second place to forget the letter spacing'
     );
   });
 

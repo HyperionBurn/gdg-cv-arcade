@@ -70,7 +70,7 @@ import {
   idlePulse,
   ramp,
 } from './theme';
-import { DWELL, HoverCursor, fitTextSize, type HoverTarget } from './hover';
+import { DWELL, HoverCursor, type HoverTarget } from './hover';
 import { router } from './router';
 import type { FrameContext, Screen } from './screen';
 
@@ -890,11 +890,13 @@ export class InitialsScreen implements Screen {
 
       const dwellInverted = isHovered && progress > 0.5;
       const label = this.keyLabel(key);
-      const size = special
-        ? fitTextSize(ctx, label, target.w * 0.72, vh(v, 3.4), WEIGHT.black, FONTS.body)
-        : vh(v, 4.8);
       drawText(ctx, label, target.x + target.w / 2, ty + target.h / 2, {
-        size,
+        size: special ? vh(v, 3.4) : vh(v, 4.8),
+        // DEL / OK / SKIP are words in a cell sized for one letter, so they
+        // are the ones that need fitting. `maxWidth` is on the letters too
+        // because it can only ever shrink, and a glyph that would not fit its
+        // own key is not something to find out about at a stall.
+        maxWidth: target.w * 0.72,
         color: disabled
           ? COLORS.muted
           : special && dwellInverted
@@ -937,7 +939,8 @@ export class InitialsScreen implements Screen {
 
     const label = `PLAYING FOR ${this.faction} · HOVER TO CHANGE`;
     drawText(ctx, label, target.x + target.w / 2, target.y + target.h / 2, {
-      size: fitTextSize(ctx, label, target.w - vh(v, SPACE.lg), vh(v, TYPE.label), WEIGHT.bold, FONTS.body),
+      size: vh(v, TYPE.label),
+      maxWidth: target.w - vh(v, SPACE.lg),
       color: COLORS.ink,
       font: FONTS.body,
       weight: WEIGHT.bold,
