@@ -2173,6 +2173,8 @@ export abstract class GameBase implements Screen {
     // Keep rising popups out of the HUD. One assignment per frame here beats
     // every game remembering the arithmetic at every spawn site.
     this.popups.floorY = this.hudBottom(v);
+    // The sideways half of the same guarantee. See `PopupLayer.width`.
+    this.popups.width = v.width;
 
     // The shelf, if this game asked for one. Paper plate, then the same grid
     // the background uses clipped into it — so the band reads as the SAME

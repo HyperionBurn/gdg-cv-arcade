@@ -335,6 +335,29 @@ export class PopupLayer {
    */
   floorY = 0;
 
+  /**
+   * THE SAME ARGUMENT SIDEWAYS, WHICH NOBODY HAD MADE.
+   *
+   * `floorY` stops a popup rising into the HUD. Nothing stopped one spawning
+   * half off the side of the screen, and popups spawn at the point of impact,
+   * which for several games is routinely AT an edge.
+   *
+   * Found in Red Light with five players: every racer starts at the left edge,
+   * so every elimination taunt — GOTCHA!, BUSTED!, TOO SLOW! — was drawn
+   * centred on a marker about 35px in and lost its left half. The one moment
+   * the game is talking directly to the person who just went out, and the word
+   * was unreadable. The vertical placement of those same taunts had been fixed
+   * twice, in detail; the horizontal had never been looked at.
+   *
+   * Balloon Pop and Fruit Ninja have the same exposure — a balloon popped at
+   * the edge, a fruit sliced there — so this belongs here and not in Red Light,
+   * for exactly the reason `floorY` does: no call site should have to remember.
+   *
+   * 0 means unbounded, so a layer nobody has told about the viewport behaves
+   * as it always did.
+   */
+  width = 0;
+
   spawn(text: string, x: number, y: number, color: string, size: number, life = 0.9): void {
     // Clamp to the safe band, allowing for the full rise distance.
     const rise = size * 1.6 * life;
@@ -351,17 +374,35 @@ export class PopupLayer {
     // `floorY` is protecting the HUD, and since popups rise, a later one
     // starting lower simply follows the earlier one instead of racing it.
     const halfW = estimateHalfWidth(text, size);
+
+    // Keep the whole word on screen. The margin covers the paper knockout
+    // stroke the draw adds (`lineWidth = size * 0.17`, so half of that each
+    // side) plus a little air, so the text is not welded to the bezel.
+    //
+    // Clamped to the SETTLED width, not the pop-in width: a popup briefly
+    // scales to 1.9x as it appears, and reserving room for that would shove
+    // every edge popup a long way from the thing it is describing. The
+    // overshoot lasts about 15% of the popup's life and the word is legible
+    // for the rest of it, which is the part anyone reads.
+    let safeX = x;
+    if (this.width > 0) {
+      const half = halfW + size * 0.18;
+      // Narrower than the word itself: centre it and accept the overflow,
+      // rather than letting the two clamps fight and pick an arbitrary side.
+      safeX = this.width < half * 2 ? this.width / 2 : Math.min(Math.max(x, half), this.width - half);
+    }
+
     for (let guard = 0; guard < 6; guard++) {
       const clash = this.pool.find(
         (q) =>
-          Math.abs(q.x - x) < q.halfW + halfW &&
+          Math.abs(q.x - safeX) < q.halfW + halfW &&
           Math.abs(q.y - safeY) < (q.size + size) * 0.58
       );
       if (!clash) break;
       safeY = clash.y + (clash.size + size) * 0.58;
     }
 
-    this.pool.push({ text, x, y: safeY, vy: -size * 1.6, life, maxLife: life, color, size, halfW });
+    this.pool.push({ text, x: safeX, y: safeY, vy: -size * 1.6, life, maxLife: life, color, size, halfW });
     if (this.pool.length > 60) this.pool.shift();
   }
 
