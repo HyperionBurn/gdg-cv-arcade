@@ -351,6 +351,23 @@ Red Light 0.98ms · Pose Match 0.49ms · Fruit Ninja 3.52ms per frame.
 
 All driven deterministically via `window.__arcade.tick()`:
 
+- **Endurance, Sept 19 (after the day's changes):** `__arcade.turn()` five
+  times, **65 full turns**, attract → menu → game → initials → out, alternating
+  1P and 2P across all seven games. **0 failures.** JS heap across the five
+  passes: **88, 90, 96, 93, 99 MB** — it sawtooths rather than climbing
+  monotonically (pass 4 came back down), and one `<canvas>` remains in the DOM
+  throughout, so the Runner's WebGL context is not being re-created per round.
+
+  Not flat, and not claimed to be: the band drifts ~11MB over 65 turns. A fair
+  day is roughly 360 turns, so a linear extrapolation lands near 150MB, which
+  a booth laptop will not notice. Re-take this if anything starts allocating
+  per frame.
+
+- **Production build**, `npm run kiosk` on 4173: all four Archivo weights fetch
+  and report `loaded`, canvas text measures as Archivo rather than the
+  fallback, `?sim=1` and the `d` overlay both work, `window.__arcade` is
+  correctly absent, frame time **6.0ms**.
+
 - **67**: 4 Hz full reach × 5s = **exactly 40 reps**; 1.5 Hz × 4s = **exactly 12**;
   quarter-height twitching at the same rate = **0** (anti-cheat holds)
 - **Fruit Ninja**: hands still = **0** (activation gate); swiping sliced 11 with
