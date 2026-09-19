@@ -137,18 +137,28 @@ mate, you can both play".
 
 How it works, so nobody has to explain it twice:
 
-- Both step into frame and the game starts as **VERSUS**, split screen, one
-  score each.
-- If the second person is a beat behind, the countdown **waits for them**. A
-  yellow `A FRIEND CAN STEP IN` badge is on screen while there is still time to
-  act on it, and the clock rewinds when they arrive.
-- If somebody wants a **solo** run for the leaderboard, the other person just
-  steps out of frame — off the tape, or behind the player.
-- Only the **winner** enters initials. That is deliberate: two name entries per
-  turn would double the slowest part of the flow.
+- After picking a game they get **JUST ME** or **VERSUS** (Red Light says
+  **ALL OF US**). It answers itself after five seconds if nobody chooses, so
+  it can never hold the queue up.
+- **JUST ME** is the only one that changes anything: it caps the round at one
+  player however many people are in frame. That is the answer to "my mate is
+  standing next to me and I want my own score" — which the camera cannot work
+  out on its own, and is the only reason the screen exists.
+- **VERSUS** is split screen, one score each. If the second person is a beat
+  behind, the countdown **waits for them**: a yellow `A FRIEND CAN STEP IN`
+  badge is up while there is still time to act on it, and the clock rewinds
+  when they arrive.
+- When one of them goes ahead, the screen says so. That is the moment worth
+  watching for.
+- Only the **winner** enters initials, and that screen says whose name it
+  wants. Two name entries per turn would double the slowest part of the flow.
 
-Red Light is the exception and it runs a real lobby — it counts people in and
-starts when nobody new has joined for a couple of seconds.
+Red Light also runs a real lobby before the countdown — it counts people in
+and starts when nobody new has joined for a couple of seconds.
+
+**If the queue is out the door**, set `ASK HOW MANY` to 0 in the operator
+console. The screen disappears and the games go back to detecting two people
+by themselves; they just cannot be told not to.
 
 ### Running a bracket
 
