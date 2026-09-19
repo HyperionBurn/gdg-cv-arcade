@@ -509,15 +509,17 @@ Sept 19 / 20 / 22 sessions in PLAN.md §8 are for.
 
 ### The numbers that have never seen a real body
 
-Every one of these is tuned against a noiseless simulator and is a playtest job:
+Every one of these is tuned against a noiseless simulator and is a playtest job.
+**Every one is also a slider** — checked 2026-09-19, none of them needs a
+rebuild to change, which is the whole point of them being on this list:
 
 | Constant | Where | Risk |
 |---|---|---|
-| `REACH_X = 1.7` shoulder widths | `shell/hover.ts` | Too generous → corner tiles need a stretch. Too tight → cursor pins to edges. **Highest-value tune on Sept 19.** |
-| `moveEnter = 0.85` | `games/redlight.ts` | MediaPipe noise at 3m under hall lighting is unknown. Too low → everyone out in 2s, unrecoverable at a stall. |
-| `0.66` match threshold | `games/poses.ts` | Only 0.07 headroom over the worst confusable pair (was 0.72; lowered after a game-feel review, because real jitter pulls scores DOWN and the error that actually happens is rejecting a pose the player hit). |
-| `inputLatencySec = 0.067` | `games/rhythm.ts` | **Measured for the One Euro filter alone** — a real camera adds capture and inference, so the true figure on the night is higher, not lower. It is 61% of the ±110 ms perfect window, so this is the single most sensitive timing number in the app. Tune by punching deliberately early and late and checking the grades come out symmetric. |
-| `DEFAULT_CLEARANCE` | `games/runner-world.ts` | The clearability proof is exact at the modelled body and no further: a body 20% slower fails 143 of 200 runs. |
+| `REACH_X = 1.7` shoulder widths | `shell/hover.ts` (slider: **REACH — SIDEWAYS**) | Too generous → corner tiles need a stretch. Too tight → cursor pins to edges. **Highest-value tune on Sept 19.** |
+| `moveEnter = 1.1` torso/s | `games/redlight.ts` | MediaPipe noise at 3m under hall lighting is unknown. Too low → everyone out in 2s, unrecoverable at a stall. This is the FLOOR in a silent room; the live threshold is this plus STILL MARGIN × the noise the lobby measured, so the other two Red Light sliders track a noisy one. Slider: **MOVE THRESHOLD**. |
+| `0.66` match threshold | `games/poses.ts` (slider: **MATCH THRESHOLD**) | Only 0.07 headroom over the worst confusable pair (was 0.72; lowered after a game-feel review, because real jitter pulls scores DOWN and the error that actually happens is rejecting a pose the player hit). |
+| `inputLatencySec = 0.067` | `games/rhythm.ts` (slider: **PUNCH LATENCY**) | **Measured for the One Euro filter alone** — a real camera adds capture and inference, so the true figure on the night is higher, not lower. It is 61% of the ±110 ms perfect window, so this is the single most sensitive timing number in the app. Tune by punching deliberately early and late and checking the grades come out symmetric. |
+| `DEFAULT_CLEARANCE` | `games/runner-world.ts` (sliders: **ASSUMED LANE-STEP TIME**, **ASSUMED RECOVERY**) | The clearability proof is exact at the modelled body and no further: a body 20% slower fails 143 of 200 runs. |
 
 ### Known gaps — decisions, not bugs
 
