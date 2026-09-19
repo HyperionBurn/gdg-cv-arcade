@@ -2,7 +2,7 @@
  * Shared round lifecycle for every game.
  *
  * PLAN.md §6 defines one flow: countdown → play → score slam → rank reveal →
- * faction contribution → initials → "wave to play again". Seven games
+ * faction contribution → initials → STEP OUT for the next player. Seven games
  * implementing that separately would be seven chances to get the queue
  * behaviour subtly wrong, so it lives here once.
  *

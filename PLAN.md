@@ -206,7 +206,13 @@ This is the highest-leverage feature in the doc. It converts a solo score into a
 
 ### Live tournament bracket
 
-For 67 Duel and Pose Match. Opt in via the menu, bracket displays on the attract screen between rounds, winner's initials go up in lights. Run it as a scheduled thing — "bracket at 2pm" gives the events team something to post about and creates a crowd spike.
+For 67 Duel, Pose Match and Fruit Ninja — short, loud, head-to-head. Bracket displays on the attract screen between rounds, winner's initials go up in lights. Run it as a scheduled thing — "bracket at 2pm" gives the events team something to post about and creates a crowd spike.
+
+> **Amended 2026-09-19: started from the OPERATOR CONSOLE, not "opt in via the menu".**
+>
+> A bracket is run BY somebody. Names get typed in off a clipboard, a late arrival gets added, a match gets replayed because the camera dropped someone. None of that is a hand-dwell interaction, and putting it on the TV would let a stranger wander into it mid-event. So the marshal seeds it on the BRACKET tab and the only player-facing parts are the ones that should be: the pair called up on the attract headline, and the bracket itself between rounds.
+>
+> Results still report themselves — play the match as a normal versus round and it advances — so the marshal's job during play is only to call the next pair.
 
 ### Ghosts
 
@@ -287,7 +293,7 @@ A dedicated pass, not leftover hours. Feel is why people play twice.
 
 ### The only things we download
 
-- **Fonts.** The one asset worth sourcing — display type matters enormously on a TV. Google Sans is restricted, so realistically Inter or Space Grotesk, **bundled locally**, unless the branding md says otherwise.
+- **Fonts.** The one asset worth sourcing — display type matters enormously on a TV. Google Sans is restricted, so realistically Inter or Space Grotesk, **bundled locally**, unless the branding md says otherwise. **It did:** the kit is Archivo exclusively, and `scripts/fetch-fonts.mjs` vendors four weights of it. Nothing else ships.
 - **Audio** — procedural Web Audio is the plan (see §5). CC0 packs are fallback only.
 
 ---
@@ -299,6 +305,27 @@ A dedicated pass, not leftover hours. Feel is why people play twice.
 - **Calibration** — auto-detect when someone enters the play zone, guide them into frame with an on-screen outline, confirm with a T-pose. Takes 3 seconds and eliminates most framing failures.
 - **Round flow** — countdown, play, score slam, rank reveal, faction contribution, initials, "wave to play again."
 - **Idle timeout** back to attract after 20s.
+
+> **Shipped differently — noted 2026-09-19, so the spec and the glass agree.**
+> The intent above held; four details did not survive contact.
+>
+> - **No glow/trail shader on the silhouette.** The brand conversion removed
+>   every blur and every see-through colour in the app; the silhouette is flat
+>   brand colour with a hard ink shadow. `vignette()` and `scanlines()` survive
+>   as no-ops so nothing had to be deleted in a hurry.
+> - **The calibration confirm is a HOLD, not a T-pose.** Attract counts a
+>   still body in with a ring — `<STAND STILL>` → `<HOLD IT>` → menu. A T-pose
+>   has to be explained; standing still does not, and the whole promise is
+>   "no instructions". `TPoseDetector` was still built and is not dead: the rig
+>   check uses it so an operator can confirm the detectors see a deliberate,
+>   unambiguous shape before the doors open.
+> - **Menu dwell is 1.5s, not 1.2s.** Testers landed on games they had not
+>   chosen. A wrong pick costs a whole turn out of a moving queue, which is the
+>   most expensive mistake the shell can make, so it bought the extra 300ms.
+> - **No "wave to play again".** Results end with `STEP OUT — NEXT PLAYER IN n`
+>   on a fixed 7s window. A replay affordance turns a predictable turn length
+>   into an open-ended one, which is the opposite of what a queue needs — and
+>   turn length being predictable is what the whole flow is built around.
 
 ---
 
@@ -326,7 +353,7 @@ Sequenced so that **every human-gated milestone happens as early as possible**, 
 |---|---|---|
 | **Sep 17–18** | Core: camera, vision worker, tracker, One Euro, gestures, engine, shell skeleton | **Camera hardware test — laptop cam vs iPhone Continuity. Do this first.** Get GDG branding assets from Nawfal. |
 | **Sep 19** | 67 Duel, Balloon Pop, leaderboard, initials | **Playtest 1 — 5+ people of varying heights.** Tune every threshold. |
-| **Sep 20** | Fruit Ninja, Red Light Green Light | **Playtest 2 — Red Light with 6 people.** Needs a real group; can't be faked. |
+| **Sep 20** | Fruit Ninja, Red Light Green Light | **Playtest 2 — Red Light with 5 people.** Needs a real group; can't be faked. (Was 6; see §3.) |
 | **Sep 21** | Pose Match, Rhythm Punch, Runner | **Go/no-go on Runner.** Cut it if it isn't fun. |
 | **Sep 22** | Factions, tournament, ghosts, highlights, operator console, juice + audio pass | **Playtest 3 — full roster, strangers not teammates.** The "do people understand it in 3 seconds" test. |
 | **Sep 23** | Fixes only | **DRESS REHEARSAL: actual TV, actual laptop, actual room, 2+ hours.** Then **hard freeze.** |
