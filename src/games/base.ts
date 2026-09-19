@@ -1373,6 +1373,9 @@ export abstract class GameBase implements Screen {
         gameId: this.config.gameId,
         score: best.score,
         next: router.firstAvailable('menu', 'attract') ?? this.config.gameId,
+        // Versus only. A solo round has nobody to disambiguate from, and
+        // "PLAYER 1 WINS" over a game one person played is nonsense.
+        ...(this.playerCount > 1 && !this.config.partyMode ? { slot: best.slot } : {}),
       });
       this.onExit?.('initials');
       return;

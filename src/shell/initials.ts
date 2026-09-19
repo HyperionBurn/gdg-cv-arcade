@@ -82,6 +82,17 @@ export interface PendingScore {
   score: number;
   /** Screen to route to once submitted. Defaults to the menu. */
   next?: string;
+  /**
+   * Which seat this score came from, when the round was a versus one.
+   *
+   * ONLY THE WINNER ENTERS INITIALS (see `GameBase.finishRound`: two name
+   * entries per turn would double the slowest part of the flow). That is the
+   * right call and it leaves one small hole — two people walk off a split
+   * screen and one keyboard appears, with nothing on it saying whose name it
+   * wants. They will sort it out socially, but it costs one line to not make
+   * them.
+   */
+  slot?: number;
 }
 
 let pending: PendingScore | null = null;
@@ -182,6 +193,8 @@ export class InitialsScreen implements Screen {
   private phase: Phase = 'letters';
   private letters: string[] = [];
   private faction: string | null = null;
+  /** The winning seat of a versus round, or null for a solo one. */
+  private winnerSlot: number | null = null;
   /**
    * Seconds left on the auto-confirm for a remembered faction, or -1 when
    * there is no countdown running (a new player, or one who has started
@@ -233,6 +246,7 @@ export class InitialsScreen implements Screen {
       this.gameId = handoff.gameId;
       this.score = handoff.score;
       this.next = handoff.next ?? 'menu';
+      this.winnerSlot = handoff.slot ?? null;
     }
 
     // NOT `getLastFaction()`. That is one value for the whole kiosk, so
@@ -687,8 +701,19 @@ export class InitialsScreen implements Screen {
     // how a payoff screen stops having a payoff.
     const compact = this.phase !== 'letters';
 
-    drawText(ctx, tile?.title ?? this.gameId.toUpperCase(), v.width / 2, vh(v, compact ? 5 : 5.6), {
-      size: vh(v, TYPE.label),
+    const title =
+      this.winnerSlot === null
+        ? (tile?.title ?? this.gameId.toUpperCase())
+        : `${tile?.title ?? this.gameId.toUpperCase()} · PLAYER ${this.winnerSlot + 1} WINS`;
+    drawText(ctx, title, v.width / 2, vh(v, compact ? 5 : 5.6), {
+      size: fitText(
+        ctx,
+        title,
+        v.width - vh(v, SAFE * 4),
+        vh(v, TYPE.label),
+        WEIGHT.bold,
+        FONTS.body
+      ),
       color: COLORS.ink,
       font: FONTS.body,
       weight: WEIGHT.bold,
