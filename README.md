@@ -15,11 +15,23 @@ from a CDN at runtime, so the stall works with no wifi (PLAN.md §1).
 
 ## Run
 
+Working on the code:
+
 ```bash
 npm run dev
 ```
 
-Then open **http://localhost:5173**.
+Running the stall:
+
+```bash
+npm run kiosk
+```
+
+Then open **http://localhost:5173** (dev) or **http://localhost:4173** (kiosk).
+
+`kiosk` builds once and serves the built files. Use it on the day: the dev
+server keeps a live-reload socket open to the page, so anything touching a file
+on disk reloads the page — mid-round, with a player standing in front of it.
 
 > The camera only works on `localhost` or over https. On plain `http://` with a
 > LAN IP, `getUserMedia` is silently blocked — the app detects this and says so
@@ -28,7 +40,7 @@ Then open **http://localhost:5173**.
 ### Without a camera
 
 ```
-http://localhost:5173/?sim=1
+http://localhost:5173/?sim=1        # or :4173 under `npm run kiosk`
 ```
 
 Runs a synthetic skeleton instead of camera + MediaPipe. Useful for working on
@@ -68,8 +80,8 @@ anything else on this page.
 1. Plug the camera in **first**, then open the laptop.
 2. Turn **sleep off** and **notifications off**. A notification banner lands on
    the TV; a sleeping laptop ends the stall.
-3. Terminal: `npm run dev`
-4. Chrome → `http://localhost:5173` → **Allow** camera.
+3. Terminal: `npm run kiosk`
+4. Chrome → `http://localhost:4173` → **Allow** camera.
 5. Press **`1`** for RIG CHECK. Stand where a player will stand. Do not move on
    until the verdict is green and it says a full body is visible.
 6. Press **`0`** for attract, then **`F`** (fullscreen), then **`C`** (hide the
@@ -84,7 +96,21 @@ anything else on this page.
 | Camera permission was refused | Press **F** to leave fullscreen, click the camera icon in Chrome's address bar, allow, then **F5**. |
 | Someone is standing there and it says STAND IN FRAME | They are too far back or cropped. Move them to the tape. Press **`d`** to see why — the `framing` and `headroom` rows say which. |
 | A game is behaving strangely and you need it back | **PANIC** in the operator console (below), or just **F5**. |
-| Camera is dead and the queue is waiting | `http://localhost:5173/?sim=1` runs a demo with no camera. It starts **muted** — press **`M`**. |
+| Camera is dead and the queue is waiting | `http://localhost:4173/?sim=1` runs a demo with no camera. It starts **muted** — press **`M`**. |
+
+### Why `npm run kiosk` and not `npm run dev`
+
+`kiosk` builds once and serves the built files. `dev` runs Vite's development
+server, which keeps a live-reload socket open to the page: if anything on disk
+changes — an editor autosave, a sync client, somebody pulling a fix between
+rounds — **the page reloads mid-round**, and the player loses their turn with
+no explanation. It also serves 47 unbundled modules instead of two files.
+
+Everything a marshal needs survives the build: `?sim=1`, the `d` overlay, the
+operator console, every key below. The only thing missing is the `__arcade`
+test harness, which is a development tool.
+
+`dev` is still the right thing while working on the code.
 
 ### Keys
 
