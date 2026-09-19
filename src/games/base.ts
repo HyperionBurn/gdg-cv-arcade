@@ -399,6 +399,16 @@ const GATHER_SETTLE_SEC = 1.2;
  * `gatherSeconds` stays as the hard ceiling.
  */
 const GATHER_STABLE_SEC = 2.6;
+/**
+ * Quietest an overtake can be announced, in seconds. See `watchLead`.
+ *
+ * Two players a point apart trade the lead several times a second in a game
+ * like 67 Speed; every one of those is technically an overtake and none of
+ * them is a moment. Long enough to be an event, short enough that a genuine
+ * back-and-forth still reads as one.
+ */
+const LEAD_DEBOUNCE_SEC = 2.5;
+
 const RESULTS_SEC = 7;
 /**
  * Shorter results hold once the player has actually walked off.
@@ -514,6 +524,10 @@ export abstract class GameBase implements Screen {
   private lateJoinAt = -1;
   /** Seconds the tracker has continuously reported fewer people than we count. */
   private rosterBelowFor = 0;
+  /** Who is ahead in a versus round, or -1 before anyone is. See `watchLead`. */
+  private leadSlot = -1;
+  /** `stateTime` of the last lead announcement, for the debounce. */
+  private leadAt = -Infinity;
 
   private lastFrameId = -1;
   private idleTime = 0;
@@ -676,6 +690,8 @@ export abstract class GameBase implements Screen {
     }
     if (state === 'playing') {
       this.capturedThisRound = false;
+      this.leadSlot = -1;
+      this.leadAt = -Infinity;
       // roundScale lets a marshal shorten every round when the queue backs up.
       this.roundTotal = this.config.roundSeconds * tunables.get('game.roundScale', 1);
       this.timeLeft = this.roundTotal;
@@ -830,8 +846,19 @@ export abstract class GameBase implements Screen {
 
   /**
    * PLAN.md §2: "Frame budget watchdog: auto-drop particle density and effect
-   * quality if we miss frame time." Three consecutive slow frames sheds
-   * quality; sustained good frames earn it back.
+   * quality if we miss frame time."
+   *
+   * TWELVE strikes, not three. A strike is one frame over 22.2ms, and a single
+   * slow frame is not a slow machine — a GC pause, a MediaPipe frame landing
+   * late, or the first draw of a screen all produce one. Shedding quality on
+   * three of them means the effects visibly thin out during ordinary play on a
+   * laptop that is coping fine, which reads as the game degrading rather than
+   * protecting itself. Good frames pay a strike back each, so a machine that
+   * is genuinely struggling accumulates; one that hiccups does not.
+   *
+   * `fc.dt` and NOT the juiced dt. Hit-stop and slow-mo deliberately return a
+   * tiny dt and near-miss slow-mo runs for 0.55s at a time; measuring the
+   * watchdog on that would read a celebration as a stall.
    */
   private watchFrameBudget(dt: number): void {
     // Both branches clamp to the operator's cap. Without this, PANIC's quality
@@ -1242,10 +1269,60 @@ export abstract class GameBase implements Screen {
     }
 
     this.onTick(fc, this.players, dt);
+    this.watchLead(fc);
     this.onRender(fc, this.players);
 
     for (const s of this.scores) s.update(fc.dt);
     this.drawHud(fc);
+  }
+
+  /**
+   * THE OVERTAKE IS THE BEST MOMENT IN A VERSUS ROUND, AND IT PASSED IN SILENCE.
+   *
+   * PLAN.md's brief for this project is tactility, feedback and addictiveness,
+   * and a head-to-head has exactly one moment that delivers all three for free:
+   * the instant the person who was losing goes ahead. Until now the only sign
+   * of it was a 2.2vh line under each score flipping between "DOWN BY 3" and
+   * "LEADING BY 1" — information, correctly placed, and completely silent. The
+   * crowd standing behind two friends could not tell it had happened.
+   *
+   * A TIE KEEPS THE INCUMBENT. Scores cross through equality, so treating a
+   * draw as "nobody leads" would fire twice on every overtake — once into the
+   * tie and once out of it — and in a game where both players score on the
+   * same beat it would fire continuously. The lead only changes hands when
+   * somebody is strictly ahead of the person who was.
+   *
+   * And a debounce on top, because two players a point apart trading the lead
+   * every half second is a see-saw, not a drama; announcing all of it is how a
+   * celebration becomes wallpaper.
+   */
+  private watchLead(fc: FrameContext): void {
+    if (this.playerCount !== 2 || this.config.partyMode) return;
+
+    const a = this.scoreFor(0);
+    const b = this.scoreFor(1);
+    const next = a > b ? 0 : b > a ? 1 : this.leadSlot;
+    if (next === this.leadSlot) return;
+
+    const first = this.leadSlot < 0;
+    this.leadSlot = next;
+    // The first player to score has not overtaken anybody.
+    if (first) return;
+    if (this.stateTime - this.leadAt < LEAD_DEBOUNCE_SEC) return;
+    this.leadAt = this.stateTime;
+
+    const rect = this.slotRect(fc.v, next);
+    const color = PLAYER_COLORS[next] ?? COLORS.yellow;
+    this.popups.spawn(
+      `<PLAYER ${next + 1} AHEAD>`,
+      rect.centerX,
+      fc.v.height * 0.3,
+      COLORS.ink,
+      vh(fc.v, 3.6)
+    );
+    this.juice.flash(color, 0.12, 8);
+    this.juice.shake(0.06);
+    audio.play('select', 1.5);
   }
 
   /**

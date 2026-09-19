@@ -68,7 +68,12 @@ const FORMAT_VERSION = 1;
 export const SCORING_VERSION: Record<GameId, number> = {
   sixtyseven: 1,
   fruitninja: 1,
-  redlight: 1,
+  /**
+   * 2: the non-finisher band was FLOORED and capped at 99 so a racer stopped a
+   * hand's width from the line (99.9, rounding to 100) could no longer tie a
+   * racer who actually crossed with no clock left. See `laneScore`.
+   */
+  redlight: 2,
   runner: 1,
   posematch: 1,
   rhythm: 1,
