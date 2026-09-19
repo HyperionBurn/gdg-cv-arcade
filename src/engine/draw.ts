@@ -27,6 +27,7 @@ import {
   WEIGHT,
   prefersReducedMotion,
   rankColor,
+  textColor,
   withAlpha,
 } from '../shell/theme';
 
@@ -569,20 +570,29 @@ export function rankedRow(
   }
 
   // Rank badge. Yellow 1st, blue 2nd, red 3rd, ink after that.
+  const badgeFill = filled ? rankColor(opts.rank) : COLORS.paper;
   ctx.save();
   ctx.shadowBlur = 0;
   ctx.beginPath();
   ctx.arc(badgeCx, cy, badgeR, 0, Math.PI * 2);
-  ctx.fillStyle = filled ? rankColor(opts.rank) : COLORS.paper;
+  ctx.fillStyle = badgeFill;
   ctx.fill();
   ctx.strokeStyle = filled ? COLORS.ink : COLORS.muted;
   ctx.lineWidth = vh(v, STROKE.thin);
   ctx.stroke();
   ctx.restore();
 
+  // THE NUMBER HAS TO CONTRAST WITH THE BADGE IT IS ON.
+  //
+  // `rankColor` is yellow, blue, red — and then INK for 4th and below, which
+  // is the same ink the numeral was hardcoded to. Places 4 and 5 on the
+  // leaderboard, and every place past third on Red Light's six-player
+  // standings board, rendered as a solid black disc with an invisible number
+  // inside it. The one row that most needs to say which place it is was the
+  // one row that could not.
   drawTabularNumber(ctx, String(opts.rank), badgeCx, cy, {
     size: badgeR * 1.15,
-    color: filled ? COLORS.ink : COLORS.muted,
+    color: filled ? textColor(COLORS.ink, badgeFill) : COLORS.muted,
     font: FONTS.body,
     weight: WEIGHT.black,
     letterSpacing: TRACK.number,

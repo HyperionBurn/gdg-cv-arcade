@@ -898,7 +898,7 @@ export class AttractScreen implements Screen {
 
     drawTabularNumber(ctx, `${Math.round(t * 100)}`, cx, cy, {
       size: vh(v, TYPE.body),
-      color: t > 0 ? COLORS.ink : COLORS.muted,
+      color: COLORS.ink,
       font: FONTS.body,
       weight: WEIGHT.black,
       letterSpacing: TRACK.number,
@@ -1122,7 +1122,12 @@ export class AttractScreen implements Screen {
       // being first and from carrying the hard shadow.
       // THE YELLOW RULE: a faction colour can be flat yellow, which is ~1.7:1
       // on paper and simply gone at 3m. textColor() falls back to ink.
-      const factionColor = scored ? textColor(entry.color) : COLORS.muted;
+      // Ink, not muted, before anyone has scored. `muted` is the kit's
+      // DISABLED colour and brand.test.ts already forbids a faction rendering
+      // in it — this was the same failure one layer down: on the morning of
+      // day one nobody has scored, so the entire faction row rendered as
+      // switched off on the screen whose job is to recruit people into one.
+      const factionColor = scored ? textColor(entry.color) : COLORS.ink;
       drawTabularNumber(ctx, part, cursor, rowY, {
         size,
         color: factionColor,
@@ -1141,7 +1146,9 @@ export class AttractScreen implements Screen {
       if (i < parts.length - 1) {
         drawText(ctx, sep, cursor, rowY, {
           size,
-          color: COLORS.muted,
+          // A separator nobody can see lets two faction scores run together
+          // into one number.
+          color: COLORS.ink,
           font: FONTS.body,
           weight: WEIGHT.black,
           align: 'left',

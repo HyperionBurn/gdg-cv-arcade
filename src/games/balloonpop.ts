@@ -869,7 +869,7 @@ export class BalloonPopGame extends GameBase {
       // Balloons drift across this line too. `drawTabularNumber` forwards opts
       // straight to `drawText`, so the knockout comes along per glyph.
       knockout: true,
-      color: COLORS.muted,
+      color: COLORS.ink,
       font: FONTS.body,
       weight: WEIGHT.bold,
       letterSpacing: TRACK.pill,

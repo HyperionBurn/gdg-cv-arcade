@@ -1650,9 +1650,14 @@ export class RedLightGame extends GameBase {
 
     const labelY = y - g.h * 0.46;
     if (out) {
+      // RED, matching the X struck through the marker beside it, not the
+      // kit's disabled grey. Elimination is the loudest event in this game and
+      // the word announcing it was the least legible thing on the lane — and
+      // the racer it is aimed at has just been told to stop moving, so it is
+      // the one label they are definitely reading.
       drawText(ctx, 'OUT', x, labelY, {
         size: vh(v, 2.1),
-        color: COLORS.muted,
+        color: COLORS.red,
         font: FONTS.body,
         weight: WEIGHT.black,
         letterSpacing: TRACK.pill,

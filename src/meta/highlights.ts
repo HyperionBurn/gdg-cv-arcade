@@ -732,11 +732,13 @@ class Highlights {
       letterSpacing: labelTrack,
     });
 
-    // Kicker above the score. Muted, because `textDim` resolves to ink now and
-    // a secondary line set in ink competes with the number it belongs to.
+    // Kicker above the score: "NEW RECORD", "#3 TODAY". This is the line the
+    // whole replay exists to deliver, and it was set in the kit's DISABLED
+    // grey (1.9:1 on paper) to stop it competing with the score. It does not
+    // compete: it is 3vh above an 11vh number. Hierarchy here is size.
     drawText(ctx, m.label, v.width / 2, v.height - vh(v, 15), {
       size: vh(v, 3),
-      color: COLORS.muted,
+      color: COLORS.ink,
       font: FONTS.body,
       weight: WEIGHT.bold,
       letterSpacing: '0.26em',

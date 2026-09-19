@@ -32,6 +32,7 @@ import {
   roundRect,
   graphPaper,
   labelPill,
+  rankedRow,
 } from '../engine/draw';
 import {
   COLORS,
@@ -39,7 +40,9 @@ import {
   FONTS,
   EASE,
   SHADOW,
+  SPACE,
   STROKE,
+  WEIGHT,
   textColor,
   dur,
   ramp,
@@ -953,7 +956,7 @@ export abstract class GameBase implements Screen {
       size: vh(v, 2.2),
       // Sits over the pre-round camera ghost at its strongest.
       knockout: true,
-      color: COLORS.muted,
+      color: COLORS.ink,
       font: FONTS.body,
       weight: 400,
     });
@@ -1021,7 +1024,7 @@ export abstract class GameBase implements Screen {
     );
     drawText(ctx, `STEP IN — UP TO ${this.config.maxPlayers} CAN PLAY`, v.width / 2, v.height * 0.56, {
       size: vh(v, 2.4),
-      color: COLORS.muted,
+      color: COLORS.ink,
       font: FONTS.body,
       weight: 500,
       alpha: pulse,
@@ -1033,7 +1036,7 @@ export abstract class GameBase implements Screen {
     );
     drawText(ctx, `<STARTING IN ${Math.ceil(remain)}>`, v.width / 2, v.height * 0.73, {
       size: vh(v, 2.2),
-      color: COLORS.muted,
+      color: COLORS.ink,
       font: FONTS.mono,
       weight: 600,
       letterSpacing: '0.1em',
@@ -1142,9 +1145,9 @@ export abstract class GameBase implements Screen {
     // shown at "1" is a taunt — and it is worded as a THING TO DO, because a
     // player reads about four words off a TV mid-queue.
     // A PILL, NOT A GREY LINE. First pass drew this as muted text and it was
-    // invisible on the TV — `COLORS.muted` is the app's "this is secondary"
-    // grey, which at 3 metres is the same as "this is absent". The yellow
-    // action badge is the shape this app already uses for "do this now"
+    // invisible on the TV — `COLORS.muted` is the kit's DISABLED colour, which
+    // at 3 metres is the same as absent (see the guard in brand.test.ts). The
+    // yellow action badge is the shape this app already uses for "do this now"
     // ("BE THE FIRST!", "NEW BEST!"), so it costs a passer-by nothing to
     // learn and it survives being read past a moving arm.
     if (this.config.supportsVersus && this.playerCount === 1 && remaining > INVITE_UNTIL_SEC) {
@@ -1305,7 +1308,8 @@ export abstract class GameBase implements Screen {
       // panel would otherwise snap in at full opacity with no entrance at all.
       if (this.panelStart < 0) this.panelStart = this.stateTime;
       const pt = ramp(this.stateTime - this.panelStart, 0.5);
-      if (versus) this.drawVersusResults(fc, pt);
+      if (this.config.partyMode && this.playerCount > 1) this.drawPartyResults(fc, pt);
+      else if (versus) this.drawVersusResults(fc, pt);
       else this.drawSoloResults(fc, pt);
     }
 
@@ -1322,7 +1326,7 @@ export abstract class GameBase implements Screen {
       const remain = Math.ceil(RESULTS_SEC - this.stateTime);
       drawText(ctx, `NEXT PLAYER IN ${remain}`, v.width / 2, v.height * 0.93, {
         size: vh(v, 2),
-        color: COLORS.muted,
+        color: COLORS.ink,
         font: FONTS.mono,
         weight: 500,
         letterSpacing: '0.1em',
@@ -1370,7 +1374,7 @@ export abstract class GameBase implements Screen {
 
     drawText(ctx, this.primaryLabel(), v.width / 2, v.height * 0.26, {
       size: vh(v, 2.6),
-      color: COLORS.muted,
+      color: COLORS.ink,
       font: FONTS.body,
       weight: 600,
       letterSpacing: '0.24em',
@@ -1415,7 +1419,7 @@ export abstract class GameBase implements Screen {
         alpha: t,
         ...(won
           ? this.playerTextStyle(color, vh(v, SHADOW.base))
-          : { color: COLORS.muted }),
+          : { color: COLORS.ink }),
       });
 
       ctx.save();
@@ -1424,7 +1428,7 @@ export abstract class GameBase implements Screen {
       ctx.scale(s, s);
       drawText(ctx, String(this.scores[slot]?.value ?? res.score), 0, 0, {
         size: vh(v, 14),
-        color: won ? color : COLORS.muted,
+        color: won ? color : COLORS.ink,
         shadow: won ? vh(v, SHADOW.lifted) : 0,
               });
       ctx.restore();
@@ -1461,6 +1465,90 @@ export abstract class GameBase implements Screen {
 
     const best = winner === 1 ? b : a;
     if (this.stateTime > 1) this.drawRankLine(fc, best.rank, v.height * 0.74);
+  }
+
+  /**
+   * SIX PLAYERS, SIX ROWS.
+   *
+   * The results screen had exactly two renderers: one score (solo) and two
+   * scores (versus). Red Light is the only party game on the roster and it
+   * seats six, so it fell to the SOLO branch — `results[0]`, one number, for a
+   * round six people just played. Fixing `scoreFor` to return a real score per
+   * lane (see `laneScore`) produced six distinct numbers that nothing on
+   * screen ever showed.
+   *
+   * And the results screen is where a party game pays off. The whole pitch is
+   * "last one standing"; the moment that lands is the standings.
+   *
+   * Sorted by score, not by lane. A leaderboard sorted by seating order is a
+   * seating chart. `PLAYER n` is the LANE number so a racer can find
+   * themselves — it is what the lane marker showed them all round — while the
+   * rank badge carries the placing, so the two never get confused.
+   */
+  private drawPartyResults(fc: FrameContext, t: number): void {
+    const { ctx, v } = fc;
+    if (this.results.length === 0) return;
+
+    const board = [...this.results].sort((a, b) => b.score - a.score);
+    const pop = EASE.back(ramp(this.stateTime, 0.6));
+
+    drawText(ctx, '<FINAL STANDINGS>', v.width / 2, v.height * 0.17, {
+      size: vh(v, 3.4),
+      color: COLORS.ink,
+      font: FONTS.body,
+      weight: WEIGHT.black,
+      letterSpacing: '0.2em',
+      alpha: t,
+    });
+
+    // Sized from the ROW COUNT, so two racers get big readable rows and six
+    // still fit above the "NEXT PLAYER IN" line at 0.93.
+    const top = v.height * 0.24;
+    const bottom = v.height * 0.84;
+    const gap = vh(v, 1.4);
+    const rowH = Math.min(vh(v, 9), (bottom - top + gap) / board.length - gap);
+    const w = Math.min(v.width * 0.56, v.width - vh(v, SPACE.xl) * 2);
+    const x = (v.width - w) / 2;
+
+    for (let i = 0; i < board.length; i++) {
+      const r = board[i]!;
+      const y = top + i * (rowH + gap);
+      // Rows land one after another rather than all at once: six rows arriving
+      // together is a table, six rows arriving in sequence is a result.
+      const enter = ramp(this.stateTime - i * 0.08, 0.35);
+      if (enter <= 0) continue;
+
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, t) * enter;
+      // Only the winner's row is accented. Six accented rows is six winners.
+      rankedRow(ctx, v, x, y, w, rowH, {
+        rank: i + 1,
+        name: `PLAYER ${r.slot + 1}`,
+        value: String(this.scores[r.slot]?.value ?? r.score),
+        ...(i === 0 ? { accent: PLAYER_COLORS[r.slot] ?? COLORS.yellow } : {}),
+      });
+      ctx.restore();
+    }
+
+    // The winner's tag, on the winner's row, once the row has landed.
+    const champ = board[0];
+    if (champ && this.stateTime > 0.8) {
+      const tie = board.filter((r) => r.score === champ.score).length > 1;
+      ctx.save();
+      ctx.translate(x + w, top + rowH / 2);
+      ctx.scale(pop, pop);
+      labelPill(ctx, v, vh(v, 1.2), 0, tie ? 'DEAD HEAT' : 'WINNER', rowH * 0.62, {
+        size: rowH * 0.26,
+        fill: COLORS.yellow,
+        color: COLORS.ink,
+        outline: COLORS.ink,
+        outlineWidth: vh(v, STROKE.base),
+        shadow: vh(v, SHADOW.base),
+        align: 'left',
+        tilt: -6,
+      });
+      ctx.restore();
+    }
   }
 
   /**
@@ -1529,7 +1617,7 @@ export abstract class GameBase implements Screen {
         });
         drawText(ctx, `${rank.total} PLAYED`, v.width / 2, y + vh(v, 4.4), {
           size: vh(v, 2.2),
-          color: COLORS.muted,
+          color: COLORS.ink,
           font: FONTS.body,
           weight: 600,
           letterSpacing: '0.1em',
@@ -1539,7 +1627,7 @@ export abstract class GameBase implements Screen {
 
       drawText(ctx, `NOT IN THE TOP 10 — ${rank.total} PLAYED`, v.width / 2, y, {
         size: vh(v, 2.4),
-        color: COLORS.muted,
+        color: COLORS.ink,
         font: FONTS.body,
         weight: 600,
         letterSpacing: '0.1em',
@@ -1772,7 +1860,7 @@ export abstract class GameBase implements Screen {
       vh(v, m.clockY),
       {
         size: vh(v, m.clockSize),
-        color: urgent ? COLORS.red : COLORS.muted,
+        color: urgent ? COLORS.red : COLORS.ink,
         font: FONTS.mono,
         weight: 700,
         align: m.inlineRow ? 'left' : 'center',
@@ -1795,7 +1883,7 @@ export abstract class GameBase implements Screen {
       drawText(ctx, this.primaryLabel(), rect.centerX, vh(v, m.labelY), {
         size: vh(v, m.labelSize),
         knockout: true,
-        color: COLORS.muted,
+        color: COLORS.ink,
         font: FONTS.body,
         weight: 600,
         letterSpacing: '0.24em',
@@ -1926,7 +2014,7 @@ export abstract class GameBase implements Screen {
         size: chase(2.2),
         align: chaseAlign,
         knockout: true,
-        color: COLORS.muted,
+        color: COLORS.ink,
         font: FONTS.body,
         weight: 700,
         letterSpacing: '0.1em',
@@ -1945,7 +2033,7 @@ export abstract class GameBase implements Screen {
         size: chase(close ? 2.6 : 2.2),
         align: chaseAlign,
         knockout: true,
-        color: close ? COLORS.ink : COLORS.muted,
+        color: COLORS.ink,
         font: FONTS.body,
         weight: 700,
         letterSpacing: '0.1em',

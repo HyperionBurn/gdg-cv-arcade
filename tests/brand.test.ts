@@ -145,3 +145,118 @@ describe('player colours', () => {
     assert.ok(PLAYER_COLORS.length >= 6);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* Muted is DISABLED, not "secondary"                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * BRAND.md gives `muted` exactly one job: "placeholders, disabled, empty
+ * slots". It measures 1.88:1 on paper — barely half this project's own
+ * MIN_CONTRAST of 3 — so anything set in it on a television three metres away
+ * is not dim, it is gone.
+ *
+ * It had spread to 25 live, player-facing strings: every game's tagline on the
+ * screen a stranger reads first, the round clock, "COMBO ×1.25" (the feedback
+ * the playtest singled out as the best in the game), "NEXT PLAYER IN 4",
+ * "<STEP LEFT OR RIGHT>" — the Runner's only statement of its own control —
+ * the replay's "NEW RECORD" kicker, and Red Light's "OUT". Each one was a
+ * local, reasonable-looking decision to make something secondary, and colour
+ * is the wrong axis for that: hierarchy here is SIZE and WEIGHT, which is what
+ * BRAND.md means by keeping the kit's ratios.
+ *
+ * So the rule is mechanical now. A `color: COLORS.muted` in the source is a
+ * claim that the thing is disabled or empty, and every remaining one is listed
+ * below with why.
+ */
+describe('muted is the disabled colour, and nothing else', () => {
+  /**
+   * One line of source that sets TEXT in muted.
+   *
+   * `fill`, `outline`, `stroke` and `shadowColor` in muted are the brand's
+   * empty-slot treatment and are correct, so they are excluded. The ternary
+   * form is included because it is the one that actually spread: `color:
+   * active ? COLORS.ink : COLORS.muted` reads as a tidy two-state style, and
+   * it is how the Runner's JUMP and SLIDE labels ended up legible only while
+   * the player was already doing the thing they were there to teach.
+   *
+   * SCOPE, stated honestly: this catches the `color:` draw option, which is
+   * where every one of the 25 offences lived. It does not catch a muted colour
+   * bound to a local (`const color = out ? COLORS.muted : r.color`) or passed
+   * positionally, and those remaining few are all genuine disabled states —
+   * an eliminated racer's chip, a stunned hand marker, the shadow under a
+   * dead key. A guard that covered everything would need a type checker; a
+   * guard that covers the shape the bug actually took is worth having today.
+   */
+  const setsMutedText = (line: string): boolean =>
+    /(?<!shadow)[Cc]olor:\s*COLORS\.muted\b/.test(line) ||
+    /[Cc]olor:.*\?.*:\s*COLORS\.muted\b/.test(line);
+
+  const ALLOWED: Record<string, string> = {
+    'src/games/base.ts': 'the ghost skeleton — a ghost is meant to be faint',
+    'src/engine/draw.ts': 'an EMPTY leaderboard row — the kit’s dashed empty slot',
+    'src/games/rhythm.ts': 'grey dust particles on a missed note',
+    'src/shell/menu.ts': 'a feature-flagged-off tile, which IS disabled',
+  };
+
+  test('muted genuinely fails the contrast floor it kept being used under', () => {
+    assert.ok(
+      contrastRatio(COLORS.muted, COLORS.paper) < MIN_CONTRAST,
+      'if this ever passes, the rule below can be relaxed'
+    );
+  });
+
+  test('no player-facing text is drawn in it', async () => {
+    const { readdir, readFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+
+    const walk = async (dir: string): Promise<string[]> => {
+      const out: string[] = [];
+      for (const e of await readdir(dir, { withFileTypes: true })) {
+        const p = join(dir, e.name);
+        if (e.isDirectory()) out.push(...(await walk(p)));
+        else if (e.name.endsWith('.ts')) out.push(p);
+      }
+      return out;
+    };
+
+    const offenders: string[] = [];
+    for (const file of await walk('src')) {
+      // `join` gives backslashes on Windows; the allowlist is written the way
+      // the repo writes paths.
+      // `join` gives backslashes on Windows; the allowlist is written the way
+      // the repo writes paths.
+      const rel = file.split(/[\\/]/).join('/');
+      const src = await readFile(file, 'utf8');
+      const lines = src.split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
+        if (!setsMutedText(line)) continue;
+        if (rel in ALLOWED) continue;
+        offenders.push(`${rel}:${i + 1}`);
+      }
+    }
+
+    assert.deepEqual(
+      offenders,
+      [],
+      `muted is the DISABLED colour (1.88:1 on paper). Use ink and make it ` +
+        `secondary by size and weight, or add the file to ALLOWED with a reason:\n  ` +
+        offenders.join('\n  ')
+    );
+  });
+
+  test('every file on the allowlist still actually uses it', () => {
+    // A stale allowlist entry is permission nobody asked for.
+    return Promise.all(
+      Object.keys(ALLOWED).map(async (rel) => {
+        const { readFile } = await import('node:fs/promises');
+        const src = await readFile(rel, 'utf8');
+        assert.ok(
+          src.split('\n').some((line) => setsMutedText(line)),
+          `${rel} no longer sets muted text — drop it from ALLOWED`
+        );
+      })
+    );
+  });
+});

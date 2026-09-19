@@ -447,9 +447,11 @@ export class RigCheckScreen implements Screen {
         color: COLORS.red,
         shadow: vh(v, SHADOW.lifted),
       });
+      // The actual reason the camera failed, on the screen a marshal opens
+      // when the stall is already broken. Never the disabled grey.
       drawText(ctx, cam.error ?? '', v.width / 2, v.height / 2 + vh(v, 2), {
         size: vh(v, 2.2),
-        color: COLORS.muted,
+        color: COLORS.ink,
         font: FONTS.body,
         weight: WEIGHT.medium,
       });
@@ -575,7 +577,7 @@ export class RigCheckScreen implements Screen {
         y + boxH + vh(v, 2.6),
         {
           size: vh(v, 1.6),
-          color: COLORS.muted,
+          color: COLORS.ink,
           font: FONTS.mono,
           weight: WEIGHT.bold,
           letterSpacing: TRACK.number,
@@ -607,7 +609,7 @@ export class RigCheckScreen implements Screen {
         ctx.restore();
         drawText(ctx, t >= 1 ? '<T-POSE OK>' : 'HOLD T-POSE', cx, cy + r + vh(v, 2.4), {
           size: vh(v, 1.6),
-          color: t >= 1 ? COLORS.ink : COLORS.muted,
+          color: COLORS.ink,
           font: FONTS.mono,
           weight: WEIGHT.bold,
           letterSpacing: TRACK.pill,
@@ -649,9 +651,12 @@ export class RigCheckScreen implements Screen {
         shadow: active ? vh(v, SHADOW.base) : 0,
       });
 
+      // A LIVE READOUT HAS TO BE READABLE WHEN IT IS NOT FIRING. That is the
+      // state a marshal is diagnosing: "the pump detector says 0.31 and
+      // nothing is happening". The fill/no-fill flip still carries active.
       drawText(ctx, label, x + vh(v, 1.6), y + h / 2, {
         size: vh(v, 1.7),
-        color: active ? COLORS.ink : COLORS.muted,
+        color: COLORS.ink,
         align: 'left',
         font: FONTS.mono,
         weight: WEIGHT.bold,
@@ -659,7 +664,7 @@ export class RigCheckScreen implements Screen {
       });
       drawTabularNumber(ctx, value, x + w - vh(v, 1.6), y + h / 2, {
         size: vh(v, 1.7),
-        color: active ? COLORS.ink : COLORS.muted,
+        color: COLORS.ink,
         align: 'right',
         font: FONTS.mono,
         weight: WEIGHT.black,
@@ -697,7 +702,7 @@ export class RigCheckScreen implements Screen {
     const energy = Math.min(1, (this.energy[readSlot] ?? 0) * 12);
     drawText(ctx, 'MOTION', pad, y + rowH * 0.42, {
       size: vh(v, 1.7),
-      color: COLORS.muted,
+      color: COLORS.ink,
       align: 'left',
       font: FONTS.mono,
       weight: WEIGHT.bold,

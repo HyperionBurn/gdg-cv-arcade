@@ -1138,7 +1138,7 @@ export class FruitNinjaGame extends GameBase {
 
     drawTabularNumber(ctx, `${sliced} SLICED`, rect.centerX, v.height - vh(v, 3), {
       size: vh(v, 2),
-      color: COLORS.muted,
+      color: COLORS.ink,
       font: FONTS.body,
       weight: WEIGHT.bold,
       letterSpacing: TRACK.pill,

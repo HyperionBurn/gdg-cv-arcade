@@ -891,9 +891,16 @@ export class RunnerGame extends GameBase {
       });
     }
 
-    drawText(ctx, '<STEP LEFT OR RIGHT>', cx, y + vh(v, 3.4), {
-      size: vh(v, 1.5),
-      color: COLORS.muted,
+    // The only place the game names its own control. It was 1.5vh of muted
+    // grey — 16px at 1080p at 1.9:1 contrast — which is a control instruction
+    // that cannot be read from the place the player is standing.
+    // BELOW the action pills, not between them. At 1.5vh the line was short
+    // enough to sit in the gap; at a size anyone can actually read it is ~300px
+    // wide and runs straight under JUMP and SLIDE, which sit at +-34% of the
+    // width with a 4.2vh pill body. Pills bottom out at height-6.15vh.
+    drawText(ctx, '<STEP LEFT OR RIGHT>', cx, y + vh(v, 5.6), {
+      size: vh(v, 2),
+      color: COLORS.ink,
       font: FONTS.body,
       weight: WEIGHT.bold,
       letterSpacing: '0.2em',
@@ -943,9 +950,14 @@ export class RunnerGame extends GameBase {
       shadow: active ? vh(v, SHADOW.lifted) : 0,
     });
 
+    // INK EVEN WHEN IDLE. These two words are the game's only statement that
+    // jumping and sliding exist at all, and in the kit's disabled grey they
+    // were legible only while the player was already doing the thing they
+    // were supposed to be teaching. The pill still reads as not-firing from
+    // its paper fill, thin outline and missing lift.
     drawText(ctx, label, cx, cy, {
       size: vh(v, 1.9),
-      color: active ? COLORS.ink : COLORS.muted,
+      color: COLORS.ink,
       font: FONTS.body,
       weight: WEIGHT.bold,
       letterSpacing: '0.18em',
@@ -1008,9 +1020,9 @@ export class RunnerGame extends GameBase {
       weight: WEIGHT.black,
       letterSpacing: TRACK.number,
     });
-    drawText(ctx, 'M/S', x, top + height + vh(v, 5.4), {
-      size: vh(v, 1.3),
-      color: COLORS.muted,
+    drawText(ctx, 'M/S', x, top + height + vh(v, 5.5), {
+      size: vh(v, 1.8),
+      color: COLORS.ink,
       font: FONTS.body,
       weight: WEIGHT.bold,
       letterSpacing: '0.2em',
@@ -1061,7 +1073,7 @@ export class RunnerGame extends GameBase {
     });
     drawTabularNumber(ctx, text, 0, 0, {
       size,
-      color: running ? COLORS.ink : COLORS.muted,
+      color: COLORS.ink,
       font: FONTS.body,
       weight: WEIGHT.black,
       letterSpacing: TRACK.number,
@@ -1069,9 +1081,9 @@ export class RunnerGame extends GameBase {
     ctx.restore();
 
     const label = !running ? 'CLEAR TO SPEED UP' : maxed ? 'MAX SPEED' : `${this.streak} CLEAN`;
-    drawText(ctx, label, x, y + h * 0.5 + vh(v, 2.4), {
-      size: vh(v, 1.4),
-      color: COLORS.muted,
+    drawText(ctx, label, x, y + h * 0.5 + vh(v, 2.6), {
+      size: vh(v, 1.9),
+      color: COLORS.ink,
       font: FONTS.body,
       weight: WEIGHT.bold,
       letterSpacing: '0.16em',

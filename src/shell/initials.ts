@@ -926,9 +926,12 @@ export class InitialsScreen implements Screen {
           letterSpacing: TRACK.number,
         });
       } else {
+        // Not a placeholder in the kit's sense — it is the ANSWER to "how is
+        // this faction doing", on the screen where a player picks one. It has
+        // to be as readable as the score it stands in for.
         drawText(ctx, 'NO POINTS YET', cx, ty + target.h * 0.64, {
           size: vh(v, TYPE.label),
-          color: COLORS.muted,
+          color: COLORS.ink,
           font: FONTS.body,
           weight: WEIGHT.bold,
           letterSpacing: TRACK.pill,

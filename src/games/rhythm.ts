@@ -1643,7 +1643,11 @@ export class RhythmGame extends GameBase {
 
     if (s.gradeFlash <= 0 || !s.lastGrade) return;
     const label = s.lastGrade === 'miss' ? 'MISS' : `<${s.lastGrade.toUpperCase()}>`;
-    const color = s.lastGrade === 'miss' ? COLORS.muted : GRADE_COLORS[s.lastGrade];
+    // MISS stays the quiet one — flat ink against three brand colours — but
+    // quiet is not the same as invisible. In the kit's disabled grey the word
+    // telling a player they missed could not be read from where they stand,
+    // which removes the only half of the feedback loop that teaches timing.
+    const color = s.lastGrade === 'miss' ? COLORS.ink : GRADE_COLORS[s.lastGrade];
     const at = this.targetPos(slot, 0, 1.6);
     drawText(ctx, label, at.x, at.y, {
       size: vh(v, TYPE.body + EASE.out(s.gradeFlash) * 1.2),
@@ -1696,9 +1700,11 @@ export class RhythmGame extends GameBase {
       });
       ctx.restore();
 
+      // The multiplier the playtest singled out as the best feedback in the
+      // game, drawn in the kit's DISABLED grey.
       drawText(ctx, `COMBO ×${this.comboMultiplier(s.combo).toFixed(2)}`, rect.centerX, vh(v, 32), {
         size: vh(v, TYPE.micro),
-        color: COLORS.muted,
+        color: COLORS.ink,
         font: FONTS.body,
         weight: WEIGHT.bold,
         letterSpacing: TRACK.body,
@@ -1715,7 +1721,7 @@ export class RhythmGame extends GameBase {
       v.height - vh(v, 6.6),
       {
         size: vh(v, TYPE.label),
-        color: COLORS.muted,
+        color: COLORS.ink,
         font: FONTS.body,
         weight: WEIGHT.bold,
         letterSpacing: TRACK.number,

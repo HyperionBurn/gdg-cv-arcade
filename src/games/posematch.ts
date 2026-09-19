@@ -1016,9 +1016,10 @@ export class PoseMatchGame extends GameBase {
     const accLabel = `AVG ${Math.round(acc * 100)}%`;
     drawTabularNumber(ctx, accLabel, barX - vh(v, 2), barY + barH / 2, {
       size: vh(v, 2.2),
-      // Secondary by intent. `textDim` now resolves to ink, which made this
-      // read at exactly the same weight as the live figure.
-      color: COLORS.muted,
+      // Secondary by SIZE, not by colour: 2.2vh against the live figure's
+      // much larger setting. Colour was doing the job before and doing it by
+      // making the number unreadable — muted is 1.9:1 on paper.
+      color: COLORS.ink,
       font: FONTS.body,
       weight: WEIGHT.black,
       align: 'right',
