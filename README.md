@@ -513,6 +513,33 @@ time; neither is a bug.
 threshold is right for a real body under hall lighting. That is what the
 Sept 19 / 20 / 22 sessions in PLAN.md §8 are for.
 
+### Which rules are tested, and which were only ever measured
+
+Surveyed 2026-09-19, game by game, after finding that Balloon Pop's arming
+line — the rule that stops the game playing itself — rested on a measurement
+nobody could reproduce.
+
+| Game | Core rule | Was |
+|---|---|---|
+| 67 Speed | anti-cheat: still body, twitching, hostile noise | **tested** (15) |
+| Pose Match | the pass decision, at every point on the ramp | **tested** (25) |
+| Runner | lane: 20cm lean vs 10cm weight-shift, two minutes still | **tested** (19) |
+| Balloon Pop | the arming line | measurement only → **tested** |
+| Red Light | elimination | tolerant smoke probe only → **tested** |
+| Fruit Ninja | bomb cost | measurement only → **tested** |
+| Rhythm | hit judging and latency sign | chart tested, judging not → **tested** |
+
+Four were already sound. Three had real gaps, and in each case the rule was
+extracted into a pure function the game itself calls — `isPoppable`,
+`judgeRedLight`, `bombPenalty`, `judgeOffset` — so the test and the game
+cannot drift apart. Same move as `laneScore`, and for the same reason.
+
+The pattern worth remembering: a rule with a MEASUREMENT next to it reads as
+covered and is not. A measurement is a reading taken once, on a build that no
+longer exists, by a method that may no longer be possible — Balloon Pop's could
+not be re-run at all, because the simulator cannot place a wrist at a chosen
+point.
+
 ### The numbers that have never seen a real body
 
 Every one of these is tuned against a noiseless simulator and is a playtest job.
