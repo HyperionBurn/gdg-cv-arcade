@@ -479,9 +479,8 @@ body.op-open {
   color: var(--green);
 }
 
-/* The whole chip goes yellow and the value stays ink, matching how
-   `.op-chip-bad` tints its whole chip red. A warning nobody can read is not a
-   warning. */
+/* The whole chip goes yellow and the value stays ink. A warning nobody can
+   read is not a warning. */
 .op-chip-warn {
   border-color: var(--ink);
   background: var(--yellow);
@@ -495,13 +494,35 @@ body.op-open {
   color: var(--ink);
 }
 
+/* THE WORST STATE IN THE CONSOLE WAS THE QUIETEST THING IN IT.
+
+   This used to be a 12% red tint with red type, while `.op-chip-warn` beside
+   it is a SOLID yellow fill — so `AUDIO MUTED` outshouted `NOT SAVING — DO
+   NOT RELOAD`, which is the one chip in the strip that means the day is being
+   thrown away. Caught by looking at the two rendered side by side; the comment
+   above this block used to claim bad already "tints its whole chip red",
+   describing an intent the CSS never delivered.
+
+   Now it matches `.rig-fault`, which is this codebase's existing answer to the
+   same question: the colour is the SURFACE and the type is ink. That is also
+   the brand rule the rig check's verdict card is built on — flat red cannot
+   hold text on paper, so it has to be underneath it. Measured in the browser,
+   not estimated: ink on red is 4.81:1, against 3.34:1 for the red-on-tint it
+   replaces — a hair over the MIN_CONTRAST floor of 3. The KEY was worse still,
+   left at --text-faint because no rule ever overrode it, which is why
+   "TUNING + BRACKET + SCORES" read as grey.
+
+   Dropping the alpha is the point as much as the fill: a brand colour laid
+   over whatever is behind it is not the brand colour any more. */
 .op-chip-bad {
-  border-color: rgba(234, 67, 53, 0.55);
-  background: rgba(234, 67, 53, 0.12);
+  border-color: var(--ink);
+  background: var(--red);
 }
 
-.op-chip-bad .op-chip-v {
-  color: var(--red);
+.op-chip-bad .op-chip-v,
+.op-chip-bad .op-chip-k {
+  color: var(--ink);
+  font-weight: 700;
 }
 
 .op-head-actions {

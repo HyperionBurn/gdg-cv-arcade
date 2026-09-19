@@ -16,7 +16,11 @@ import { resizeCanvas, viewportOf, drawText, measureText, vh } from './engine/dr
 import { COLORS } from './shell/theme';
 import type { FrameContext } from './shell/screen';
 import { router } from './shell/router';
-import { drawDebugOverlay, toggleDebug, watchForDebug } from './shell/debug';
+import { drawDebugOverlay, toggleDebug, watchForDebug, logDebug } from './shell/debug';
+import { probeStorage } from './meta/storage';
+import { leaderboard } from './meta/leaderboard';
+import { tunables } from './meta/tunables';
+import { tournament } from './meta/tournament';
 import { RigCheckScreen } from './shell/rigcheck';
 import { installOperatorConsole } from './shell/operator';
 import { highlights } from './meta/highlights';
@@ -331,6 +335,25 @@ async function boot(): Promise<void> {
   requestAnimationFrame(loop);
 
   await loadFonts();
+
+  // WILL THIS PROFILE LET US WRITE ANYTHING DOWN?
+  //
+  // All three stores raise `saveFailed` when a write is refused, but none of
+  // them can notice until something has already been lost — the first slider
+  // move, the first reported match, the first submitted score. The condition
+  // worth catching is a profile that was never going to allow storage at all:
+  // locked-down, managed, or a private window somebody opened without
+  // thinking. That is present from load, fixable in ten seconds at 9am, and
+  // not fixable at 3pm without throwing away the morning.
+  //
+  // One probe answers for all three because localStorage is per-origin, so a
+  // refusal belongs to the origin and not to any one key. See meta/storage.ts.
+  if (!probeStorage()) {
+    leaderboard.saveFailed = true;
+    tunables.saveFailed = true;
+    tournament.saveFailed = true;
+    logDebug('storage refused a probe write — nothing will persist');
+  }
 
   if (SIM) {
     // Skip camera and MediaPipe entirely. Games see synthetic poses.
