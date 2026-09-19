@@ -1203,13 +1203,37 @@ export class AttractScreen implements Screen {
     const sep = '  ·  ';
     const line = parts.join(sep);
     const maxW = v.width - vh(v, SAFE * 2 + SPACE.lg);
-    // '0px' explicitly: this row is drawn by `drawTabularNumber` with no letter
-    // spacing, and the rule is that every fitText call states what it measured
-    // against rather than leaving it to a default nobody checks.
-    const size = fitText(ctx, line, maxW, vh(v, TYPE.heading), WEIGHT.black, FONTS.body, '0px');
-    const sepW = measureTabularNumber(ctx, sep, size, WEIGHT.black, FONTS.body);
-    const widths = parts.map((part) => measureTabularNumber(ctx, part, size, WEIGHT.black, FONTS.body));
-    const total = widths.reduce((a, b) => a + b, 0) + sepW * (parts.length - 1);
+    // FIT AGAINST THE MEASUREMENT THIS ROW IS ACTUALLY LAID OUT WITH.
+    //
+    // `fitText` measures proportionally; every width below comes from
+    // `measureTabularNumber`, which gives each digit the width of '0'. Those
+    // are different numbers, and tabular is the larger one whenever the string
+    // contains a digit narrower than '0' — which for a faction total is most
+    // of them, and worst for a row full of 1s. So the old code fitted the line
+    // to `maxW` and then laid it out wider than `maxW`, and `cursor` went
+    // negative: the row ran off BOTH edges of the screen.
+    //
+    // Fit once proportionally to get close, then correct against the real
+    // total. One extra measuring pass on a row that changes a few times an
+    // hour.
+    let size = fitText(ctx, line, maxW, vh(v, TYPE.heading), WEIGHT.black, FONTS.body, '0px');
+    const layout = (): { sepW: number; widths: number[]; total: number } => {
+      const sepW = measureTabularNumber(ctx, sep, size, WEIGHT.black, FONTS.body);
+      const widths = parts.map((part) =>
+        measureTabularNumber(ctx, part, size, WEIGHT.black, FONTS.body)
+      );
+      return {
+        sepW,
+        widths,
+        total: widths.reduce((a, b) => a + b, 0) + sepW * (parts.length - 1),
+      };
+    };
+    let measured = layout();
+    if (measured.total > maxW && measured.total > 0) {
+      size *= maxW / measured.total;
+      measured = layout();
+    }
+    const { sepW, widths, total } = measured;
     let cursor = (v.width - total) / 2;
     const rowY = y + vh(v, 11.5);
 

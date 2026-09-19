@@ -1185,7 +1185,11 @@ export class InitialsScreen implements Screen {
           TRACK.number
         )
       );
-      const w = measureTabularNumber(ctx, line, size, WEIGHT.black, FONTS.body) + vh(v, SPACE.xl);
+      // TRACK.number, because that is what the `drawTabularNumber` below sets.
+      // Measured without it, the pill came out narrower than the score inside it.
+      const w =
+        measureTabularNumber(ctx, line, size, WEIGHT.black, FONTS.body, TRACK.number) +
+        vh(v, SPACE.xl);
       const h = vh(v, 6.4);
       // 82, not 78: the personal-best line above needs clearance, and the
       // deadline countdown does not start until 100 - SAFE - 5, so there is

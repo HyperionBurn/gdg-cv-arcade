@@ -205,6 +205,22 @@ export function measureText(
   /**
    * The SAME value the eventual `drawText` will use.
    *
+   * MEASURED, Archivo at 1024x768, drawn width against unspaced width:
+   *
+   *   string                        tracking   drawn is
+   *   RED LIGHT, GREEN LIGHT        +0.03em     +4.8%   <- overflowed at 98%
+   *   menu tile blurbs (TRACK.body) +0.02em     +3.3%
+   *   BE THE FIRST! (TRACK.pill)    +0.01em     +1.8%
+   *   <CHOOSE YOUR GAME> (h1)       -0.04em     -5.6%
+   *   <STEP IN TO PLAY> (display)   -0.04em     -6.6%
+   *
+   * Note the sign. Only `pill` and `body` are positive in this kit, so the
+   * POSITIVE ones are the overflow risks and they are the small ones; the
+   * headlines all track NEGATIVE, which means an unspaced measurement was too
+   * WIDE and they were simply fitted smaller than they were entitled to be.
+   * Both are wrong, only one of them could have shown up as clipped text, and
+   * it did — the game title.
+   *
    * Canvas applies letter spacing as extra advance per glyph, so a 21-character
    * headline at 0.03em is ~0.6em wider than an unspaced measurement of it, and
    * every `TRACK.*` value in this kit is larger than that. Omitting it here is
@@ -321,25 +337,47 @@ export function drawTabularNumber(
   const weight = opts.weight ?? WEIGHT.black;
   const font = opts.font ?? FONTS.display;
 
-  ctx.save();
-  ctx.font = `${weight} ${opts.size}px ${font}`;
-  if (opts.letterSpacing) ctx.letterSpacing = opts.letterSpacing;
-  const digitW = ctx.measureText('0').width;
-
   const chars = [...text];
-  const widths = chars.map((c) => (c >= '0' && c <= '9' ? digitW : ctx.measureText(c).width));
-  const total = widths.reduce((a, b) => a + b, 0);
-  ctx.restore();
+
+  // MEASURE, THEN FIT THE WHOLE NUMBER, THEN MEASURE AGAIN.
+  //
+  // `maxWidth` has to be handled here rather than left to the per-glyph
+  // `drawText` calls below. Forwarded as-is it would fit each CHARACTER to the
+  // full width independently — which never fires, so a number that overflows
+  // would silently keep overflowing while looking like it had been fitted.
+  let size = opts.size;
+  let digitW = 0;
+  let widths: number[] = [];
+  let total = 0;
+
+  const measure = (): void => {
+    ctx.save();
+    ctx.font = `${weight} ${size}px ${font}`;
+    if (opts.letterSpacing) ctx.letterSpacing = opts.letterSpacing;
+    digitW = ctx.measureText('0').width;
+    widths = chars.map((c) => (c >= '0' && c <= '9' ? digitW : ctx.measureText(c).width));
+    total = widths.reduce((a, b) => a + b, 0);
+    ctx.restore();
+  };
+
+  measure();
+  if (opts.maxWidth !== undefined && opts.maxWidth > 0 && total > opts.maxWidth) {
+    size = Math.max(1, size * (opts.maxWidth / total));
+    measure();
+  }
 
   const align = opts.align ?? 'center';
   let cursor = align === 'right' ? x - total : align === 'center' ? x - total / 2 : x;
 
   // Each glyph is centred in its own fixed-width cell, so '1' sits where '8'
   // would and the number stops dancing as it rolls.
+  //
+  // `maxWidth` is stripped from the per-glyph options for the reason above.
+  const glyphOpts = { ...opts, size, align: 'center' as const, maxWidth: undefined };
   for (let i = 0; i < chars.length; i++) {
     const c = chars[i]!;
     const w = widths[i]!;
-    drawText(ctx, c, cursor + w / 2, y, { ...opts, align: 'center' });
+    drawText(ctx, c, cursor + w / 2, y, glyphOpts);
     cursor += w;
   }
 }
@@ -350,10 +388,21 @@ export function measureTabularNumber(
   text: string,
   size: number,
   weight: number | string = WEIGHT.black,
-  font: string = FONTS.display
+  font: string = FONTS.display,
+  /**
+   * The SAME value the matching `drawTabularNumber` uses.
+   *
+   * It applies `opts.letterSpacing` BEFORE measuring its digit cell, so the
+   * spacing is inside every width it lays out with. This measured without it
+   * and returned a number narrower than the one that gets drawn — which is
+   * how a caller sizing a pill around a score ends up with the score wider
+   * than its own pill.
+   */
+  letterSpacing: string = '0px'
 ): number {
   ctx.save();
   ctx.font = `${weight} ${size}px ${font}`;
+  ctx.letterSpacing = letterSpacing;
   const digitW = ctx.measureText('0').width;
   let total = 0;
   for (const c of text) total += c >= '0' && c <= '9' ? digitW : ctx.measureText(c).width;
