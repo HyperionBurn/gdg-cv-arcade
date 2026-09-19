@@ -34,6 +34,8 @@ import {
   type GameConfig,
 } from '../src/games/base.ts';
 import { GAME_SEATS, seatBadge } from '../src/meta/games.ts';
+import { setPlayMode, takePlayMode } from '../src/meta/mode.ts';
+import { modeScreenApplies } from '../src/shell/mode.ts';
 import type { GameId } from '../src/meta/leaderboard.ts';
 import { laneScore, type ScorableRacer } from '../src/games/redlight.ts';
 import { BalloonPopGame } from '../src/games/balloonpop.ts';
@@ -519,5 +521,89 @@ describe('the overtake is announced, and only the overtake', () => {
       if (s.announce) fired++;
     }
     assert.equal(fired, 1, `${fired} announcements for one overtake`);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* 5. "How many playing?"                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The one thing the camera cannot read is INTENT.
+ *
+ * Two friends stand side by side, one wants a solo run for the board and the
+ * other is watching from inside the play zone. To the tracker that is a versus
+ * round; to them it is a ruined turn, and the only fix available before the
+ * mode screen was folklore — "step back off the tape" — that nothing on screen
+ * ever said.
+ *
+ * So `solo` is the only mode that changes anything: `open` is exactly what the
+ * detection already produced. That asymmetry is the whole design and it is
+ * what these pin.
+ */
+describe('the play mode caps the round, and only downward', () => {
+  test('JUST ME means one seat however many bodies are in frame', () => {
+    for (const [name, cfg] of GAMES) {
+      for (const present of [1, 2, 3, 6]) {
+        assert.equal(
+          rosterSize(present, cfg, 'solo'),
+          1,
+          `${name} seated more than one with ${present} present`
+        );
+      }
+    }
+  });
+
+  test('OPEN is exactly what the machine does on its own', () => {
+    // If these ever diverge, the mode screen has started changing behaviour
+    // for people who never touched it.
+    for (const [name, cfg] of GAMES) {
+      for (const present of [0, 1, 2, 3, 6, 12]) {
+        assert.equal(
+          rosterSize(present, cfg, 'open'),
+          rosterSize(present, cfg),
+          `${name} at ${present} present`
+        );
+      }
+    }
+  });
+
+  test('no mode at all is also what the machine does on its own', () => {
+    // A game reached without the screen — a keyboard jump, the dev harness, a
+    // one-seat game — must behave exactly as it did before the screen existed.
+    for (const [name, cfg] of GAMES) {
+      for (const present of [0, 1, 2, 6]) {
+        assert.equal(
+          rosterSize(present, cfg, null),
+          rosterSize(present, cfg),
+          `${name} at ${present} present`
+        );
+      }
+    }
+  });
+
+  test('solo still seats one when nobody is in frame', () => {
+    // `rosterSize` feeds array lengths and loop bounds; zero is never an answer.
+    for (const [, cfg] of GAMES) assert.equal(rosterSize(0, cfg, 'solo'), 1);
+  });
+
+  test('the screen only appears where there is a question', () => {
+    // A screen offering a choice of one is a delay dressed as agency.
+    for (const [name, cfg] of GAMES) {
+      assert.equal(
+        modeScreenApplies(cfg.gameId),
+        cfg.maxPlayers > 1,
+        `${name} seats ${cfg.maxPlayers}`
+      );
+    }
+  });
+
+  test('a choice is consumed once and never inherited', () => {
+    // The failure this prevents: somebody picks JUST ME, walks away before the
+    // round starts, and the next person up gets a solo round they never asked
+    // for — on the game they did not choose either.
+    setPlayMode('solo');
+    assert.equal(takePlayMode(), 'solo');
+    assert.equal(takePlayMode(), null, 'the choice outlived the turn it was made for');
   });
 });

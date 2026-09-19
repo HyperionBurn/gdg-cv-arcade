@@ -54,6 +54,7 @@ import { ghosts, drawGhost, type GhostPlayback } from '../meta/ghosts';
 import { highlights } from '../meta/highlights';
 import { tournament, isTournamentGame } from '../meta/tournament';
 import { setPendingScore } from '../shell/initials';
+import { takePlayMode, type PlayMode } from '../meta/mode';
 import { router } from '../shell/router';
 import type { Screen, FrameContext } from '../shell/screen';
 
@@ -304,8 +305,14 @@ export const INVITE_UNTIL_SEC = ADMIT_LATENCY_SEC + STEP_IN_REACTION_SEC + 0.2;
  */
 export function rosterSize(
   present: number,
-  cfg: { partyMode?: boolean; supportsVersus: boolean; maxPlayers: number }
+  cfg: { partyMode?: boolean; supportsVersus: boolean; maxPlayers: number },
+  mode: PlayMode | null = null
 ): number {
+  // THE ONLY MODE THAT CHANGES ANYTHING. `open` is exactly what the detection
+  // already produces, so the mode screen's real job is offering "just me" —
+  // the one intent a camera cannot read off two people standing side by side.
+  // See `meta/mode.ts`.
+  if (mode === 'solo') return 1;
   if (cfg.partyMode) return Math.max(1, Math.min(present, cfg.maxPlayers));
   if (cfg.supportsVersus) return Math.min(Math.max(present, 1), 2);
   return 1;
@@ -563,6 +570,15 @@ export abstract class GameBase implements Screen {
   private lateJoinAt = -1;
   /** Seconds the tracker has continuously reported fewer people than we count. */
   private rosterBelowFor = 0;
+  /**
+   * What the mode screen was told, for the life of this visit.
+   *
+   * Read ONCE on mount rather than per round: a player who picked JUST ME and
+   * then plays again without going back to the menu has not changed their
+   * mind, and re-reading a handoff that `takePlayMode` has already cleared
+   * would silently put them back into versus on their second turn.
+   */
+  private playMode: PlayMode | null = null;
   /** Who is ahead in a versus round, or -1 before anyone is. See `watchLead`. */
   private leadSlot = -1;
   /** `stateTime` of the last lead announcement, for the debounce. */
@@ -666,6 +682,13 @@ export abstract class GameBase implements Screen {
   /* ---------------- lifecycle ---------------- */
 
   async mount(): Promise<void> {
+    // What the mode screen was told, if anything. Read and cleared here, once
+    // per visit — see `playMode`. A game reached without passing through that
+    // screen (a keyboard jump, a one-seat game, the dev harness) gets null,
+    // which is the auto-detected behaviour this app had before the screen
+    // existed.
+    this.playMode = takePlayMode();
+
     // In sim mode the simulator feeds poses directly; starting MediaPipe would
     // just spin up a worker with no camera behind it.
     // `maxPlayers`, NOT the number of people actually in frame.
@@ -1006,7 +1029,7 @@ export abstract class GameBase implements Screen {
 
   /** How many of the people in frame this game will actually play with. */
   private resolvePlayerCount(present: number): number {
-    return rosterSize(present, this.config);
+    return rosterSize(present, this.config, this.playMode);
   }
 
   private tickWaiting(fc: FrameContext): void {

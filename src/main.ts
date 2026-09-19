@@ -22,6 +22,7 @@ import { installOperatorConsole } from './shell/operator';
 import { highlights } from './meta/highlights';
 import { AttractScreen } from './shell/attract';
 import { MenuScreen } from './shell/menu';
+import { ModeScreen } from './shell/mode';
 import { InitialsScreen } from './shell/initials';
 import { SixtySevenGame } from './games/sixtyseven';
 import { FruitNinjaGame } from './games/fruitninja';
@@ -77,6 +78,8 @@ router.register('rigcheck', () => new RigCheckScreen());
 router.register('attract', () => new AttractScreen());
 router.register('menu', () => new MenuScreen());
 router.register('initials', () => new InitialsScreen());
+// "How many playing?", between the menu and a game that seats more than one.
+router.register('mode', () => new ModeScreen());
 router.register('sixtyseven', () => new SixtySevenGame());
 router.register('fruitninja', () => new FruitNinjaGame());
 router.register('balloonpop', () => new BalloonPopGame());

@@ -57,6 +57,7 @@ import {
 } from './theme';
 import { GAME_COLORS, seatBadge } from '../meta/games';
 import { DWELL, HoverCursor, type HoverTarget } from './hover';
+import { modeScreenApplies, setPendingGame } from './mode';
 import { router } from './router';
 import type { FrameContext, Screen } from './screen';
 
@@ -390,7 +391,21 @@ export class MenuScreen implements Screen {
     // `launching` stays set through the wipe so the chosen tile keeps its
     // pressed state all the way out; `leave` is idempotent.
     const span = dur(DUR.base);
-    if (this.launching && fc.time - this.launchAt > DUR.fast) this.leave(this.launching);
+    if (this.launching && fc.time - this.launchAt > DUR.fast) {
+      // VIA THE MODE SCREEN, when the game can seat more than one.
+      //
+      // The menu's job ends at "which game"; "how many of us" is a separate
+      // question with a separate answer, and the one the camera cannot infer.
+      // A one-seat game has nothing to ask, so it goes straight through — a
+      // screen offering a choice of one is a delay dressed as agency.
+      const id = this.launching as GameId;
+      if (modeScreenApplies(id) && router.has('mode')) {
+        setPendingGame(id);
+        this.leave('mode');
+      } else {
+        this.leave(this.launching);
+      }
+    }
 
     if (this.exiting) {
       this.exitTime += fc.dt;

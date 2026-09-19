@@ -349,8 +349,25 @@ async function oneTurn(host: Host, game: string, players = 1): Promise<TurnResul
     // ── menu: select the tile with the real dwell cursor ──────────────────
     await settle();
     const picked = await dwell(game);
-    await run(240, (s) => s === game);
-    if (!step('menu tile selects by dwell', id() === game, `picked=${picked} ended on ${id()}`)) {
+    await run(240, (s) => s === game || s === 'mode');
+    step('menu tile selects by dwell', id() === game || id() === 'mode', `picked=${picked} ended on ${id()}`);
+
+    // ── "how many playing?", for every game that seats more than one ──────
+    //
+    // Driven rather than waited out. The screen answers itself after
+    // DEFAULT_SEC, so a sweep that just ticked would pass without ever
+    // exercising the dwell — and the dwell is the whole screen. The pass picks
+    // the mode it is actually testing, which is also how the 2P sweep proves
+    // that choosing VERSUS with two bodies really opens two seats.
+    if (id() === 'mode') {
+      await settle();
+      const card = players > 1 ? 'mode:open' : 'mode:solo';
+      const mode = await dwell(card);
+      step('mode card selects by dwell', mode, `${card}: ${mode ? 'committed' : 'timed out'}`);
+      await run(300, (s) => s === game);
+    }
+
+    if (!step('reaches the game', id() === game, `ended on ${id()}`)) {
       throw new Error('never reached the game');
     }
 
