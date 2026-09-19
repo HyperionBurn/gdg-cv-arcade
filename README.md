@@ -93,7 +93,7 @@ anything else on this page.
 |---|---|
 | Red **&lt;CAMERA LOST — RECONNECTING&gt;** bar at the top | Push the USB cable back in and **wait**. It is already retrying — 1s, 2s, 4s, 8s, then every 10s, forever. Most USB knocks come back inside two tries. |
 | Red **&lt;CAMERA LOST — PRESS F5&gt;** bar at the top | It has been trying for half a minute and it is not coming back on its own. **F5**. If that fails, `?sim=1` (bottom row of this table). |
-| Red **&lt;VISION OFFLINE — PRESS F5&gt;** bar at the top | The pose worker died, not the camera. **F5** — there is no auto-recovery for this one. |
+| Red **&lt;VISION OFFLINE — PRESS F5&gt;** bar at the top | The pose worker died, not the camera. **F5** — the worker does not restart itself. But the SCREEN does: with no poses at all the shell walks itself back to attract in under 30s (round ends, initials times out, attract). So you have a stall that cannot see anybody, not a frozen one — finish serving the person in front of you before you reload. |
 | Nothing responds, screen looks frozen | **F5**, then **F**, then **C**. Fullscreen and the hidden pointer do NOT survive a reload. |
 | Camera permission was refused | Press **F** to leave fullscreen, click the camera icon in Chrome's address bar, allow, then **F5**. |
 | Someone is standing there and it says STAND IN FRAME | They are too far back or cropped. Move them to the tape. Press **`d`** to see why — the `framing` and `headroom` rows say which. |
@@ -389,6 +389,16 @@ Red Light 0.98ms · Pose Match 0.49ms · Fruit Ninja 3.52ms per frame.
 ### Verified in the simulator
 
 All driven deterministically via `window.__arcade.tick()`:
+
+- **Degraded hardware.** Four camera shapes — 0×0 (what a failed camera
+  reports), 640×480, 1920×1080 and an odd 1280×960 — all play a round through
+  with a finite score and no errors; the projection's `|| 1280` fallback holds.
+
+  And the one that decides whether a marshal reloads mid-queue: with poses
+  stopping dead in the middle of a round, the shell does NOT strand the screen.
+  The round reaches results in 3s, initials times out, and it is back on
+  attract 28.7s later, with nothing in the console. A dead vision worker leaves
+  a stall that cannot see anybody rather than a frozen one.
 
 - **Audio, including its absence.** All twenty sounds played muted and unmuted
   (forty calls, zero throws), music started, ramped, silenced and stopped. Then
