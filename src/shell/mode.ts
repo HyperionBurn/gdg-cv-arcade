@@ -62,6 +62,7 @@ import {
   WEIGHT,
   dur,
   ramp,
+  textColor,
 } from './theme';
 import { GAME_SEATS, gameColor } from '../meta/games';
 import { tunables } from '../meta/tunables';
@@ -391,9 +392,14 @@ export class ModeScreen implements Screen {
     const tile = MENU_TILES.find((x) => x.id === game);
     const title = '<HOW MANY PLAYING?>';
 
+    // THROUGH `textColor`, because two of the seven games are YELLOW. Flat
+    // yellow on paper is 1.7:1 — legible on a laptop at arm's length, gone on
+    // a TV across a hall — so the kit's rule is that yellow is a SURFACE and
+    // never a text colour. `textColor` falls back to ink rather than relying
+    // on anybody remembering which games those two are.
     drawText(ctx, tile?.title ?? game.toUpperCase(), v.width / 2, vh(v, 10), {
       size: vh(v, TYPE.label),
-      color: gameColor(game),
+      color: textColor(gameColor(game)),
       font: FONTS.body,
       weight: WEIGHT.bold,
       knockout: true,

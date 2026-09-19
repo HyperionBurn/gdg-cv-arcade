@@ -265,3 +265,73 @@ describe('muted is the disabled colour, and nothing else', () => {
     );
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* Yellow is a surface                                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `textColor` exists so nobody has to remember the yellow rule, and it only
+ * helps where it is actually called.
+ *
+ * The mode screen prints the game's own colour as its header, which for two of
+ * the seven games — the Runner and Rhythm Punch — is flat yellow. On paper
+ * that is 1.7:1: legible on a laptop at arm's length and gone on a TV across a
+ * hall. It shipped that way for about twenty minutes and the fix is one call,
+ * which is exactly the kind of thing a guard is for.
+ */
+describe('yellow never carries text', () => {
+  test('no drawn text takes a brand colour without routing it through textColor', async () => {
+    const { readdir, readFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+
+    const walk = async (dir: string): Promise<string[]> => {
+      const out: string[] = [];
+      for (const e of await readdir(dir, { withFileTypes: true })) {
+        const p = join(dir, e.name);
+        if (e.isDirectory()) out.push(...(await walk(p)));
+        else if (e.name.endsWith('.ts')) out.push(p);
+      }
+      return out;
+    };
+
+    const offenders: string[] = [];
+    for (const file of await walk('src')) {
+      const rel = file.split(/[\\/]/).join('/');
+      const lines = (await readFile(file, 'utf8')).split('\n');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
+        // A colour that MIGHT be yellow. `gameColor` and `factionColor` both
+        // return it for some inputs, which is what makes this worth checking:
+        // nobody writes `COLORS.yellow` as a label colour on purpose, they
+        // write `gameColor(id)` and two of the seven games happen to be it.
+        if (!/\bcolor:\s*(COLORS\.yellow\b|gameColor\(|factionColor\()/.test(line)) continue;
+        if (line.includes('textColor(')) continue;
+
+        // ONLY INSIDE A DRAW CALL. The same expression in a plain data object
+        // is fine and common — `factionStandings()` carries a raw faction
+        // colour that its consumer routes through `textColor` at the point of
+        // drawing, and rigcheck's verdict colour is a FILL, which is exactly
+        // what yellow is for. Looking back a few lines for the call is cruder
+        // than a parser and precise enough to catch the shape that has
+        // actually gone wrong.
+        const near = lines.slice(Math.max(0, i - 6), i).join('\n');
+        if (!/\b(drawText|drawTabularNumber)\(/.test(near)) continue;
+
+        offenders.push(`${rel}:${i + 1}`);
+      }
+    }
+
+    assert.deepEqual(
+      offenders,
+      [],
+      'yellow on paper is 1.7:1. Wrap it in textColor(), or make it a fill and ' +
+        `put ink on top:\n  ${offenders.join('\n  ')}`
+    );
+  });
+
+  test('and textColor really does refuse it', () => {
+    assert.notEqual(textColor(COLORS.yellow), COLORS.yellow);
+    assert.equal(textColor(COLORS.yellow), COLORS.ink);
+  });
+});
