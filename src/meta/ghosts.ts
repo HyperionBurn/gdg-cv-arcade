@@ -77,7 +77,20 @@ export const SCORING_VERSION: Record<GameId, number> = {
   runner: 1,
   posematch: 1,
   rhythm: 1,
-  balloonpop: 1,
+  /**
+   * 2: the playfield lost its top 15.8vh. `hudShelf` made the HUD an opaque
+   * band because the score spent most of every round behind a balloon, and
+   * balloons now retire AT that band rather than rising invisibly behind it —
+   * so a strip that used to be poppable is not any more.
+   *
+   * A small change to the ceiling rather than a rule change, and it would have
+   * been tempting to leave the version alone. But the instruction above says
+   * "in any way", and the reason it says that is this exact judgement call: a
+   * score set with more reachable field than the current one has is a target
+   * the current game cannot fairly beat, and the person it is unfair to is
+   * standing in front of it.
+   */
+  balloonpop: 2,
 };
 
 /* ------------------------------------------------------------------ *

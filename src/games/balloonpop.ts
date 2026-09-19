@@ -86,7 +86,22 @@ const ARM_OFFSET_TORSOS = 0.25;
 /** Used when nobody is tracked, purely so balloons render sensibly. */
 const ARM_FALLBACK = 0.55;
 
-const BALLOON_COLORS = [COLORS.blue, COLORS.red, COLORS.green, COLORS.yellow] as const;
+/**
+ * THREE, AND YELLOW IS NOT ONE OF THEM.
+ *
+ * A golden balloon is worth 50 against an ordinary balloon's 10, and it was
+ * drawn in `COLORS.yellow` — which was also one of the four ordinary colours.
+ * The only things separating the 50 from the 10 were a slightly thicker
+ * outline and a smaller radius, neither of which survives three metres. A
+ * player who cannot see which balloon is worth five of the others is playing a
+ * different, worse game than the one that was designed.
+ *
+ * So yellow now means gold and nothing else, and `drawBalloon` puts a flat ink
+ * star inside it as well. Colour answers the question across the room; the
+ * star confirms it in arm's reach. Three ordinary colours is plenty — they
+ * carry no meaning, they are just so the field is not monotone.
+ */
+const BALLOON_COLORS = [COLORS.blue, COLORS.red, COLORS.green] as const;
 
 /**
  * How long into a round the "hands up" hint can still appear.
@@ -264,6 +279,27 @@ export class BalloonPopGame extends GameBase {
       gameId: 'balloonpop',
       title: 'BALLOON POP',
       tagline: '<POP THEM WITH YOUR HANDS>',
+      /*
+       * THE SCORE WAS UNDER A BALLOON FOR MOST OF EVERY ROUND.
+       *
+       * Reported from an outside playtest, and it is worse than it sounds: at
+       * 1280x720 with a normal wave in flight, the 11vh score numeral, the
+       * clock and the progress bar were all behind balloon bodies at once.
+       * `knockout` was doing its job — a paper ring per glyph — but a knockout
+       * only separates type from what is BEHIND it, and these balloons are
+       * drawn in front.
+       *
+       * `hudShelf` was written for Pose Match's approaching wall and is the
+       * same answer here: an opaque paper band with a hard ink rule, and the
+       * playfield passing under it. The score gives up 11vh for 8.2vh, which
+       * is a trade worth making roughly a hundred times over against a number
+       * nobody can see at all.
+       *
+       * The other half is in the cull below — a shelf on its own would leave
+       * balloons poppable while hidden behind it, which is the objection the
+       * original `knockout` comment raised and was right about.
+       */
+      hudShelf: true,
       // The arming line. `drawArmHint` says this in-round, but only once the
       // round is already running and only to a player standing with their
       // hands down — by which point they have spent several seconds watching
@@ -444,7 +480,18 @@ export class BalloonPopGame extends GameBase {
       b.x += b.vx * dt + Math.sin(b.phase) * v.width * 0.02 * dt;
       b.squash = Math.max(0, b.squash - dt * 4);
 
-      if (b.y + b.r < -v.height * 0.05) {
+      // ESCAPE AT THE SHELF, NOT OFF THE TOP OF THE SCREEN.
+      //
+      // With `hudShelf` the top 15.8vh is an opaque paper band. A balloon that
+      // rises behind it is invisible and still poppable, which is a ghost: the
+      // player's hand is at the anatomical limit of an overhead reach anyway
+      // (see the REACH — ABOVE SHOULDER tunable), so what they would actually
+      // experience is points arriving from nowhere.
+      //
+      // Retiring them at the band keeps one rule true — if you can see it you
+      // can pop it, and if you cannot you cannot — and costs each balloon the
+      // last sixth of a rise it was almost never popped in.
+      if (b.y + b.r < this.hudBottom(v)) {
         // A balloon that was LIVE and escaped unpopped breaks the streak.
         //
         // Without this there is no code path that resets it, so "14 STREAK" on
@@ -488,7 +535,9 @@ export class BalloonPopGame extends GameBase {
           vx: (Math.random() - 0.5) * v.height * 0.05,
           vy: -v.height * (golden ? 0.26 : 0.15 + Math.random() * 0.06),
           r,
-          color: golden ? COLORS.yellow : BALLOON_COLORS[Math.floor(Math.random() * 4)]!,
+          color: golden
+            ? COLORS.yellow
+            : BALLOON_COLORS[Math.floor(Math.random() * BALLOON_COLORS.length)]!,
           slot,
           phase: Math.random() * Math.PI * 2,
           golden,
@@ -823,6 +872,34 @@ export class BalloonPopGame extends GameBase {
     ctx.beginPath();
     ctx.ellipse(-b.r * 0.3, -b.r * 0.4, b.r * 0.22, b.r * 0.3, -0.5, 0, Math.PI * 2);
     ctx.fill();
+
+    // FIVE TIMES THE POINTS NEEDS TO LOOK LIKE IT.
+    //
+    // A gold balloon is 50 against an ordinary balloon's 10 and was separated
+    // from one only by a slightly thicker outline and a smaller radius — at
+    // three metres, by nothing. Yellow is now reserved for gold (see
+    // BALLOON_COLORS) and this is the close-range confirmation: a flat ink
+    // star, which is the one shape in the kit that means nothing else.
+    //
+    // Drawn INSIDE the squash transform so it deforms with the body on a
+    // near-miss, and only while armed — a grey balloon is not worth 50 either.
+    if (b.golden && armed) {
+      ctx.fillStyle = COLORS.ink;
+      ctx.beginPath();
+      for (let i = 0; i < 10; i++) {
+        // Alternating outer and inner radius is the whole star. Starting at
+        // -90° puts a point straight up, which is what reads as a star rather
+        // than as a cog.
+        const a = -Math.PI / 2 + (i * Math.PI) / 5;
+        const rr = b.r * (i % 2 === 0 ? 0.52 : 0.22);
+        const px = Math.cos(a) * rr;
+        const py = Math.sin(a) * rr;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
 
     ctx.restore();
   }
