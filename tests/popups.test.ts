@@ -55,6 +55,69 @@ const spawnedAt = (layer: PopupLayer): Array<{ x: number; text: string }> => {
   return out;
 };
 
+/** Records every `ctx.scale()` a popup applies, frame by frame. */
+const scaleOverLife = (frames: number): number[] => {
+  const layer = new PopupLayer();
+  layer.spawn('X', 500, 400, '#111111', SIZE, 0.9);
+  const seen: number[] = [];
+  const ctx = {
+    save() {}, restore() {}, translate() {},
+    scale(s: number) { seen.push(s); },
+    strokeText() {}, fillText() {},
+    measureText: () => ({ width: 0 }),
+    set font(_v: string) {}, set textAlign(_v: string) {}, set textBaseline(_v: string) {},
+    set globalAlpha(_v: number) {}, set lineJoin(_v: string) {}, set miterLimit(_v: number) {},
+    set lineWidth(_v: number) {}, set strokeStyle(_v: string) {}, set fillStyle(_v: string) {},
+  } as unknown as CanvasRenderingContext2D;
+  for (let i = 0; i < frames; i++) {
+    layer.update(1 / 60);
+    layer.draw(ctx, 'Archivo');
+  }
+  return seen;
+};
+
+/**
+ * THE POP WENT THE WRONG WAY AND ENDED IN A JUMP CUT.
+ *
+ * `t` runs 1 -> 0 over a popup's life, so `1 + (1 - t) * 6` grew from 1.11 to
+ * 1.89 over eight frames and then snapped back to 1 in one. Measured:
+ *
+ *   1.111 1.222 1.333 1.444 1.556 1.667 1.778 1.889 1 1 1 ...
+ *
+ * A 47% shrink in a single frame, on every popup in the app, under a comment
+ * reading "Pop in fast, then fade".
+ */
+describe('a popup pops in and settles', () => {
+  test('it starts big and shrinks, never the reverse', () => {
+    const s = scaleOverLife(20);
+    assert.ok(s.length > 10, 'the popup did not survive long enough to measure');
+    assert.ok(s[0]! > 1.2, `first frame is ${s[0]}, so there is no pop at all`);
+    for (let i = 1; i < s.length; i++) {
+      assert.ok(
+        s[i]! <= s[i - 1]! + 1e-9,
+        `scale grew from ${s[i - 1]} to ${s[i]} at frame ${i}; the pop is inverted`
+      );
+    }
+  });
+
+  test('and never jumps', () => {
+    const s = scaleOverLife(20);
+    for (let i = 1; i < s.length; i++) {
+      const step = Math.abs(s[i]! - s[i - 1]!);
+      assert.ok(
+        step < 0.2,
+        `scale stepped ${step.toFixed(3)} between frames ${i - 1} and ${i} ` +
+          `(${s[i - 1]} -> ${s[i]}); that is a visible jump cut, not an ease`
+      );
+    }
+  });
+
+  test('it settles at exactly 1 and stays there', () => {
+    const s = scaleOverLife(30);
+    assert.equal(s[s.length - 1], 1, 'the popup never returns to its true size');
+  });
+});
+
 describe('popups stay on screen sideways', () => {
   test('a popup at the left edge is pushed fully into view', () => {
     const layer = new PopupLayer();

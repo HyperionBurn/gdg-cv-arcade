@@ -419,8 +419,27 @@ export class PopupLayer {
   draw(ctx: CanvasRenderingContext2D, font: string): void {
     for (const p of this.pool) {
       const t = p.life / p.maxLife;
-      // Pop in fast, then fade.
-      const scale = t > 0.85 ? 1 + (1 - t) * 6 : 1;
+      // POP IN FAST, THEN FADE — which is what the old comment claimed and the
+      // opposite of what the old expression did.
+      //
+      // `t` runs 1 -> 0 over the popup's life, so `1 + (1 - t) * 6` GREW from
+      // 1.11 to 1.89 across the first eight frames and then snapped straight
+      // back to 1 the moment the branch flipped. Measured by driving a real
+      // PopupLayer frame by frame:
+      //
+      //   1.111 1.222 1.333 1.444 1.556 1.667 1.778 1.889 1 1 1 ...
+      //
+      // A 47% shrink in a single frame, on every popup in the app — every
+      // score, every milestone, `<NEW BEST!>`, the elimination taunts and the
+      // overtake banner. It reads as a glitch rather than a punch, and it is
+      // at its biggest at the instant it disappears, which is also when it
+      // overlaps whatever is beside it.
+      //
+      // `(t - 0.85)` instead of `(1 - t)` reverses it and lands exactly on 1
+      // at the boundary, so there is no step. Same peak, same 135ms, same
+      // energy — it now starts big and settles instead of swelling and
+      // vanishing.
+      const scale = t > 0.85 ? 1 + (t - 0.85) * 6 : 1;
       const alpha = t > 0.3 ? 1 : t / 0.3;
 
       ctx.save();
