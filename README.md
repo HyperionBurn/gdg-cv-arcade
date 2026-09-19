@@ -158,9 +158,9 @@ hold SHIFT**, so a bag on the keyboard cannot end somebody's turn.
 
 ### Two people can play — say it out loud
 
-**Every game on the roster takes two.** Red Light takes six. The stall's own
+**Every game on the roster takes two.** Red Light takes five. The stall's own
 signage says so now (the menu tiles carry a `1-2P` badge, Red Light says
-`1-6P`), but the single most effective thing a marshal does is say "grab your
+`1-5P`), but the single most effective thing a marshal does is say "grab your
 mate, you can both play".
 
 How it works, so nobody has to explain it twice:
@@ -176,10 +176,17 @@ How it works, so nobody has to explain it twice:
   behind, the countdown **waits for them**: a yellow `A FRIEND CAN STEP IN`
   badge is up while there is still time to act on it, and the clock rewinds
   when they arrive.
+- The countdown shows **PLAYER 1** and **PLAYER 2** plates, one on each half,
+  with a line between them and `ONE EACH SIDE` underneath. Point at it if a
+  pair are bunched in the middle — that is the one mistake that makes two
+  people share a slot or swap scores mid-round.
 - When one of them goes ahead, the screen says so. That is the moment worth
   watching for.
 - Only the **winner** enters initials, and that screen says whose name it
   wants. Two name entries per turn would double the slowest part of the flow.
+- Anybody who does not want to be on the board can hover **SKIP** — the OK key
+  says SKIP until a letter is typed. Their score is still recorded, just
+  without a name, and it takes one dwell instead of the 16-second deadline.
 
 Red Light also runs a real lobby before the countdown — it counts people in
 and starts when nobody new has joined for a couple of seconds.
