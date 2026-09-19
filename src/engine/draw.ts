@@ -261,13 +261,24 @@ export function wrapText(
   size: number,
   weight: number | string = WEIGHT.black,
   font: string = FONTS.display,
-  maxLines = 2
+  maxLines = 2,
+  /**
+   * The SAME value the eventual `drawText` will use — see `measureText`.
+   *
+   * Wrapping is worse off than fitting when this is wrong. A low measurement
+   * does not just overflow: it decides the break is unnecessary, so the line
+   * that should have wrapped stays whole AND renders wider than the box. The
+   * menu wrapped seven tile blurbs at `0px` and drew all of them at
+   * `TRACK.body`.
+   */
+  letterSpacing: string = '0px'
 ): string[] {
   const words = text.split(/\s+/).filter(Boolean);
   if (words.length === 0) return [];
 
   ctx.save();
   ctx.font = `${weight} ${size}px ${font}`;
+  ctx.letterSpacing = letterSpacing;
   const lines: string[] = [];
   let line = words[0] ?? '';
   for (let i = 1; i < words.length; i++) {

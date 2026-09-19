@@ -304,7 +304,15 @@ function tilesInDisplayOrder(): MenuTile[] {
   return [...live, ...soon];
 }
 
-/** Wrap every tile's blurb at one shared size. Used twice: measure, then fit. */
+/**
+ * Wrap every tile's blurb at one shared size. Used twice: measure, then fit.
+ *
+ * `TRACK.body` is passed all the way through here and into the widest-line
+ * measurement below, because that is what `drawText` uses when it finally
+ * draws these lines. Without it the wrap was computed on a string narrower
+ * than the one that gets rendered — which does not merely overflow, it
+ * suppresses the break that would have prevented the overflow.
+ */
 function wrapAll(
   ctx: CanvasRenderingContext2D,
   size: number,
@@ -312,7 +320,7 @@ function wrapAll(
 ): Map<string, string[]> {
   const out = new Map<string, string[]>();
   for (const t of MENU_TILES) {
-    out.set(t.id, wrapText(ctx, t.blurb, inner, size, WEIGHT.medium, FONTS.body, 2));
+    out.set(t.id, wrapText(ctx, t.blurb, inner, size, WEIGHT.medium, FONTS.body, 2, TRACK.body));
   }
   return out;
 }
@@ -780,7 +788,10 @@ export class MenuScreen implements Screen {
     let widest = 0;
     for (const lines of blurbLines.values()) {
       for (const line of lines) {
-        widest = Math.max(widest, measureText(ctx, line, blurbSize, WEIGHT.medium, FONTS.body));
+        widest = Math.max(
+          widest,
+          measureText(ctx, line, blurbSize, WEIGHT.medium, FONTS.body, TRACK.body)
+        );
       }
     }
     if (widest > inner) {
