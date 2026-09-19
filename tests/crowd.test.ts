@@ -720,3 +720,124 @@ describe('everything new is aspect-correct', () => {
     assert.equal(log[59]!.players.length, 1, 'a turned player must not vanish');
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* A slot is where a score lives, so it cannot move mid-round          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The tracker reorders slots when two people genuinely walk around each other,
+ * and that is correct: slot is SCREEN ORDER, and a split screen is spatial.
+ *
+ * It is also, on its own, a silent scoring bug. Every versus game on the roster
+ * indexes its points by slot — `this.points[slot]`, `this.counters[slot]`,
+ * `this.slots[slot].score` — so the moment two players cross, each one inherits
+ * the other's number, in the middle of a head-to-head round, with nothing on
+ * screen to say it happened.
+ *
+ * Identity was never the problem: ids survive a crossing (see the test above).
+ * The fix is to stop asking the ordering question while a round is live.
+ */
+describe('slots are frozen while a round is running', () => {
+  /** The same crossing as the identity test, which is known to reorder slots. */
+  const crossing = (f: number): RawPose[] => {
+    const u = Math.min(1, Math.max(0, (f - 45) / 90));
+    return [personAt(0.28 + 0.44 * u, 3.0), personAt(0.72 - 0.44 * u, 3.7)];
+  };
+
+  test('unlocked, a crossing DOES move both players to the other slot', () => {
+    // The failing case, pinned. If this ever stops being true the lock below
+    // is solving a problem that no longer exists and should be reconsidered.
+    const tracker = new PoseTracker({ maxPlayers: 2, aspect: A });
+    const log = run(tracker, crossing, 180);
+
+    const start = log[45]!.players;
+    assert.equal(start.length, 2, 'both admitted before the crossing');
+    const left = [...start].sort((a, b) => a.x - b.x)[0]!;
+
+    const end = log[179]!.players.find((p) => p.id === left.id)!;
+    assert.notEqual(end.slot, left.slot, 'the crossing did not reorder anything');
+  });
+
+  test('locked, the same crossing leaves every slot where it was', () => {
+    const tracker = new PoseTracker({ maxPlayers: 2, aspect: A });
+    // Let admission and ordering settle first, exactly as a round does: the
+    // lobby and countdown run unlocked, the lock goes on at GO.
+    run(tracker, crossing, 45);
+    const settled = tracker.getPlayers();
+    const before = new Map(settled.map((p) => [p.id, p.slot]));
+    const startX = new Map(settled.map((p) => [p.id, p.centroid.x]));
+    assert.equal(before.size, 2, 'both admitted before the lock');
+
+    tracker.setOptions({ lockSlots: true });
+    const log = run(tracker, crossing, 180, REALISTIC_NOISE, 2);
+
+    const end = log[179]!.players;
+    assert.equal(end.length, 2, 'both players still present');
+    for (const p of end) {
+      assert.equal(p.slot, before.get(p.id), `player ${p.id} changed halves mid-round`);
+    }
+    // And they really did swap sides, so this is not passing because the scene
+    // stopped being a crossing. Compared in landmark x, which is what ordering
+    // is computed from, rather than in slot terms — `mirrored` flips those.
+    const startLeftId = [...startX.keys()].sort(
+      (a, b) => startX.get(a)! - startX.get(b)!
+    )[0]!;
+    const endLeftId = [...end].sort((a, b) => a.x - b.x)[0]!.id;
+    assert.notEqual(endLeftId, startLeftId, 'nobody actually crossed');
+  });
+
+  test('locked, a newcomer still gets a slot rather than none at all', () => {
+    // A mid-round takeover, or somebody returning after the tracker gave up on
+    // them, arrives with slot -1. Freezing the order must not mean freezing
+    // them out — a player with slot -1 indexes nothing and scores nowhere.
+    const tracker = new PoseTracker({ maxPlayers: 2, aspect: A });
+    const alone = (): RawPose[] => [personAt(0.3, 3.0)];
+    run(tracker, alone, 45);
+    assert.equal(tracker.getPlayers().length, 1);
+
+    tracker.setOptions({ lockSlots: true });
+    const pair = (): RawPose[] => [personAt(0.3, 3.0), personAt(0.7, 3.0)];
+    const log = run(tracker, pair, 120, REALISTIC_NOISE, 3);
+
+    const end = log[119]!.players;
+    assert.equal(end.length, 2, 'the second person was never admitted');
+    const slots = end.map((p) => p.slot).sort();
+    assert.deepEqual(slots, [0, 1], `slots were ${JSON.stringify(slots)}`);
+  });
+
+  test('locked, two people standing still keep their halves under hostile noise', () => {
+    // The everyday case. Two friends side by side, neither going anywhere, for
+    // a whole round.
+    const tracker = new PoseTracker({ maxPlayers: 2, aspect: A });
+    const still = (): RawPose[] => [personAt(0.34, 3.0), personAt(0.66, 3.05)];
+    run(tracker, still, 45);
+    const before = new Map(tracker.getPlayers().map((p) => [p.id, p.slot]));
+    assert.equal(before.size, 2);
+
+    tracker.setOptions({ lockSlots: true });
+    const log = run(tracker, still, 600, HOSTILE_NOISE, 7);
+
+    let churn = 0;
+    for (const s of log) {
+      for (const p of s.players) if (before.has(p.id) && p.slot !== before.get(p.id)) churn++;
+    }
+    assert.equal(churn, 0, `${churn} frames with a swapped half`);
+  });
+
+  test('the lock lifts, and ordering catches up with the room', () => {
+    // Between rounds the order has to be free again, or the next pair inherit
+    // the last pair's halves regardless of where they are standing.
+    const tracker = new PoseTracker({ maxPlayers: 2, aspect: A });
+    run(tracker, crossing, 45);
+    tracker.setOptions({ lockSlots: true });
+    run(tracker, crossing, 180, REALISTIC_NOISE, 4);
+
+    tracker.setOptions({ lockSlots: false });
+    const after = run(tracker, crossing, 60, REALISTIC_NOISE, 5);
+    const end = after[59]!.players;
+    const byX = [...end].sort((a, b) => a.x - b.x);
+    // Mirrored is on by default, so slot 0 is the RIGHTMOST body in landmark x.
+    assert.equal(byX[byX.length - 1]!.slot, 0, 'ordering did not resume');
+  });
+});

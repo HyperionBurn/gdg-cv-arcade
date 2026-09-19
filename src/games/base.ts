@@ -907,6 +907,14 @@ export abstract class GameBase implements Screen {
       // they count as a player rather than a passer-by. Both are things you can
       // only really set once you can see the room.
       minUnit: tunables.get('tracker.minUnit', DEFAULT_TRACKER_OPTIONS.minUnit),
+      // YOUR HALF OF THE SCREEN IS YOURS FOR THE WHOLE TURN.
+      //
+      // Every versus game indexes its points by slot, and slot is screen
+      // order, so two people who walk around each other mid-round have their
+      // SCORES swapped along with their slots — silently, in the middle of a
+      // head-to-head. Ordering is still free to settle right up to GO; after
+      // that it is frozen. See `lockSlots` in core/tracker.ts.
+      lockSlots: this.state === 'playing',
       admitSpeedTorsos: tunables.get(
         'tracker.admitSpeedTorsos',
         DEFAULT_TRACKER_OPTIONS.admitSpeedTorsos

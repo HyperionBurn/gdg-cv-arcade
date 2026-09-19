@@ -312,6 +312,29 @@ export interface TrackerOptions {
    */
   slotHysteresisTorsos: number;
   /**
+   * Stop reordering slots entirely. Set for the duration of a live round.
+   *
+   * SLOT IS SCREEN ORDER, AND SCREEN ORDER IS WHERE YOUR SCORE LIVES. Every
+   * versus game indexes its points by slot — `this.points[slot]`,
+   * `this.counters[slot]`, `this.slots[slot].score`. That is the right shape
+   * for a split screen, and it is exactly wrong the moment the tracker does
+   * its job: two people who genuinely walk around each other have their slots
+   * swapped, deliberately (see the crossing test in `crowd.test.ts`), and
+   * their SCORES go with them. Each player inherits the other's number, in
+   * silence, in the middle of a head-to-head round.
+   *
+   * Identity is never the problem — the tracker keeps ids through a crossing.
+   * So the fix is not to make ordering stickier, it is to stop asking the
+   * question while a round is running: your half of the screen is yours for
+   * the whole turn. A player who walks to the other side of the room still
+   * drives their own half from over there, which is confusing for about one
+   * second and self-correcting, where a silently swapped score is neither.
+   *
+   * Newcomers still get a slot (the lowest free one) so a mid-round takeover
+   * or a returning body is not left slotless.
+   */
+  lockSlots: boolean;
+  /**
    * How much nearer a challenger must be before `getPrimary()` switches to
    * them. See `takeoverRatio` for where 1.12 comes from: it is attract.ts's
    * MEASURED 1.25x on bounding-box area, converted to torso units.
@@ -371,6 +394,7 @@ export const DEFAULT_TRACKER_OPTIONS: TrackerOptions = {
   unitOutlierRatio: 1.6,
   unitResyncFrames: 20,
   slotHysteresisTorsos: 0.5,
+  lockSlots: false,
   primaryTakeover: 1.12,
   zone: FULL_FRAME_ZONE,
   mirrored: true,
@@ -730,6 +754,20 @@ export class PoseTracker {
     const aspect = this.aspect;
     const players = this.tracks.filter((tr) => tr.confirmed);
     const key = (tr: InternalTrack): number => (o.mirrored ? -tr.pred.x : tr.pred.x);
+
+    // Mid-round: hold what everyone has. See `lockSlots`.
+    if (o.lockSlots) {
+      const taken = new Set<number>();
+      for (const tr of players) if (tr.slot >= 0) taken.add(tr.slot);
+      for (const tr of players) {
+        if (tr.slot >= 0) continue;
+        let free = 0;
+        while (taken.has(free)) free++;
+        tr.slot = free;
+        taken.add(free);
+      }
+      return;
+    }
 
     // Start from the order we already had, so the sort has something to be
     // hysteretic ABOUT. New arrivals go to the end, in screen order.

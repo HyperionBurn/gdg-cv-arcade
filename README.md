@@ -102,6 +102,28 @@ anything else on this page.
 Number keys only jump screens from attract or the menu. **Mid-round you must
 hold SHIFT**, so a bag on the keyboard cannot end somebody's turn.
 
+### Two people can play — say it out loud
+
+**Every game on the roster takes two.** Red Light takes six. The stall's own
+signage says so now (the menu tiles carry a `1-2P` badge, Red Light says
+`1-6P`), but the single most effective thing a marshal does is say "grab your
+mate, you can both play".
+
+How it works, so nobody has to explain it twice:
+
+- Both step into frame and the game starts as **VERSUS**, split screen, one
+  score each.
+- If the second person is a beat behind, the countdown **waits for them**. A
+  yellow `A FRIEND CAN STEP IN` badge is on screen while there is still time to
+  act on it, and the clock rewinds when they arrive.
+- If somebody wants a **solo** run for the leaderboard, the other person just
+  steps out of frame — off the tape, or behind the player.
+- Only the **winner** enters initials. That is deliberate: two name entries per
+  turn would double the slowest part of the flow.
+
+Red Light is the exception and it runs a real lobby — it counts people in and
+starts when nobody new has joined for a couple of seconds.
+
 ### The mouse works too
 
 Move the trackpad and the hand cursor follows the mouse for 2.5 seconds, then
@@ -151,7 +173,7 @@ src/
   core/      camera, MediaPipe worker, tracker, One Euro filter,
              gestures, blades, simulator
   engine/    draw, projection, skeleton, juice, particles, procedural audio
-  games/     base (round lifecycle) + 6 games + geometry + poses + runner-world
+  games/     base (round lifecycle) + 7 games + geometry + poses + runner-world
   meta/      leaderboard, factions
   shell/     theme, router, attract, menu, hover, initials, rigcheck
 scripts/     one-time model + font fetch
