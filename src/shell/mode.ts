@@ -64,6 +64,7 @@ import {
   ramp,
 } from './theme';
 import { GAME_SEATS, gameColor } from '../meta/games';
+import { tunables } from '../meta/tunables';
 import { setPlayMode, type PlayMode } from '../meta/mode';
 import { MENU_TILES } from './menu';
 import { tournament } from '../meta/tournament';
@@ -96,6 +97,12 @@ export function takePendingGame(): GameId | null {
  * than no screen at all — it is a delay dressed as agency.
  */
 export function modeScreenApplies(id: GameId): boolean {
+  // OFF-SWITCH FOR A BUSY STALL. This screen buys certainty at the cost of a
+  // few seconds a turn, and which of those a marshal wants depends on how long
+  // the queue is — which is not something anybody can know from here. Turning
+  // it off loses nothing the games cannot do themselves; they just stop being
+  // able to be told NOT to seat two.
+  if (tunables.get('shell.modeScreen', 1) < 0.5) return false;
   // NEITHER DOES A BRACKET MATCH. A tournament match is by definition a versus
   // round: the marshal has called two names, the crowd is watching, and the
   // bracket only advances from a `playerCount === 2` round. Asking the pair how

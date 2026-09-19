@@ -1003,4 +1003,19 @@ tunables.registerAll([
       'Lower it when the stall is busy so an abandoned round frees the screen ' +
       'for the next person instead of holding it.',
   },
+  {
+    key: 'shell.modeScreen',
+    label: 'ASK HOW MANY',
+    group: 'STALL CONTROL',
+    min: 0,
+    max: 1,
+    step: 1,
+    default: 1,
+    description:
+      'Show the JUST ME / VERSUS screen between the menu and a game. It is ' +
+      'there because the camera cannot tell a second player from a friend ' +
+      'standing too close, and it costs every turn a few seconds. Set 0 when ' +
+      'the queue is out the door: the games still detect two people by ' +
+      'themselves, they just cannot be told NOT to.',
+  },
 ]);

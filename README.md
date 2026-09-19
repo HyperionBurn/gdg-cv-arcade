@@ -185,6 +185,9 @@ Open the operator console (`CTRL+SHIFT+` `` ` ``), **STALL CONTROL** group:
 - **IDLE TIMEOUT** — how long a deserted game waits before going back to attract.
 - **MIN BODY SIZE** — raise it if people standing in the queue behind the player
   are being picked up as players.
+- **ASK HOW MANY** — set it to 0 when the queue is out the door. It drops the
+  JUST ME / VERSUS screen and saves a few seconds a turn; the games still
+  detect two people by themselves, they just cannot be told NOT to.
 
 If Red Light specifically is misbehaving: **MOVE THRESHOLD** (raise it if people
 are eliminated while standing still) and **STOPPING GRACE** (raise it if people

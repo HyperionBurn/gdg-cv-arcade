@@ -34,6 +34,7 @@ import {
   type GameConfig,
 } from '../src/games/base.ts';
 import { GAME_SEATS, seatBadge } from '../src/meta/games.ts';
+import { tunables } from '../src/meta/tunables.ts';
 import { setPlayMode, takePlayMode } from '../src/meta/mode.ts';
 import { modeScreenApplies } from '../src/shell/mode.ts';
 import { TOURNAMENT_GAMES, isTournamentGame, tournament } from '../src/meta/tournament.ts';
@@ -709,5 +710,30 @@ describe('a finished bracket stops owning its game', () => {
 
     assert.equal(modeScreenApplies(game), true, 'the choice never came back');
     tournament.reset();
+  });
+});
+
+/**
+ * The screen buys certainty at the cost of a few seconds a turn, and which of
+ * those a marshal wants depends on how long the queue is — which nothing in
+ * the code can know. So it is on the operator console.
+ */
+describe('the mode screen has an off switch', () => {
+  test('setting ASK HOW MANY to 0 skips it everywhere', () => {
+    tournament.reset();
+    tunables.set('shell.modeScreen', 0);
+    for (const [name, cfg] of GAMES) {
+      assert.equal(modeScreenApplies(cfg.gameId), false, `${name} still asked`);
+    }
+    tunables.reset('shell.modeScreen');
+    assert.equal(modeScreenApplies(GAMES[0]![1].gameId), true, 'it did not come back');
+  });
+
+  test('turning it off loses nothing the games cannot do themselves', () => {
+    // The point of the off switch: auto-detection is unchanged, so two people
+    // still get a versus round. What is lost is the ability to say NO to one.
+    for (const [name, cfg] of GAMES) {
+      assert.equal(rosterSize(2, cfg, null), rosterSize(2, cfg, 'open'), name);
+    }
   });
 });
