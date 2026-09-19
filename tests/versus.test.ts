@@ -26,6 +26,8 @@ import {
   LATE_JOIN_FLOOR_SEC,
   MAX_LATE_JOINS,
   DEPART_GRACE_SEC,
+  LEAD_DEBOUNCE_SEC,
+  leadChange,
   ADMIT_LATENCY_SEC,
   STEP_IN_REACTION_SEC,
   INVITE_UNTIL_SEC,
@@ -422,5 +424,100 @@ describe('Red Light — six players, six scores', () => {
     // Progress is frozen at elimination and the lane is never reassigned
     // mid-round, so scoring does not care whether they are still in frame.
     assert.equal(laneScore([racer(2, 73)], 2), 73);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* 4. The overtake                                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A head-to-head has exactly one moment that is worth a celebration for free:
+ * the instant the person who was losing goes ahead. Until `watchLead` the only
+ * sign of it was a 2.2vh line flipping between "DOWN BY 3" and "LEADING BY 1",
+ * which the crowd standing behind two friends cannot read.
+ *
+ * The rule is small and every one of its edges is a way to ruin it — announce
+ * on a tie and it fires twice per overtake, announce every crossing and a
+ * see-saw becomes wallpaper, announce the first lead and the opening second of
+ * every round has a celebration in it.
+ */
+describe('the overtake is announced, and only the overtake', () => {
+  const start = { leadSlot: -1, leadAt: -Infinity };
+
+  test('the first player to go ahead has not overtaken anybody', () => {
+    const r = leadChange(1, 0, start, 0.5);
+    assert.equal(r.leadSlot, 0);
+    assert.equal(r.announce, false, 'a celebration in the first second of the round');
+  });
+
+  test('taking the lead from somebody IS announced', () => {
+    const first = leadChange(1, 0, start, 0.5);
+    const over = leadChange(1, 2, first, 9);
+    assert.equal(over.leadSlot, 1);
+    assert.equal(over.announce, true);
+    assert.equal(over.leadAt, 9);
+  });
+
+  test('a tie keeps the incumbent, so an overtake fires once and not twice', () => {
+    // Scores cross THROUGH equality. Treating a draw as "nobody leads" fires
+    // on the way in and again on the way out.
+    let s = leadChange(5, 3, start, 1);
+    s = leadChange(5, 5, s, 8); // the moment they draw level
+    assert.equal(s.leadSlot, 0, 'the lead changed hands on a tie');
+    assert.equal(s.announce, false);
+
+    s = leadChange(5, 6, s, 8.1); // and now they are actually ahead
+    assert.equal(s.leadSlot, 1);
+    assert.equal(s.announce, true, 'the real overtake went unannounced');
+  });
+
+  test('a see-saw at one point apart is not eight celebrations', () => {
+    // 67 Speed with two evenly matched players: the lead changes hands on
+    // almost every rep.
+    let s: ReturnType<typeof leadChange> = { ...start, announce: false };
+    let fired = 0;
+    let t = 0;
+    for (let i = 0; i < 40; i++) {
+      // Genuinely alternating: each one scores a point and goes one ahead.
+      const base = 20 + Math.floor(i / 2);
+      const a = base + (i % 2 === 0 ? 1 : 0);
+      const b = base + (i % 2 === 0 ? 0 : 1);
+      s = leadChange(a, b, s, t);
+      if (s.announce) fired++;
+      t += 0.25; // 10 seconds of trading the lead
+    }
+    assert.ok(fired <= 10 / LEAD_DEBOUNCE_SEC + 1, `${fired} announcements in 10s`);
+    assert.ok(fired >= 1, 'a genuine back-and-forth said nothing at all');
+  });
+
+  test('the debounce never LOSES the lead, only the announcement', () => {
+    // Whoever is actually ahead has to be right even when the celebration is
+    // suppressed — the HUD and the results screen both read this.
+    let s = leadChange(1, 0, start, 0.5);
+    s = leadChange(0, 1, s, 1.0); // announced
+    assert.equal(s.leadSlot, 1);
+    s = leadChange(2, 1, s, 1.2); // inside the debounce
+    assert.equal(s.leadSlot, 0, 'the leader was wrong while the debounce held');
+    assert.equal(s.announce, false);
+  });
+
+  test('a round where nobody ever scores says nothing', () => {
+    let s: ReturnType<typeof leadChange> = { ...start, announce: false };
+    for (let i = 0; i < 200; i++) {
+      s = leadChange(0, 0, s, i / 60);
+      assert.equal(s.announce, false);
+    }
+    assert.equal(s.leadSlot, -1);
+  });
+
+  test('a runaway winner is announced once, not once per point', () => {
+    let s = leadChange(0, 1, start, 0.5);
+    let fired = 0;
+    for (let i = 0; i < 100; i++) {
+      s = leadChange(i, 1, s, 1 + i * 0.5);
+      if (s.announce) fired++;
+    }
+    assert.equal(fired, 1, `${fired} announcements for one overtake`);
   });
 });

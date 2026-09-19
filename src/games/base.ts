@@ -407,7 +407,46 @@ const GATHER_STABLE_SEC = 2.6;
  * them is a moment. Long enough to be an event, short enough that a genuine
  * back-and-forth still reads as one.
  */
-const LEAD_DEBOUNCE_SEC = 2.5;
+export const LEAD_DEBOUNCE_SEC = 2.5;
+
+/** Who holds the lead, and whether this frame is worth announcing. */
+export interface LeadState {
+  leadSlot: number;
+  /** `stateTime` of the last announcement, for the debounce. */
+  leadAt: number;
+  announce: boolean;
+}
+
+/**
+ * Pure half of the overtake rule, so it can be tested without a canvas.
+ *
+ * A TIE KEEPS THE INCUMBENT. Scores cross THROUGH equality, so treating a draw
+ * as "nobody leads" fires twice on every overtake — once into the tie and once
+ * out — and in a game where both players score on the same beat it fires
+ * continuously.
+ *
+ * The FIRST player to go ahead has not overtaken anybody, so that one is
+ * recorded silently. After that, a debounce: two players a point apart trade
+ * the lead several times a second, every one of those is technically an
+ * overtake and none of them is a moment.
+ */
+export function leadChange(
+  a: number,
+  b: number,
+  prev: Pick<LeadState, 'leadSlot' | 'leadAt'>,
+  stateTime: number
+): LeadState {
+  const next = a > b ? 0 : b > a ? 1 : prev.leadSlot;
+  if (next === prev.leadSlot) return { ...prev, announce: false };
+
+  // Nobody held it before, so nobody lost it.
+  if (prev.leadSlot < 0) return { leadSlot: next, leadAt: prev.leadAt, announce: false };
+
+  if (stateTime - prev.leadAt < LEAD_DEBOUNCE_SEC) {
+    return { leadSlot: next, leadAt: prev.leadAt, announce: false };
+  }
+  return { leadSlot: next, leadAt: stateTime, announce: true };
+}
 
 const RESULTS_SEC = 7;
 /**
@@ -1299,17 +1338,16 @@ export abstract class GameBase implements Screen {
   private watchLead(fc: FrameContext): void {
     if (this.playerCount !== 2 || this.config.partyMode) return;
 
-    const a = this.scoreFor(0);
-    const b = this.scoreFor(1);
-    const next = a > b ? 0 : b > a ? 1 : this.leadSlot;
-    if (next === this.leadSlot) return;
-
-    const first = this.leadSlot < 0;
+    const lead = leadChange(
+      this.scoreFor(0),
+      this.scoreFor(1),
+      { leadSlot: this.leadSlot, leadAt: this.leadAt },
+      this.stateTime
+    );
+    const next = lead.leadSlot;
     this.leadSlot = next;
-    // The first player to score has not overtaken anybody.
-    if (first) return;
-    if (this.stateTime - this.leadAt < LEAD_DEBOUNCE_SEC) return;
-    this.leadAt = this.stateTime;
+    this.leadAt = lead.leadAt;
+    if (!lead.announce) return;
 
     const rect = this.slotRect(fc.v, next);
     const color = PLAYER_COLORS[next] ?? COLORS.yellow;
