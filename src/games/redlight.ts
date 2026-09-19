@@ -448,10 +448,10 @@ export interface ScorableRacer {
  * ONE SCORE PER LANE — the pure rule, extracted so it can be tested.
  *
  * THE BUG THIS REPLACED. `scoreFor(slot)` ignored `slot` entirely and returned
- * the same number for every player: Red Light is the only six-player game on
- * the roster, so six people finished a round, looked at the results screen,
- * and saw six identical scores. The leaderboard then took that one number six
- * times. A party game whose entire pitch is "last one standing" was, at the
+ * the same number for every player: Red Light is the only game on the roster
+ * that seats a whole group, so everybody finished a round, looked at the
+ * results screen, and saw identical scores. The leaderboard then took that one
+ * number once per racer. A party game whose entire pitch is "last one standing" was, at the
  * only moment that pitch pays off, unable to say who won.
  *
  * Lane is the right key and slot is the right lookup: `lane` is fixed at first
@@ -2123,13 +2123,13 @@ export class RedLightGame extends GameBase {
     // game in a queue. A line under it during the opening green — which is
     // deliberately the longest and most forgiving of the round — costs nothing
     // and is gone before it can become clutter. After that, the doll, the
-    // light and six other people are the instruction.
+    // light and four other people are the instruction.
     //
     // GATED ON THE LIGHT, NOT ON PROGRESS. It used to hide the moment ANY
-    // racer passed 0.5% of the track, which in a six-player game is the moment
-    // the FASTEST person starts — so the one line explaining the game was
-    // pulled off screen by somebody who had already understood it, away from
-    // the five who had not. The person who needs an instruction is by
+    // racer passed 0.5% of the track, which in a five-player game is the
+    // moment the FASTEST person starts — so the one line explaining the game
+    // was pulled off screen by somebody who had already understood it, away
+    // from the four who had not. The person who needs an instruction is by
     // definition the person who has not acted on it yet, so a behavioural gate
     // is always aimed at the wrong player. The opening green is 3.4-4.2s and
     // there is exactly one of them; that is the window.

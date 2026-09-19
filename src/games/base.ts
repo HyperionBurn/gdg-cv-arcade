@@ -99,7 +99,7 @@ export interface GameConfig {
    * join. 0 or absent starts as soon as someone is in frame.
    *
    * Essential for party games. Without it the countdown fires the instant ONE
-   * player is confirmed — which for a six-player game means it starts while
+   * player is confirmed — which for a five-player game means it starts while
    * everyone else is still shuffling into frame, and the whole reason the game
    * is on the roster is lost.
    */
@@ -1829,14 +1829,14 @@ export abstract class GameBase implements Screen {
   }
 
   /**
-   * SIX PLAYERS, SIX ROWS.
+   * A WHOLE GROUP, A ROW EACH.
    *
    * The results screen had exactly two renderers: one score (solo) and two
-   * scores (versus). Red Light is the only party game on the roster and it
-   * seats six, so it fell to the SOLO branch — `results[0]`, one number, for a
-   * round six people just played. Fixing `scoreFor` to return a real score per
-   * lane (see `laneScore`) produced six distinct numbers that nothing on
-   * screen ever showed.
+   * scores (versus). Red Light is the only party game on the roster — it seats
+   * five now and seated six when this was found — so it fell to the SOLO
+   * branch: `results[0]`, one number, for a round a whole group just played.
+   * Fixing `scoreFor` to return a real score per lane (see `laneScore`)
+   * produced a distinct number per racer that nothing on screen ever showed.
    *
    * And the results screen is where a party game pays off. The whole pitch is
    * "last one standing"; the moment that lands is the standings.

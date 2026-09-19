@@ -134,10 +134,10 @@ export function factionColor(index: number): string {
 /**
  * Six faction identities from four brand colours.
  *
- * `PLAYER_COLORS` ends `...ink, muted`, which is correct for a six-player game
- * where the last two slots are transient. It is WRONG for factions: muted is
- * this kit's *disabled* colour, so the sixth faction rendered as greyed-out and
- * unavailable. Nobody picks the option that looks switched off, which would
+ * `PLAYER_COLORS` USED TO end `...ink, muted` — it does not any more, for the
+ * reason written above it, but this list was copied from it while it did. Muted
+ * is this kit's *disabled* colour, so the sixth faction rendered as greyed-out
+ * and unavailable. Nobody picks the option that looks switched off, which would
  * have quietly zeroed a whole faction's score on day one.
  *
  * So: four flat brand colours, then INK — a full-strength kit colour, not an

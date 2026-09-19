@@ -26,7 +26,7 @@
  *    today, and if one lands the screen must not offer a choice of one.
  *
  * The vocabulary is per game, because "multiplayer" means different things on
- * a split screen and in a six-lane race, and a screen that says the wrong one
+ * a split screen and in a five-lane race, and a screen that says the wrong one
  * is worse than no screen.
  */
 
@@ -149,7 +149,7 @@ interface Choice {
  * The words, per game shape.
  *
  * "MULTIPLAYER" and "VERSUS" are not synonyms here: a split screen is two
- * people racing each other and a six-lane Red Light is a group surviving
+ * people racing each other and a five-lane Red Light is a group surviving
  * together. Using one word for both would make one of the two screens lie.
  */
 function choicesFor(id: GameId): [Choice, Choice] {

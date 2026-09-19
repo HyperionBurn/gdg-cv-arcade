@@ -713,7 +713,7 @@ export function rankedRow(
   //
   // `rankColor` is yellow, blue, red — and then INK for 4th and below, which
   // is the same ink the numeral was hardcoded to. Places 4 and 5 on the
-  // leaderboard, and every place past third on Red Light's six-player
+  // leaderboard, and every place past third on Red Light's five-player
   // standings board, rendered as a solid black disc with an invisible number
   // inside it. The one row that most needs to say which place it is was the
   // one row that could not.

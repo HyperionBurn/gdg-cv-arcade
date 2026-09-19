@@ -250,7 +250,7 @@ class AudioEngine {
 
       case 'eliminate':
         // HONOURS PITCH, AND IT HAS TO. A red light regularly takes three to
-        // six people on the same frame, and redlight.ts steps the pitch down
+        // five people on the same frame, and redlight.ts steps the pitch down
         // per elimination for exactly that reason — its comment calls the
         // result "an audible cascade, which is both clearer and much funnier".
         // It never happened: these two frequencies were hardcoded, so `p` was
