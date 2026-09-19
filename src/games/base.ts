@@ -1336,6 +1336,8 @@ export abstract class GameBase implements Screen {
       });
     }
 
+    if (this.playerCount === 2) this.drawStandingMarks(fc);
+
     if (this.playerCount === 2) {
       // Landing, not blinking. A banner that simply exists on the next frame
       // reads as a render glitch; one that overshoots and settles reads as the
@@ -1358,6 +1360,91 @@ export abstract class GameBase implements Screen {
       });
       ctx.restore();
     }
+  }
+
+  /**
+   * WHICH HALF IS MINE?
+   *
+   * Reported from an outside playtest: in a two-player game people "stand in
+   * the middle and swap tracks". Nothing on the countdown ever said where to
+   * stand. The screen showed VERSUS, a numeral and a tagline, all centred, and
+   * then the round started and two players discovered they were sharing a
+   * slot — or worse, crossed over mid-round and swapped scores.
+   *
+   * Two things fix it, and both are one draw call:
+   *
+   *   THE DIVIDER, four seconds early. Every versus game already draws one
+   *   during play; drawing it during the countdown turns an abstract "versus"
+   *   into a visible line on the floor of the screen.
+   *
+   *   A PLATE PER HALF, in that slot's identity colour — the same colour the
+   *   half's HUD and score will be in ten seconds' time, so the association is
+   *   made before it has to be read under pressure.
+   *
+   * The display is mirrored, so screen-left is the player's own left as they
+   * face it. That is what a mirror does and what anybody standing in front of
+   * one expects, so nothing needs to explain it.
+   *
+   * Placed at 0.62H: below the numeral, above the tagline, and low enough on
+   * the screen to read as floor markings rather than as headings.
+   */
+  private drawStandingMarks(fc: FrameContext): void {
+    const { ctx, v } = fc;
+    if (this.config.partyMode || !this.config.supportsVersus) return;
+
+    const y = v.height * 0.62;
+    const h = vh(v, 6.4);
+
+    // INK, AND ONLY BETWEEN THE TWO PLATES.
+    //
+    // First pass drew this in `grid` and ran it from under the numeral to the
+    // bottom of the screen. Wrong on both counts: `grid` is the token for
+    // structure you read PAST, and here the line is the entire message, so at
+    // 3m it simply was not there. And a full-height rule crosses the numeral,
+    // which is the one thing on this screen that must not be competed with.
+    //
+    // A short ink line spanning exactly the plates' band reads as the boundary
+    // between two places to stand, which is what it is.
+    const top = v.height * 0.56;
+    ctx.save();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = COLORS.ink;
+    ctx.fillRect(
+      v.width / 2 - vh(v, STROKE.base) / 2,
+      top,
+      vh(v, STROKE.base),
+      // Stops at the plates' bottom edge. Running it further put it straight
+      // through ONE EACH SIDE, which is centred on the same axis.
+      v.height * 0.66 - top
+    );
+    ctx.restore();
+
+    for (let slot = 0; slot < 2; slot++) {
+      const rect = this.slotRect(v, slot);
+      const color = PLAYER_COLORS[slot] ?? COLORS.blue;
+      // Ink on a flat identity colour. `PLAYER_COLORS[0]` is yellow, which is
+      // 1.7:1 as TEXT on paper — as a SURFACE with ink on top it is exactly
+      // what the kit asks for, and it is how the seat badge reads during play.
+      labelPill(ctx, v, rect.centerX, y, `PLAYER ${slot + 1}`, h, {
+        size: vh(v, 2.8),
+        fill: color,
+        color: COLORS.ink,
+        outline: COLORS.ink,
+        outlineWidth: vh(v, STROKE.base),
+        shadow: vh(v, SHADOW.base),
+      });
+    }
+
+    drawText(ctx, 'ONE EACH SIDE', v.width / 2, y + vh(v, 6.2), {
+      size: vh(v, 2),
+      // Runner is playable during its own countdown, so this line lands on a
+      // live 3D track rather than on paper. Free everywhere else.
+      knockout: true,
+      color: COLORS.ink,
+      font: FONTS.body,
+      weight: 600,
+      letterSpacing: '0.24em',
+    });
   }
 
   private tickPlaying(fc: FrameContext, dt: number): void {
