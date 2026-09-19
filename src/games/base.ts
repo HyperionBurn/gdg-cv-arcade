@@ -2134,6 +2134,24 @@ export abstract class GameBase implements Screen {
     return vh(v, this.hudMetrics().bottom);
   }
 
+  /**
+   * The bottom of the HUD's LABEL — "STILL IN", "FURTHEST", "SCORE" — rather
+   * than the bottom of the whole HUD band.
+   *
+   * `hudBottom` is the right number for anything that must clear the HUD
+   * entirely. It is too conservative for something that deliberately sits
+   * inside the HUD's lower region and only needs to miss the type, which is
+   * what Red Light's final-call banner does: anchoring that to `hudBottom`
+   * pushed it so far down it stopped covering the state band underneath.
+   *
+   * The label is drawn with `textBaseline: 'middle'`, so its box is
+   * `labelY ± labelSize / 2`.
+   */
+  protected hudLabelBottom(v: FrameContext['v']): number {
+    const m = this.hudMetrics();
+    return vh(v, m.labelY + m.labelSize * 0.5);
+  }
+
   private hudMetrics(): HudMetrics {
     return this.config.hudShelf ? HUD_SHELF : HUD_FULL;
   }

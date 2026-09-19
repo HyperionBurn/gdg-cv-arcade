@@ -2172,12 +2172,28 @@ export class RedLightGame extends GameBase {
     const t = EASE.back(Math.min(1, (this.holdTotal - this.endHold) / 0.45));
     const winner = this.winnerId !== null ? this.racers.get(this.winnerId) : undefined;
     const col = winner ? winner.color : COLORS.red;
-    const cy = vh(v, 32);
 
     // Opaque paper band with ink rules, full-bleed. Same language as the state
     // band it is covering.
-    const bandY = vh(v, 23);
+    //
+    // STARTS BELOW THE HUD LABEL, NOT AT A FIXED 23vh.
+    //
+    // `HUD_FULL.labelY` is also 23. The two numbers were picked independently
+    // and happen to be the same, so this band's top edge was drawn straight
+    // through the vertical centre of "STILL IN" — measured at 11.3 of the
+    // label's 20.5 device pixels painted over, then a 4px ink rule through
+    // what was left. On screen it reads as a smear rather than a band edge,
+    // at the loudest moment in the round.
+    //
+    // NOT `hudBottom` (30vh): this band is meant to sit inside the HUD's lower
+    // region, and anchoring it there pushed it down far enough to stop covering
+    // the state band underneath — which is the band's whole job. It needs to
+    // miss the TYPE, not the whole HUD. Verified both ways in the browser.
+    const bandY = Math.max(vh(v, 23), this.hudLabelBottom(v) + vh(v, 0.8));
     const bandH = vh(v, 18);
+    // Centred IN the band rather than at a fixed 32vh, so the pill travels with
+    // the band instead of drifting toward its top edge when the band moves.
+    const cy = bandY + bandH / 2;
     const rule = vh(v, STROKE.thick);
     ctx.save();
     ctx.shadowBlur = 0;
