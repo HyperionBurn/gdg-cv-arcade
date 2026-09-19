@@ -97,7 +97,8 @@ const BOMB_TIME_PENALTY = 8;
  * Under half the advertised turn, every time, and the variation between turns
  * is larger than the turn that is left. Someone who steps up, swings through
  * four bombs and is handed back to the queue after seventeen seconds has not
- * had a go — and PLAN.md §11 asks for failure that is funny, not failure that
+ * had a go — and ARCHITECTURE.md's "What good means here" asks for failure that
+ * is funny, not failure that
  * takes the turn away.
  *
  * 12s is a quarter of the round: the first bomb still bites a full eight
@@ -791,7 +792,8 @@ export class FruitNinjaGame extends GameBase {
    * the reason for the timer in the first place) and turns the bomb into the
    * biggest laugh in the game rather than the end of it.
    *
-   * PLAN.md §11: "failure should be funny, never punishing."
+   * ARCHITECTURE.md, "What good means here": "Failure should be funny, never
+   * punishing."
    *
    * IN VERSUS THE CLOCK IS NOT YOURS TO SPEND. `timeLeft` is one shared round
    * clock, so the time penalty was charged to BOTH players — measured, three

@@ -120,7 +120,8 @@ const WIN_HOLD_SEC = 1.9;
 const WIPEOUT_HOLD_SEC = 1.2;
 
 /**
- * Elimination callouts. Deliberately daft — PLAN.md §11: "failure should be
+ * Elimination callouts. Deliberately daft — ARCHITECTURE.md, "What good means
+ * here": "Failure should be
  * funny, never punishing." Being out has to look like the best thing that
  * happened to you, or nobody queues twice.
  */
