@@ -2,7 +2,7 @@
  * The juice engine.
  *
  * PLAN.md §5, in impact order: screen shake, hit-stop, time dilation,
- * particles, rolling counters, impact popups, chromatic aberration.
+ * particles, rolling counters, impact popups, ink edge slams.
  *
  * "Feel is why people play twice." At a stall, where nobody has time to
  * appreciate depth, feel is most of what the game IS.
@@ -12,7 +12,7 @@
  *   juice.pushTransform(ctx);             // shake
  *   ...draw the world...
  *   juice.popTransform(ctx);
- *   juice.drawOverlays(ctx, v);           // flash, aberration, vignette pulse
+ *   juice.drawOverlays(ctx, v);           // flash, edge slam
  */
 
 import type { Viewport } from './draw';

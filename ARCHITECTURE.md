@@ -199,13 +199,22 @@ muddy green that is in no palette at all.
 ### `engine/juice.ts`
 ```ts
 juice.shake(0..1)            juice.hitStop(ms)        juice.slowMo(scale, recover?)
-juice.flash(color, a?, decay?)                        juice.chromatic(amount)
+juice.flash(color, a?, decay?)                        juice.chromatic(amount)*
 juice.impact(strength?, color?)   // standard "that landed" bundle
 juice.celebrate(color)            // "new record", deliberately over the top
 
 new RollingNumber(speed?)    // .set .add .update(dt) .value .isSettled .reset
 new PopupLayer()             // .spawn(text, x, y, color, size, life?) .update .draw
 ```
+
+\* `chromatic()` is a legacy NAME, not a legacy effect. It used to be an RGB
+fringe built from two gradients in `screen` composite — which the brand bans,
+and which on paper was a literal no-op because white is that operator's
+identity. It now slams hard flat INK BARS in from both edges, which is the
+kit's vocabulary for "the screen just took a hit" and reads from the back of a
+crowd where a subtle fringe never would. Kept under the old name because seven
+call sites use it consistently and a rename days before the event buys nothing
+the reader of this line does not now have.
 
 ### `engine/particles.ts`
 ```ts
@@ -222,7 +231,8 @@ BURST.ambient(ps, x, y, color)
 ```ts
 audio.play(name, pitch?)   // 'rep' 'slice' 'pop' 'bomb' 'tick' 'go' 'record'
                            // 'hover' 'select' 'eliminate' 'greenlight'
-                           // 'redlight' 'whoosh' 'land'
+                           // 'redlight' 'whoosh' 'land' 'heartbeat' 'shatter'
+                           // 'punch' 'whiff' 'duck' 'wallhit'
 audio.startMusic(bpm?)     audio.setMusicIntensity(0..1)     audio.stopMusic()
 ```
 Add a new sound by extending the `SoundName` union and its `switch` case. Keep
@@ -284,7 +294,23 @@ http://localhost:5173/?sim=1
 ```
 
 `core/simulator.ts` emits synthetic skeletons. In dev, `window.__arcade` exposes
-`{ router, camera, vision, audio, simulator, screen, tick(frames, dt) }`.
+`{ router, camera, vision, audio, simulator, highlights, screen, tick(frames, dt),
+smoke(only?), turn(only?) }`.
+
+`smoke()` and `turn()` are the two regression sweeps and the distinction
+matters: `smoke` mounts each game DIRECTLY and asserts it scores and
+terminates, which is half a turn. `turn` drives the SHELL through the real
+hover cursor — attract, menu dwell, play, three letters, back out — because
+the bug that made every menu tile unselectable passed a fully green smoke run.
+
+`highlights` is on there for a reason worth knowing: a dev-console
+`import('/src/meta/highlights.ts')` does NOT reach the live instance. Vite
+appends an HMR timestamp to module URLs it has reloaded, so a bare import
+resolves to a SECOND, freshly-constructed module whose counters are all zero.
+That looks exactly like "instant replay is dead" and is not. The same trap
+applies to `tunables` and `mode` — reach anything stateful through
+`window.__arcade` or through the operator console, never through a fresh
+import.
 
 `tick()` advances the app with a fixed clock, so game logic can be asserted
 deterministically and at far faster than real time:
