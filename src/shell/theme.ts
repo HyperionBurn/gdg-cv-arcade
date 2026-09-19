@@ -92,6 +92,25 @@ export const COLORS = {
  * at two brand colours; a six-player game legitimately needs six identities,
  * which is a different thing — but no screen should ever draw more of these at
  * once than it has players.
+ *
+ * THE SIXTH IS MUTED AND THAT IS A KNOWN COMPROMISE, not an oversight.
+ *
+ * The kit has exactly five colours a player can be told apart by — yellow,
+ * blue, green, red, ink — and Red Light seats six. All six ARE distinguishable
+ * on screen, which is what `brand.test.ts` checks and what actually matters in
+ * the lane. What is wrong with it is semantic: muted is this kit's DISABLED
+ * colour everywhere else in the app, so the sixth racer's marker reads as
+ * switched off to anybody who has learned the rest of the system. The factions
+ * hit the identical wall and solved it with `factionSplit` — a four-colour
+ * swatch for the one identity with no colour of its own — which works on a
+ * faction tile and would be mud on a 2vh lane marker at three metres.
+ *
+ * Fixing it properly means either a ninth palette token, which is a decision
+ * for the club's kit and not for this file, or a second identity axis (a
+ * hollow marker, a striped chip) threaded through every call site that takes a
+ * colour string. Neither is worth doing days before an event to improve a case
+ * that is already legible. Written down so the next person does not have to
+ * rediscover the constraint to reach the same answer.
  */
 export const PLAYER_COLORS = [
   COLORS.yellow,
