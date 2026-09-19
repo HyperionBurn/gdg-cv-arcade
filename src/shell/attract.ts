@@ -52,7 +52,7 @@ import { Projection } from '../engine/projection';
 import { drawPose, SKELETON_STYLES } from '../engine/skeleton';
 import { FACTIONS, leaderboard } from '../meta/leaderboard';
 import { MENU_TILES, isTileAvailable, type MenuTile } from './menu';
-import { drawBracket, tournament } from '../meta/tournament';
+import { drawBracket, tournament, type RenderBracket } from '../meta/tournament';
 import {
   COLORS,
   DUR,
@@ -981,8 +981,24 @@ export class AttractScreen implements Screen {
       letterSpacing: TRACK.h2,
     });
 
+    // FROM THE ROUND BEING PLAYED, NOT FROM THE START.
+    //
+    // The rail card is a third of a screen. `drawBracket` divides its height
+    // by the number of matches in the FIRST round shown, so a sixteen-player
+    // bracket drawn whole gives each name about 1.5vh — sixteen pixels on a
+    // 1080p TV, which is not a bracket, it is a texture. Rounds already played
+    // are also the least interesting thing on it.
+    //
+    // The tree is self-similar, so dropping finished rounds off the front
+    // costs nothing structurally and the cards grow to fit what is left. Two
+    // rounds minimum, so there is always a next-round column to advance into.
+    const liveRound = bracket.rounds.findIndex((r) => r.matches.some((m) => !m.done));
+    const from = liveRound < 0 ? Math.max(0, bracket.rounds.length - 2) : liveRound;
+    const shown: RenderBracket =
+      from > 0 ? { ...bracket, rounds: bracket.rounds.slice(from) } : bracket;
+
     const top = y + vh(v, 14.5);
-    drawBracket(ctx, v, bracket, {
+    drawBracket(ctx, v, shown, {
       x: x + vh(v, 2),
       y: top,
       width: w - vh(v, 4),

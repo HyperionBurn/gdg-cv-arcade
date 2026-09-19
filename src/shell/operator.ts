@@ -42,6 +42,7 @@ import { audio } from '../engine/audio';
 import { leaderboard, type GameId } from '../meta/leaderboard';
 import { tunables, type TunableSpec } from '../meta/tunables';
 import {
+  MAX_PLAYERS,
   TOURNAMENT_GAMES,
   roundName,
   tournament,
@@ -911,6 +912,12 @@ export class OperatorOverlay {
 
     /* --- players --- */
     const players = tournament.getPlayers();
+    if (!live && players.length >= MAX_PLAYERS) {
+      // ADD silently does nothing past the cap, and a marshal typing the
+      // thirty-third name into a full bracket would otherwise be left
+      // wondering which key they missed.
+      pane.appendChild(el('p', 'op-hint', `Bracket is full at ${MAX_PLAYERS}. START it.`));
+    }
     const list = el('div', 'op-board');
     if (players.length === 0) {
       list.appendChild(el('p', 'op-empty', 'Nobody entered yet.'));
