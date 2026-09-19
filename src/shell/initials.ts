@@ -741,14 +741,8 @@ export class InitialsScreen implements Screen {
         ? (tile?.title ?? this.gameId.toUpperCase())
         : `${tile?.title ?? this.gameId.toUpperCase()} · PLAYER ${this.winnerSlot + 1} WINS`;
     drawText(ctx, title, v.width / 2, vh(v, compact ? 5 : 5.6), {
-      size: fitText(
-        ctx,
-        title,
-        v.width - vh(v, SAFE * 4),
-        vh(v, TYPE.label),
-        WEIGHT.bold,
-        FONTS.body
-      ),
+      size: vh(v, TYPE.label),
+      maxWidth: v.width - vh(v, SAFE * 4),
       color: COLORS.ink,
       font: FONTS.body,
       weight: WEIGHT.bold,
@@ -963,7 +957,8 @@ export class InitialsScreen implements Screen {
       : '<WHO ARE YOU PLAYING FOR?>';
 
     drawText(ctx, title, v.width / 2, vh(v, 21), {
-      size: fitText(ctx, title, v.width - vh(v, SAFE * 4), vh(v, TYPE.title)),
+      size: vh(v, TYPE.title),
+      maxWidth: v.width - vh(v, SAFE * 4),
       color: COLORS.ink,
       weight: WEIGHT.black,
       // Ink glyphs: paper knockout, never an ink shadow — the shadow is the
@@ -1055,7 +1050,8 @@ export class InitialsScreen implements Screen {
 
       const cx = target.x + target.w / 2;
       drawText(ctx, name, cx, ty + target.h * 0.4, {
-        size: fitText(ctx, name, target.w - vh(v, SPACE.lg), vh(v, TYPE.subhead)),
+        size: vh(v, TYPE.subhead),
+        maxWidth: target.w - vh(v, SPACE.lg),
         color: COLORS.ink,
         weight: WEIGHT.black,
         letterSpacing: TRACK.h2,
@@ -1115,7 +1111,8 @@ export class InitialsScreen implements Screen {
     ctx.translate(v.width / 2, vh(v, 36));
     ctx.scale(pop, pop);
     drawText(ctx, headline, 0, 0, {
-      size: fitText(ctx, headline, v.width - vh(v, SAFE * 4), vh(v, TYPE.hero)),
+      size: vh(v, TYPE.hero),
+      maxWidth: v.width - vh(v, SAFE * 4),
       color: accent,
       weight: WEIGHT.black,
       shadow: vh(v, SHADOW.lifted),

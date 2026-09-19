@@ -65,7 +65,6 @@ import {
   drawText,
   drawTabularNumber,
   measureText,
-  fitText,
   graphPaper,
   stickerPill,
   vh,
@@ -2096,7 +2095,8 @@ export class RedLightGame extends GameBase {
     if (teaching) {
       const line = 'SWING YOUR ARMS — DO NOT WALK';
       drawText(ctx, line, v.width / 2, cy + vh(v, 3.6), {
-        size: fitText(ctx, line, maxW, vh(v, 2.5), 700, FONTS.body),
+        size: vh(v, 2.5),
+        maxWidth: maxW,
         color: COLORS.ink,
         font: FONTS.body,
         weight: 700,

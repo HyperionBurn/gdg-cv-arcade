@@ -38,7 +38,6 @@ import { audio } from '../engine/audio';
 import {
   decorShape,
   drawText,
-  fitText,
   graphPaper,
   roundRect,
   stickerCard,
@@ -407,7 +406,8 @@ export class ModeScreen implements Screen {
       alpha: t,
     });
     drawText(ctx, title, v.width / 2, vh(v, 17), {
-      size: fitText(ctx, title, v.width - vh(v, SAFE * 2), vh(v, TYPE.title)),
+      size: vh(v, TYPE.title),
+      maxWidth: v.width - vh(v, SAFE * 2),
       color: COLORS.ink,
       weight: WEIGHT.black,
       // Ink glyphs take a PAPER KNOCKOUT and never an ink shadow — the shadow
@@ -478,13 +478,15 @@ export class ModeScreen implements Screen {
       const inner = target.w - vh(v, 6);
 
       drawText(ctx, choice.title, cx, ty + target.h * 0.4, {
-        size: fitText(ctx, choice.title, inner, vh(v, 6.4)),
+        size: vh(v, 6.4),
+        maxWidth: inner,
         color: COLORS.ink,
         weight: WEIGHT.black,
         letterSpacing: TRACK.h2,
       });
       drawText(ctx, choice.blurb, cx, ty + target.h * 0.62, {
-        size: fitText(ctx, choice.blurb, inner, vh(v, 2.6), WEIGHT.medium, FONTS.body),
+        size: vh(v, 2.6),
+        maxWidth: inner,
         color: COLORS.ink,
         font: FONTS.body,
         weight: WEIGHT.medium,

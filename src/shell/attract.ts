@@ -974,7 +974,8 @@ export class AttractScreen implements Screen {
         ? `${a.label}  v  ${b.label}`
         : 'WAITING FOR A RESULT';
     drawText(ctx, headline, cx, y + vh(v, 10.4), {
-      size: fitText(ctx, headline, w - vh(v, 6), vh(v, 5.2)),
+      size: vh(v, 5.2),
+      maxWidth: w - vh(v, 6),
       color: COLORS.ink,
       shadow: vh(v, SHADOW.base),
       shadowColor: COLORS.yellow,
@@ -1093,7 +1094,8 @@ export class AttractScreen implements Screen {
     // already has the highest contrast available.
     const railTitleColor = textColor(tile.color);
     drawText(ctx, tile.title, cx, y + vh(v, 10.6), {
-      size: fitText(ctx, tile.title, w - pad * 2, vh(v, TYPE.heading)),
+      size: vh(v, TYPE.heading),
+      maxWidth: w - pad * 2,
       color: railTitleColor,
       weight: WEIGHT.black,
       shadow: railTitleColor === COLORS.ink ? 0 : vh(v, SHADOW.base),

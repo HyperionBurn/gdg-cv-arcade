@@ -18,7 +18,7 @@
  */
 
 import type { GameId } from './leaderboard';
-import { vh, drawText, fitText, roundRect, stickerCard, type Viewport } from '../engine/draw';
+import { vh, drawText, roundRect, stickerCard, type Viewport } from '../engine/draw';
 import { COLORS, FONTS, PLAYER_COLORS, SHADOW, STROKE, WEIGHT } from '../shell/theme';
 
 /* ------------------------------------------------------------------ *
@@ -811,7 +811,8 @@ export function drawBracket(
     // enough that "QUARTER-FINAL" and "SEMI-FINAL" ran into each other and
     // read as one word.
     drawText(ctx, round.name, colX(r) + cardW / 2, y0 + headerH * 0.4, {
-      size: fitText(ctx, round.name, cardW, vh(v, 1.9), WEIGHT.bold, FONTS.body),
+      size: vh(v, 1.9),
+      maxWidth: cardW,
       color: COLORS.ink,
       font: FONTS.body,
       weight: WEIGHT.bold,
