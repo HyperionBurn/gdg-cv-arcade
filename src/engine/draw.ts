@@ -64,6 +64,15 @@ export function viewportOf(canvas: HTMLCanvasElement): Viewport {
   };
 }
 
+/**
+ * Ceiling on a TEXT shadow's offset, as a fraction of the type size.
+ *
+ * See the note in `drawText`. Shapes keep their fixed `SHADOW.*` offsets; only
+ * letterforms are capped, because only letterforms vary in size by a factor of
+ * five while the token stays constant.
+ */
+const SHADOW_MAX_OF_SIZE = 0.08;
+
 /** vh units → logical pixels. All sizing goes through this. */
 export function vh(v: Viewport, units: number): number {
   return (v.height * units) / 100;
@@ -181,10 +190,35 @@ export function drawText(
     //
     // Guarded here rather than only at the call sites, because there were seven
     // of them and nothing stopped an eighth.
+    //
+    // AND CAPPED AS A FRACTION OF THE TYPE SIZE, which is the other half of
+    // the same problem.
+    //
+    // `SHADOW.base` and `SHADOW.lifted` are fixed vh offsets — the kit's 5px
+    // and 7px lift, scaled for distance. That is right for a SHAPE, whose
+    // shadow should not change with the text inside it, and wrong for
+    // letterforms, which come in sizes spanning a factor of five. MEASURED at
+    // 1024x768:
+    //
+    //   versus results score      108px   shadow 7.2px    6.7% of size
+    //   HUD primary stat           84px   shadow 5.1px    6.1%
+    //   game waiting title         69px   shadow 7.2px   10.5%
+    //   attract rail game title    34px   shadow 5.1px   15.2%   <- smudge
+    //   faction total, leader      34px   shadow 5.1px   15.2%   <- smudge
+    //
+    // At 6% the offset copy reads as a printed drop shadow. At 15% it reads as
+    // the word printed twice, which is the exact complaint the guard above
+    // exists for — it was fixed for same-colour shadows and left open for
+    // different-colour ones, where it is less obvious but still wrong. The
+    // attract screen's game title, in red over its own ink copy, was the
+    // least legible string on the idle screen the whole stall stares at.
+    //
+    // 8% keeps every large case exactly as designed and only bites the small
+    // ones, which is the intent: a lift, never a second word.
     const shadowColor = opts.shadowColor ?? COLORS.ink;
     if (shadowColor !== color) {
       ctx.fillStyle = shadowColor;
-      ctx.fillText(text, x, y + opts.shadow);
+      ctx.fillText(text, x, y + Math.min(opts.shadow, opts.size * SHADOW_MAX_OF_SIZE));
     }
   }
 
