@@ -102,7 +102,12 @@ export function modeScreenApplies(id: GameId): boolean {
   // many are playing is a delay in front of an audience AND a way to break the
   // bracket — one hover on JUST ME and the match is played, won, and silently
   // not reported, with no diagnosis available short of reading the source.
-  if (tournament.active && tournament.game === id) return false;
+  //
+  // Gated on there being a match LEFT TO PLAY, not on `active`. A finished
+  // bracket stays active so the champion keeps their slot on attract, and
+  // that must not go on suppressing the choice for everybody who walks up to
+  // that game afterwards.
+  if (tournament.game === id && tournament.nextMatch() !== null) return false;
   return (GAME_SEATS[id] ?? 1) > 1;
 }
 

@@ -686,3 +686,28 @@ describe('a bracket match is never asked how many are playing', () => {
     tournament.reset();
   });
 });
+
+/**
+ * A finished bracket keeps its slot on the attract screen — "winner's initials
+ * go up in lights" is the payoff, and it holds until a marshal resets it. That
+ * must not also go on suppressing the mode screen for everybody who walks up
+ * to that game for the rest of the afternoon.
+ */
+describe('a finished bracket stops owning its game', () => {
+  test('the mode screen comes back once every match is played', () => {
+    const game = TOURNAMENT_GAMES[0];
+    tournament.reset();
+    tournament.addPlayer('WAS');
+    tournament.addPlayer('AMY');
+    tournament.start(game);
+    assert.equal(modeScreenApplies(game), false, 'a live match should own the screen');
+
+    // Play the one match out.
+    assert.equal(tournament.reportCurrent(10, 20), true);
+    assert.equal(tournament.nextMatch(), null, 'the bracket should be finished');
+    assert.equal(tournament.active, true, 'and still showing the champion');
+
+    assert.equal(modeScreenApplies(game), true, 'the choice never came back');
+    tournament.reset();
+  });
+});
