@@ -91,12 +91,40 @@ anything else on this page.
 
 | What you see | What to do |
 |---|---|
-| Red **CAMERA OFFLINE / VISION OFFLINE** bar at the top | Push the USB cable back in. It retries every 5s by itself. If it stays, **F5**. |
+| Red **&lt;CAMERA LOST — RECONNECTING&gt;** bar at the top | Push the USB cable back in and **wait**. It is already retrying — 1s, 2s, 4s, 8s, then every 10s, forever. Most USB knocks come back inside two tries. |
+| Red **&lt;CAMERA LOST — PRESS F5&gt;** bar at the top | It has been trying for half a minute and it is not coming back on its own. **F5**. If that fails, `?sim=1` (bottom row of this table). |
+| Red **&lt;VISION OFFLINE — PRESS F5&gt;** bar at the top | The pose worker died, not the camera. **F5** — there is no auto-recovery for this one. |
 | Nothing responds, screen looks frozen | **F5**, then **F**, then **C**. Fullscreen and the hidden pointer do NOT survive a reload. |
 | Camera permission was refused | Press **F** to leave fullscreen, click the camera icon in Chrome's address bar, allow, then **F5**. |
 | Someone is standing there and it says STAND IN FRAME | They are too far back or cropped. Move them to the tape. Press **`d`** to see why — the `framing` and `headroom` rows say which. |
 | A game is behaving strangely and you need it back | **PANIC** in the operator console (below), or just **F5**. |
 | Camera is dead and the queue is waiting | `http://localhost:4173/?sim=1` runs a demo with no camera. It starts **muted** — press **`M`**. |
+
+### Prove it runs with no wifi — do this once, before Sept 24
+
+The stall is designed for zero network calls (PLAN.md §1) and
+`tests/offline.test.ts` holds that promise against the source on every commit.
+But a test reads code, and the hall is a physical place, so prove it physically
+**once** on the actual booth laptop:
+
+1. `npm run setup`, then `npm run kiosk`.
+2. **Unplug the ethernet and turn wifi off.** Not flight mode with wifi still
+   on — off.
+3. Hard-reload `http://localhost:4173` (**Ctrl+Shift+R**), so nothing is served
+   from a warm cache.
+4. Play one full turn: attract → menu → a game → initials → back to attract.
+5. Open DevTools → Network, filter to `Fetch/XHR` and `Other`, and confirm
+   every row is `localhost`.
+
+If step 3 shows unstyled text, the fonts did not vendor — re-run
+`npm run fetch-fonts`. If a game hangs on **LOADING VISION**, the wasm or the
+models did not — re-run `npm run fetch-models`. Both live in `public/`, which
+is deliberately not in git; a fresh clone that skips `npm run setup` has no
+models at all.
+
+> The 55MB in `public/` is the entire reason the stall survives venue wifi.
+> Copy the folder with the repo if you move to another laptop on the day —
+> re-downloading it in the hall is the exact situation this avoids.
 
 ### Why `npm run kiosk` and not `npm run dev`
 
