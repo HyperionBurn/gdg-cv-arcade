@@ -66,6 +66,7 @@ import {
   dur,
   factionColor,
   factionSplit,
+  textColor,
   idlePulse,
   ramp,
 } from './theme';
@@ -1105,7 +1106,20 @@ export class InitialsScreen implements Screen {
     const pop = EASE.spring(ramp(this.doneTime, DUR.slow));
     const r = this.result;
     const headline = r?.isRecord ? '<NEW BEST!>' : r?.rank !== null && r ? `<#${r.rank}>` : '<SAVED!>';
+    // YELLOW IS A SURFACE, NEVER TEXT — and this is the one headline in the app
+    // where that was most expensive.
+    //
+    // `<NEW BEST!>` is drawn at TYPE.hero, the largest type on the screen, and
+    // it is the single most exciting thing the arcade ever has to say. In raw
+    // yellow on paper it is 1.7:1: gone from three metres, at the exact moment
+    // a crowd is looking. The non-record case is blue at 4.6:1 and was always
+    // fine, which is why nobody noticed — you only see this bug by beating a
+    // record.
+    //
+    // `textColor` hands back ink; the yellow survives as the hard shadow, which
+    // is the kit's own answer and what every score in `GameBase` already does.
     const accent = r?.isRecord ? COLORS.yellow : COLORS.blue;
+    const accentText = textColor(accent);
 
     ctx.save();
     ctx.translate(v.width / 2, vh(v, 36));
@@ -1113,9 +1127,10 @@ export class InitialsScreen implements Screen {
     drawText(ctx, headline, 0, 0, {
       size: vh(v, TYPE.hero),
       maxWidth: v.width - vh(v, SAFE * 4),
-      color: accent,
+      color: accentText,
       weight: WEIGHT.black,
       shadow: vh(v, SHADOW.lifted),
+      shadowColor: accentText === accent ? undefined : accent,
       letterSpacing: TRACK.display,
     });
     ctx.restore();

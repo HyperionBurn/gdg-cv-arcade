@@ -1761,10 +1761,27 @@ export abstract class GameBase implements Screen {
       ctx.translate(cx, v.height * 0.42);
       const s = won ? pop : pop * 0.82;
       ctx.scale(s, s);
+      // THE WINNER'S SCORE GOES THROUGH `playerTextStyle` LIKE EVERY OTHER
+      // NUMBER IN THIS APP.
+      //
+      // It did not, and `PLAYER_COLORS[0]` is yellow: sampled off the canvas,
+      // the glyphs of a winning player-one score were 251,188,4 on paper.
+      // 1.7:1 — the brand kit's one hard colour rule — on the single most
+      // celebrated number the app draws.
+      //
+      // The label two draws above already did this correctly, which is what
+      // makes it easy to miss: the word PLAYER 1 was ink-with-a-yellow-shadow
+      // and the 395 underneath it was raw yellow.
+      //
+      // `brand.test.ts` missed it too. Its guard matches `color: COLORS.yellow`
+      // and this line reads `color: won ? color : COLORS.ink`, with the colour
+      // bound to a local — the same blind spot the muted guard documents about
+      // itself. Widened there as well.
       drawText(ctx, String(this.scores[slot]?.value ?? res.score), 0, 0, {
         size: vh(v, 14),
-        color: won ? color : COLORS.ink,
-        shadow: won ? vh(v, SHADOW.lifted) : 0,
+        ...(won
+          ? this.playerTextStyle(color, vh(v, SHADOW.lifted))
+          : { color: COLORS.ink, shadow: 0 }),
               });
       ctx.restore();
 

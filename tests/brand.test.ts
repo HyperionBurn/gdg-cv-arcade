@@ -355,6 +355,52 @@ describe('yellow never carries text', () => {
 
         offenders.push(`${rel}:${i + 1}`);
       }
+
+      // AND THE SAME COLOUR BOUND TO A LOCAL, which is how it actually got in.
+      //
+      // The versus results screen drew the winning score as
+      //
+      //     const color = PLAYER_COLORS[slot]!;
+      //     ...
+      //     color: won ? color : COLORS.ink,
+      //
+      // and `PLAYER_COLORS[0]` is yellow. Sampled off the canvas, the glyphs of
+      // a winning player-one score were 251,188,4 on paper — 1.7:1, on the most
+      // celebrated number the app draws. The rule above never saw it, because
+      // the literal is thirty lines away from the draw.
+      //
+      // The muted guard further down documents the identical blind spot and
+      // leaves it open. This closes it for yellow: find the locals that hold a
+      // possibly-yellow colour, then look for those NAMES in a draw's `color:`.
+      const bound = new Map<string, number>();
+      for (let i = 0; i < lines.length; i++) {
+        const m = /\b(?:const|let)\s+(\w+)\s*=[^;]*?(PLAYER_COLORS|GAME_COLORS|gameColor\(|factionColor\(|COLORS\.yellow\b)/.exec(
+          lines[i] ?? ''
+        );
+        if (m?.[1]) bound.set(m[1], i);
+      }
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
+        const m = /\bcolor:\s*(.+)$/.exec(line);
+        if (!m?.[1]) continue;
+        if (line.includes('textColor(') || line.includes('playerTextStyle(')) continue;
+
+        // Which of the tracked locals does this expression mention?
+        const used = [...bound.keys()].find((name) =>
+          new RegExp(`\\b${name}\\b`).test(m[1] as string)
+        );
+        if (!used) continue;
+        // Only when the binding is ABOVE the use and reasonably close, so an
+        // unrelated `color` in another function does not get blamed.
+        const at = bound.get(used) ?? -1;
+        if (at < 0 || at > i || i - at > 60) continue;
+
+        const near = lines.slice(Math.max(0, i - 8), i).join('\n');
+        if (!/\b(drawText|drawTabularNumber)\(/.test(near)) continue;
+
+        offenders.push(`${rel}:${i + 1} (via local \`${used}\`)`);
+      }
     }
 
     assert.deepEqual(
