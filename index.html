@@ -4,6 +4,62 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>GDG Motion Arcade</title>
+
+    <!--
+      Link previews were blank, reported from an outside playtest. The stall is
+      posted about before the fair and the link is how people find out it is
+      happening, so a blank card is a real cost for zero work.
+
+      Everything here is relative and local. `og:image` wants an absolute URL to
+      be scraped correctly, but this app is served from localhost at the stall
+      and from wherever the club happens to host it otherwise, so there is no
+      honest absolute URL to hard-code. Most scrapers resolve a relative one
+      against the page; the ones that do not fall back to the title and
+      description below, which is still a card rather than a blank.
+
+      public/og.png and public/icon.png are generated from the real brand kit
+      and the real Archivo files. Regenerating them is a hand-run script, not a
+      build step: they change when the brand does, which is approximately never.
+    -->
+    <meta name="description" content="Seven computer-vision party games you play with your whole body. No controller, no app, no sign-up — step in front of the camera and move. Built for the GDG on Campus UOBD club fair." />
+    <meta name="theme-color" content="#FBBC04" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="GDG on Campus UOBD" />
+    <meta property="og:title" content="GDG Motion Arcade" />
+    <meta property="og:description" content="Seven party games you play with your whole body. Step in front of the camera and move — no controller, no app, no sign-up." />
+    <meta property="og:image" content="./og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="MOTION ARCADE on a yellow sticker, above chips reading 67 Speed, Fruit Ninja, Red Light and four more." />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="GDG Motion Arcade" />
+    <meta name="twitter:description" content="Seven party games you play with your whole body. Step in front of the camera and move." />
+    <meta name="twitter:image" content="./og.png" />
+
+    <!--
+      An inline SVG favicon so the tab is never the browser's blank page glyph,
+      and never a request that can fail. `icon.png` is the raster fallback for
+      Safari and for a home-screen pin.
+    -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='10' fill='%23FBBC04' stroke='%23111' stroke-width='6'/%3E%3Ccircle cx='32' cy='21' r='9' fill='%23111'/%3E%3Crect x='15' y='34' width='34' height='22' rx='6' fill='%23111'/%3E%3C/svg%3E"
+    />
+    <link rel="apple-touch-icon" href="./icon.png" />
+
+    <!--
+      PRELOAD THE DISPLAY WEIGHT.
+
+      `@font-face` declares a font, it does not fetch one, and this app draws
+      every glyph to a canvas — where setting `ctx.font` triggers no load at
+      all. `loadFonts()` in main.ts is what actually asks for all four weights;
+      this preload just gets the heaviest-used one moving before the module
+      graph has finished parsing. See the comment on `loadFonts`.
+    -->
+    <link rel="preload" href="./fonts/Archivo-Black.woff2" as="font" type="font/woff2" crossorigin />
+
     <link rel="stylesheet" href="./src/styles.css" />
   </head>
   <body>

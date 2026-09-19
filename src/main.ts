@@ -280,11 +280,57 @@ function showBoot(
   overlay.appendChild(el);
 }
 
+/**
+ * ASK FOR THE FONTS. NOTHING ELSE IN THIS APP EVER DOES.
+ *
+ * `@font-face` declares a font; it does not fetch one. The browser fetches on
+ * first USE, and "use" means a DOM element laid out with that family. This app
+ * draws every glyph it has to a canvas, and setting `ctx.font` does NOT count:
+ * the canvas silently falls back to the next family in the stack and never
+ * tells anyone.
+ *
+ * MEASURED, six seconds on attract, before this existed: zero woff2 requests in
+ * `performance.getEntriesByType('resource')`, three faces `unloaded`, and
+ * canvas text measuring byte-identical to a deliberately nonexistent family.
+ * The entire arcade — every headline, every score, every label — rendered in
+ * Helvetica. DESIGN.md says "Archivo exclusively" and the CSS said so too; the
+ * glass did not.
+ *
+ * The only DOM that uses Archivo is the operator console, which is
+ * `display: none` until a marshal opens it, and a hidden element triggers
+ * nothing. So on a laptop without Archivo installed it never loaded at all, and
+ * on a machine that happens to have it the bug is invisible — which is the
+ * worst possible combination for noticing.
+ *
+ * Boot WAITS for this. It is four local files totalling ~55KB off disk, and the
+ * alternative is that the first screen of the stall's day is set in the wrong
+ * typeface. `allSettled` plus a timeout, because a font that will not load must
+ * never be a stall that will not start.
+ */
+const FONT_WEIGHTS = [900, 800, 700, 500] as const;
+const FONT_TIMEOUT_MS = 3000;
+
+async function loadFonts(): Promise<void> {
+  if (!document.fonts?.load) return;
+  const wanted = FONT_WEIGHTS.map((w) =>
+    // A sample string matters: the browser only loads the faces needed for the
+    // characters given, and this app is capitals, digits and the brand's
+    // brackets.
+    document.fonts.load(`${w} 16px Archivo`, 'ABCXYZ 0123456789 <>')
+  );
+  await Promise.race([
+    Promise.allSettled(wanted),
+    new Promise((resolve) => setTimeout(resolve, FONT_TIMEOUT_MS)),
+  ]);
+}
+
 async function boot(): Promise<void> {
   startTime = performance.now();
   lastTime = startTime;
   audio.setMuted(START_MUTED);
   requestAnimationFrame(loop);
+
+  await loadFonts();
 
   if (SIM) {
     // Skip camera and MediaPipe entirely. Games see synthetic poses.
