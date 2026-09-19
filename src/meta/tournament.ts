@@ -18,7 +18,7 @@
  */
 
 import type { GameId } from './leaderboard';
-import { vh, drawText, roundRect, stickerCard, type Viewport } from '../engine/draw';
+import { vh, drawText, fitText, roundRect, stickerCard, type Viewport } from '../engine/draw';
 import { COLORS, FONTS, PLAYER_COLORS, SHADOW, STROKE, WEIGHT } from '../shell/theme';
 
 /* ------------------------------------------------------------------ *
@@ -807,12 +807,15 @@ export function drawBracket(
   for (let r = 0; r < cols; r++) {
     const round = bracket.rounds[r];
     if (!round) continue;
+    // FITTED TO ITS OWN COLUMN. At eight players the columns are narrow
+    // enough that "QUARTER-FINAL" and "SEMI-FINAL" ran into each other and
+    // read as one word.
     drawText(ctx, round.name, colX(r) + cardW / 2, y0 + headerH * 0.4, {
-      size: vh(v, 1.9),
+      size: fitText(ctx, round.name, cardW, vh(v, 1.9), WEIGHT.bold, FONTS.body),
       color: COLORS.ink,
       font: FONTS.body,
       weight: WEIGHT.bold,
-      letterSpacing: '0.18em',
+      letterSpacing: '0.12em',
     });
   }
 
