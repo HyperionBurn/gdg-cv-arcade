@@ -679,7 +679,10 @@ export class AttractScreen implements Screen {
     const breathe = detected ? 1 : idlePulse(fc.time, 2.2, 1);
     const punch = 1 + EASE.spring(this.detectPulse) * 0.14 + (detected ? 0 : breathe * 0.015);
     const cta = '<STEP IN TO PLAY>';
-    const size = fitText(ctx, cta, box.colW * 0.99, vh(v, 10.5));
+    // Sized here because the pop transform below needs the number; the WIDTH
+    // limit is enforced by `maxWidth` on the draw itself, which is the only
+    // place that knows this line is set at TRACK.display.
+    const size = vh(v, 10.5);
     const ctaY = vh(v, 25);
 
     ctx.save();
@@ -687,6 +690,7 @@ export class AttractScreen implements Screen {
     ctx.scale(punch, punch);
     drawText(ctx, cta, 0, 0, {
       size,
+      maxWidth: box.colW * 0.99,
       // ALWAYS ink, never a brand colour. The thing behind this headline is a
       // living human being rendered as a flat brand colour, and a blue
       // headline landing on the blue player is invisible. Detection is already
@@ -1199,7 +1203,10 @@ export class AttractScreen implements Screen {
     const sep = '  ·  ';
     const line = parts.join(sep);
     const maxW = v.width - vh(v, SAFE * 2 + SPACE.lg);
-    const size = fitText(ctx, line, maxW, vh(v, TYPE.heading), WEIGHT.black, FONTS.body);
+    // '0px' explicitly: this row is drawn by `drawTabularNumber` with no letter
+    // spacing, and the rule is that every fitText call states what it measured
+    // against rather than leaving it to a default nobody checks.
+    const size = fitText(ctx, line, maxW, vh(v, TYPE.heading), WEIGHT.black, FONTS.body, '0px');
     const sepW = measureTabularNumber(ctx, sep, size, WEIGHT.black, FONTS.body);
     const widths = parts.map((part) => measureTabularNumber(ctx, part, size, WEIGHT.black, FONTS.body));
     const total = widths.reduce((a, b) => a + b, 0) + sepW * (parts.length - 1);

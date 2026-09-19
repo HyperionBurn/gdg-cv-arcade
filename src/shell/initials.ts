@@ -1175,7 +1175,15 @@ export class InitialsScreen implements Screen {
       const line = `+${this.score.toLocaleString('en-US')} FOR ${this.faction}`;
       const size = Math.min(
         vh(v, TYPE.subhead),
-        fitText(ctx, line, v.width - vh(v, SAFE * 6), vh(v, TYPE.subhead), WEIGHT.black, FONTS.body)
+        fitText(
+          ctx,
+          line,
+          v.width - vh(v, SAFE * 6),
+          vh(v, TYPE.subhead),
+          WEIGHT.black,
+          FONTS.body,
+          TRACK.number
+        )
       );
       const w = measureTabularNumber(ctx, line, size, WEIGHT.black, FONTS.body) + vh(v, SPACE.xl);
       const h = vh(v, 6.4);

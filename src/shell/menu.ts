@@ -677,7 +677,8 @@ export class MenuScreen implements Screen {
     const title = '<CHOOSE YOUR GAME>';
 
     drawText(ctx, title, v.width / 2, vh(v, 9.5), {
-      size: fitText(ctx, title, v.width - vh(v, SAFE * 2), vh(v, TYPE.title)),
+      size: vh(v, TYPE.title),
+      maxWidth: v.width - vh(v, SAFE * 2),
       color: COLORS.ink,
       weight: WEIGHT.black,
       // Ink glyphs get a PAPER KNOCKOUT, never an ink shadow. `drawText`'s
@@ -761,9 +762,18 @@ export class MenuScreen implements Screen {
     // one set — which is what lets a player scan it instead of reading it.
     const firstW = this.targets[0]?.w ?? v.width / 4;
     const inner = firstW - vh(v, SPACE.xl);
+    // ONE SIZE FOR ALL SEVEN TITLES, so the grid reads as a grid rather than as
+    // seven cards that happen to be adjacent. That is why this cannot use
+    // `drawText`'s `maxWidth`, which would size each tile independently — and
+    // why the spacing has to be passed by hand. `TRACK.h2` is what the draw
+    // uses; measuring without it fitted every title to a narrower string than
+    // the one that reaches the screen.
     let titleSize = vh(v, 3.6);
     for (const t of MENU_TILES) {
-      titleSize = Math.min(titleSize, fitText(ctx, t.title, inner, titleSize));
+      titleSize = Math.min(
+        titleSize,
+        fitText(ctx, t.title, inner, titleSize, WEIGHT.black, FONTS.display, TRACK.h2)
+      );
     }
 
     // THE BLURB IS THE PRODUCT.
@@ -940,7 +950,7 @@ export class MenuScreen implements Screen {
     // tilts its badges, not two grey lines of 1.7vh mouse type.
     if (!best) {
       labelPill(ctx, v, cx, y + vh(v, TILE.badgeCy), 'BE THE FIRST!', vh(v, TILE.badgeH), {
-        size: Math.min(vh(v, 2.4), fitText(ctx, 'BE THE FIRST!', inner * 0.7, vh(v, 2.4), WEIGHT.bold, FONTS.body)),
+        size: Math.min(vh(v, 2.4), fitText(ctx, 'BE THE FIRST!', inner * 0.7, vh(v, 2.4), WEIGHT.bold, FONTS.body, TRACK.pill)),
         fill: COLORS.yellow,
         color: COLORS.ink,
         shadow: vh(v, SHADOW.base),
@@ -979,7 +989,7 @@ export class MenuScreen implements Screen {
     // Disabled: "all elements turn muted grey", and it stays straight — a
     // tilted badge reads as playful, and nothing about an unavailable game is.
     labelPill(ctx, v, x + w / 2, y + vh(v, TILE.badgeCy), 'COMING SOON', vh(v, TILE.badgeH), {
-      size: Math.min(vh(v, 2.2), fitText(ctx, 'COMING SOON', inner * 0.7, vh(v, 2.2), WEIGHT.bold, FONTS.body)),
+      size: Math.min(vh(v, 2.2), fitText(ctx, 'COMING SOON', inner * 0.7, vh(v, 2.2), WEIGHT.bold, FONTS.body, TRACK.pill)),
       fill: COLORS.paper,
       outline: COLORS.muted,
       color: COLORS.muted,

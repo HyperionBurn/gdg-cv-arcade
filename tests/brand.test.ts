@@ -438,3 +438,137 @@ describe('styles.css obeys the same colour rules as the canvas', () => {
     assert.deepEqual(bad, []);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* Text is measured in the font it is drawn in                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `fitText` AND `wrapText` TAKE THE FONT AS ARGUMENTS. `drawText` TAKES IT AS
+ * OPTIONS. NOTHING MAKES THE TWO AGREE.
+ *
+ * A caller has to repeat the size, the weight, the family and the letter
+ * spacing, and every one of the four is silent when it is wrong — the text
+ * simply renders wider than the box it was measured against. Twelve call sites
+ * had it wrong, including the widest tracking in the kit on the initials
+ * winner headline, and one that measured in Archivo BLACK at display weight
+ * while drawing in Archivo BOLD at body.
+ *
+ * It surfaced only because the typeface was fixed: every one of those numbers
+ * had been tuned against Helvetica, which is narrower than Archivo, so the app
+ * looked fine while being measured wrongly throughout.
+ *
+ * `drawText`'s `maxWidth` has nothing to repeat — it measures after the font
+ * and the spacing are already on the context. So the rule is: if you are
+ * fitting text that has letter spacing, use `maxWidth`.
+ *
+ * `fitText` itself stays, for the callers that need the NUMBER rather than a
+ * draw (a layout that sizes a box around text, say). Those are fine as long as
+ * they pass the spacing.
+ */
+describe('fitted text is measured the way it is drawn', () => {
+  const sep = process.platform === 'win32' ? '\\\\' : '/';
+  const read = async (): Promise<Array<{ file: string; lines: string[] }>> => {
+    const { readdir, readFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const walk = async (dir: string): Promise<string[]> => {
+      const out: string[] = [];
+      for (const e of await readdir(dir, { withFileTypes: true })) {
+        const full = join(dir, e.name);
+        if (e.isDirectory()) out.push(...(await walk(full)));
+        else if (full.endsWith('.ts')) out.push(full);
+      }
+      return out;
+    };
+    const files = await walk('src');
+    return Promise.all(
+      files.map(async (file) => ({
+        file,
+        lines: (await readFile(file, 'utf8')).split(/\r?\n/),
+      }))
+    );
+  };
+
+  /**
+   * EVERY `fitText` CALL STATES THE SPACING IT MEASURED AGAINST.
+   *
+   * The first version of this guard looked for `letterSpacing` within a few
+   * lines of the call, and it was vacuous for the form that matters most:
+   *
+   *     let titleSize = vh(v, 3.6);
+   *     for (const t of MENU_TILES) titleSize = Math.min(titleSize, fitText(...));
+   *     // ...130 lines later...
+   *     drawText(ctx, tile.title, cx, y, { size: titleSize, letterSpacing: TRACK.h2 });
+   *
+   * That is all seven menu tile titles, and no regex can follow the variable.
+   * Proven vacuous by reverting the fix and watching the suite stay green.
+   *
+   * So the rule is mechanical instead: pass the argument, always, even when it
+   * is `'0px'`. An author who has to type it has to look up what the draw
+   * uses, which is the entire failure being guarded against. Three more real
+   * cases fell out of this the moment it was enforced — the initials faction
+   * line (drawn at TRACK.number) and both of the menu's labelPill badges
+   * (labelPill defaults to TRACK.pill).
+   *
+   * Prefer `drawText`'s `maxWidth` where the size is used once. `fitText` is
+   * for the cases that need the NUMBER: a size shared across several elements,
+   * or a box measured around the text.
+   */
+  test('every fitText call says what spacing it measured against', async () => {
+    const offenders: string[] = [];
+
+    for (const { file, lines } of await read()) {
+      if (file.endsWith(`engine${sep}draw.ts`)) continue; // the definition
+      const text = lines.join('\n');
+      let from = 0;
+      for (;;) {
+        const at = text.indexOf('fitText(', from);
+        if (at === -1) break;
+        from = at + 8;
+
+        // Walk to the matching close paren so a multi-line call is one string.
+        let depth = 0;
+        let i = at + 'fitText'.length;
+        for (; i < text.length; i++) {
+          if (text[i] === '(') depth++;
+          else if (text[i] === ')') {
+            depth--;
+            if (depth === 0) break;
+          }
+        }
+        const call = text.slice(at, i + 1);
+        if (/TRACK\.|'0px'|"0px"|letterSpacing/.test(call)) continue;
+
+        const line = text.slice(0, at).split('\n').length;
+        offenders.push(`${file}:${line}`);
+      }
+    }
+
+    assert.deepEqual(
+      offenders,
+      [],
+      "fitText's last argument is the letter spacing, and omitting it measures " +
+        'the string narrower than it will be drawn. Pass what the draw uses — ' +
+        "or `'0px'` if it genuinely uses none."
+    );
+  });
+
+  /**
+   * The engine side of the same rule. If either helper loses its spacing
+   * parameter the twelve call sites above go quietly wrong again, and the
+   * guard above would still pass because it only looks at `fitText`.
+   */
+  test('the measurement helpers still accept letter spacing', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/engine/draw.ts', 'utf8');
+
+    for (const fn of ['measureText', 'fitText', 'wrapText']) {
+      const at = src.indexOf(`export function ${fn}(`);
+      assert.ok(at > 0, `${fn} is gone`);
+      const sig = src.slice(at, src.indexOf('{', src.indexOf(')', at)));
+      assert.match(sig, /letterSpacing/, `${fn} no longer takes letterSpacing`);
+    }
+
+    assert.match(src, /maxWidth\?: number;/, 'drawText lost its maxWidth option');
+  });
+});
