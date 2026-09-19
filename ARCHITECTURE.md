@@ -36,10 +36,14 @@ export class MyGame extends GameBase {
       title: 'BALLOON POP',
       tagline: 'POP THEM WITH YOUR HANDS',   // must fully explain the game
       visionMode: 'hands',          // 'pose' | 'hands' | 'both'
-      maxPlayers: 1,
+      maxPlayers: 2,
       roundSeconds: 30,
       color: COLORS.green,
-      supportsVersus: false,
+      supportsVersus: true,         // split screen, one score each
+      // Optional:
+      // partyMode: true,           // everyone shares one screen (Red Light)
+      // gatherSeconds: 10,         // hold a lobby; party games only
+      // fullBleedSlots: true,      // playfield fills the slot: hard divider
     });
   }
 
@@ -62,6 +66,46 @@ Available on `this`: `tracker`, `proj`, `juice`, `particles`, `popups`,
 `celebrateAt(x, y)`.
 
 `dt` in `onTick` already has hit-stop and slow-mo applied. `fc.dt` is real time.
+
+### Two players is the default, and it is a state-shape decision
+
+Six of the seven games seat two; Red Light seats six. A game that can only be
+played alone is a decision somebody has to write down — `tests/versus.test.ts`
+fails the build until they do.
+
+**Every piece of per-player state belongs in a per-slot struct, not on the
+class.** This is the whole of what makes a game two-player, and getting it
+wrong is invisible until a second body walks up. The Runner was solo-only for
+no other reason: one lane detector, one track, one clock, one streak, each a
+field on the screen. Nothing about the design was single-player.
+
+```ts
+interface MyLane { detector: Thing; score: number; streak: number; }
+private slots: MyLane[] = [makeLane(), makeLane()];
+protected scoreFor(slot: number): number { return this.slots[slot]?.score ?? 0; }
+```
+
+Rules that follow from it:
+
+- **`scoreFor(slot)` must read `slot`.** Ignoring it is the exact bug Red Light
+  shipped: six people finished a round and saw six identical numbers.
+- **Draw inside `slotRect(v, slot)`.** Clip to it if your playfield can spill —
+  Pose Match's two walls punched holes in each other for exactly this reason.
+  Width ceilings must be measured against the RECT, not the viewport, or a HUD
+  sized for a whole TV overflows its own half.
+- **Whose body is this?** `players.find(p => p.slot === slot)` when
+  `playerCount > 1`, and ALWAYS `players[0]` when it is 1 — so a bystander
+  drifting into slot 1 cannot take the round away from the person playing.
+- **Give both players the same game.** If your game generates content, seed it
+  once and build it twice; sharing one mutable structure means the leader
+  clears the course for whoever is behind.
+
+The base class handles the rest. The countdown re-resolves the roster every
+frame, so a friend arriving late is adopted and the clock rewinds to give them
+a real start (`countdownRoster`); the tracker's slot ordering is frozen for the
+duration of `playing`, so two players who walk around each other cannot swap
+scores (`lockSlots`); and the results screen picks solo, versus or party
+standings off `playerCount` and `partyMode`.
 
 ## API reference
 
@@ -86,16 +130,39 @@ measureText(ctx, text, size, weight?, font?)
 roundRect(ctx, x, y, w, h, r)                 // path only, you fill/stroke
 glowLine(ctx, points, { color, width, glow?, alpha?, cap? })
 glowCircle(ctx, x, y, r, color, glow?, alpha?)
-progressBar(ctx, x, y, w, h, t, color, glow?)
+progressBar(ctx, x, y, w, h, t, color)
 clearFrame(ctx, v, color?)
-vignette(ctx, v, strength?)
-scanlines(ctx, v, alpha?)
+
+stickerPill / stickerCard / labelPill / rankedRow / decorShape   // the brand kit
 ```
 
+`vignette()` and `scanlines()` still exist and DO NOTHING. They are gradients
+and see-through overlays, which the brand rules out; they are kept as no-ops
+only so nothing has to be deleted in a hurry. Do not call them.
+
 ### `shell/theme.ts`
-`COLORS` (blue red yellow green + `*Bright` + bg/bgRaised/text/textDim/textFaint/danger/success),
-`PLAYER_COLORS[]`, `FONTS` (display/body/mono), `EASE` (out/in/inOut/back/elastic),
-`withAlpha(hex, a)`, `lerpColor(a, b, t)`.
+`COLORS` — eight tokens, and only eight: `paper` `ink` `grid` `muted` +
+`yellow` `blue` `green` `red`. The `bg*` / `text*` / `*Bright` / `danger` /
+`success` names are LEGACY ALIASES that resolve to those eight; new code uses
+the real names.
+
+`PLAYER_COLORS[]`, `FACTION_COLORS[]`, `FONTS` (display/body/mono),
+`EASE` (out/in/inOut/back/elastic), `WEIGHT`, `TYPE`, `TRACK`, `SHADOW`,
+`STROKE`, `SPACE`, `RADIUS`, `dur()`, `ramp()`, `idlePulse()`.
+
+`textColor(preferred, on?)` — **use this for any coloured text.** Flat yellow
+on paper is 1.7:1 and simply gone at three metres, so yellow is a SURFACE and
+never a text colour; this enforces it rather than relying on everyone
+remembering.
+
+`muted` is the kit's DISABLED colour at 1.88:1. It is for placeholders, empty
+slots and switched-off things. It is not "secondary text" — `brand.test.ts`
+fails the build on `color: COLORS.muted`. Secondary text is ink, made secondary
+by SIZE and WEIGHT.
+
+`withAlpha` and `lerpColor` exist for non-brand work only. A tint or a blend of
+a brand colour is off-brand twice over: `lerpColor(blue, yellow)` renders as a
+muddy green that is in no palette at all.
 
 ### `engine/juice.ts`
 ```ts
@@ -216,6 +283,20 @@ score**, active scoring, finite integer scores, round termination, no console
 errors, and frame budget. Add a probe in `src/dev/smoke.ts` when you add a game.
 If mashing input is not competent play in your game, give the probe a `drive()`
 closed-loop function rather than letting it flail.
+
+Then the whole turn, which is the half smoke cannot see — attract, the menu
+dwell, play, results, three letters on the initials keyboard, and back out:
+
+```js
+await window.__arcade.turn()
+```
+
+Every versus game runs TWICE, the second time with two bodies in frame, and
+asserts the round opened two seats and that neither seat is stuck at zero.
+That second pass exists because the two-player path shipped with three separate
+faults — one score for six players, two walls punching holes in each other, and
+a countdown that locked the roster before the second person could be admitted —
+and not one of them is reachable with a single body.
 
 **The simulator does not replace human playtesting.** It cannot tell us whether
 a threshold is right for a real body under hall lighting. That is what the
