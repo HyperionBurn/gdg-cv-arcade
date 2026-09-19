@@ -208,7 +208,94 @@ const HUD_SHELF: HudMetrics = {
 const PLAYER_LOST_GRACE_SEC = 2.5;
 /** PLAN.md §6: idle timeout back to attract. */
 const IDLE_TIMEOUT_SEC = 20;
-const COUNTDOWN_SEC = 3.2;
+export const COUNTDOWN_SEC = 3.2;
+/**
+ * The friend is always half a step behind.
+ *
+ * Six of the seven games hold two players and draw a real split screen, but
+ * only Red Light ran a lobby. Everything else went `waiting -> countdown` on
+ * the single frame the FIRST body was confirmed, froze `playerCount` there,
+ * and never looked again — `tickCountdown` had no player-count logic at all.
+ * So the actual failure at a stall was not "two-player is missing", it was
+ * "two-player exists and is unreachable": two friends walk up, one is a beat
+ * ahead, and the game locks solo while the second person stands inside the
+ * frame feeding the tracker a body that scores nothing.
+ *
+ * The obvious fix — give every versus game `gatherSeconds` — costs the SOLO
+ * player 1.5-2.6s of lobby on every single turn, at a stall whose whole
+ * problem is queue throughput. That is the wrong trade: the countdown is
+ * already 3.2 seconds of a person standing still watching a numeral, which is
+ * exactly the window the late friend needs and it is already being spent.
+ *
+ * So the countdown re-resolves the player count every frame, and an ARRIVAL
+ * rewinds the clock to at least `LATE_JOIN_FLOOR_SEC` so nobody starts a
+ * versus round mid-stride. Solo turns pay nothing.
+ */
+export const LATE_JOIN_FLOOR_SEC = 1.7;
+/**
+ * Arrivals that may rewind the countdown, per round.
+ *
+ * Without a cap a tracker oscillating between one and two bodies — which is
+ * exactly what a spectator hovering at the edge of the play zone produces —
+ * could hold the countdown open indefinitely. Two is enough for the real case
+ * (one friend joining a 2P game, or two joining a 6-lane one) and bounds the
+ * worst case at COUNTDOWN_SEC + 2 * LATE_JOIN_FLOOR_SEC.
+ */
+export const MAX_LATE_JOINS = 2;
+
+/**
+ * How many of the people in frame a game actually plays with.
+ *
+ * Party games take everyone up to their lane count. Versus games take at most
+ * two, because the split screen has exactly two halves and the third body is
+ * by definition a spectator. Solo games take one and let the tracker's own
+ * ranking decide WHICH one — that is `tracker.ts`'s job, not this one's.
+ */
+export function rosterSize(
+  present: number,
+  cfg: { partyMode?: boolean; supportsVersus: boolean; maxPlayers: number }
+): number {
+  if (cfg.partyMode) return Math.max(1, Math.min(present, cfg.maxPlayers));
+  if (cfg.supportsVersus) return Math.min(Math.max(present, 1), 2);
+  return 1;
+}
+
+/** What one countdown frame decides about the number of people in frame. */
+export interface CountdownRoster {
+  playerCount: number;
+  lateJoins: number;
+  /** Rewound on an arrival so the newcomer is not mid-stride at GO. */
+  stateTime: number;
+  /** True on the frame an arrival was honoured — drives sound, shake, banner. */
+  arrived: boolean;
+}
+
+/**
+ * Pure half of the late-join rule, so it can be tested without a canvas.
+ *
+ * `want` is what `resolvePlayerCount` makes of the bodies currently tracked.
+ * Everything this returns is a decision; `tickCountdown` owns the effects.
+ */
+export function countdownRoster(
+  want: number,
+  playerCount: number,
+  lateJoins: number,
+  stateTime: number
+): CountdownRoster {
+  if (want > playerCount && lateJoins < MAX_LATE_JOINS) {
+    return {
+      playerCount: want,
+      lateJoins: lateJoins + 1,
+      stateTime: Math.min(stateTime, COUNTDOWN_SEC - LATE_JOIN_FLOOR_SEC),
+      arrived: true,
+    };
+  }
+  // A departure re-resolves the count but must never touch the clock — the
+  // person still standing there has already waited long enough.
+  if (want < playerCount) return { playerCount: want, lateJoins, stateTime, arrived: false };
+  return { playerCount, lateJoins, stateTime, arrived: false };
+}
+
 /** Lobby ends early once this many have joined and held still briefly. */
 const GATHER_SETTLE_SEC = 1.2;
 /**
@@ -336,6 +423,10 @@ export abstract class GameBase implements Screen {
   protected roundTotal = 0;
   protected players: TrackedPlayer[] = [];
   protected playerCount = 1;
+  /** Arrivals already honoured this countdown. See `MAX_LATE_JOINS`. */
+  private lateJoins = 0;
+  /** `fc.time` of the last arrival, so the VERSUS banner can land rather than blink on. */
+  private lateJoinAt = -1;
 
   private lastFrameId = -1;
   private idleTime = 0;
@@ -369,7 +460,21 @@ export abstract class GameBase implements Screen {
    */
   private ghost: GhostPlayback | null = null;
 
-  constructor(protected config: GameConfig) {
+  /**
+   * Declared as a field rather than a constructor parameter property.
+   *
+   * `node --test` runs TypeScript in strip-only mode, which cannot compile
+   * `constructor(protected config: ...)` — it throws
+   * ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX at PARSE time, before any test body
+   * runs. One shorthand therefore made this entire module, and everything
+   * that imports it, untestable under the runner the project uses. The round
+   * state machine is the most shared code in the repo; it should be the most
+   * testable, not the least.
+   */
+  protected config: GameConfig;
+
+  constructor(config: GameConfig) {
+    this.config = config;
     this.id = config.gameId;
     this.tracker = new PoseTracker({
       maxPlayers: config.maxPlayers,
@@ -474,6 +579,8 @@ export abstract class GameBase implements Screen {
 
     if (state === 'countdown') {
       this.lastCountdownTick = -1;
+      this.lateJoins = 0;
+      this.lateJoinAt = -1;
     }
     if (state === 'gathering') {
       this.gatherPeak = 0;
@@ -724,9 +831,7 @@ export abstract class GameBase implements Screen {
 
   /** How many of the people in frame this game will actually play with. */
   private resolvePlayerCount(present: number): number {
-    if (this.config.partyMode) return Math.max(1, Math.min(present, this.config.maxPlayers));
-    if (this.config.supportsVersus) return Math.min(Math.max(present, 1), 2);
-    return 1;
+    return rosterSize(present, this.config);
   }
 
   private tickWaiting(fc: FrameContext): void {
@@ -751,7 +856,17 @@ export abstract class GameBase implements Screen {
       shadow: vh(v, SHADOW.lifted),
             letterSpacing: '0.03em',
     });
-    drawText(ctx, '<STEP INTO THE FRAME>', v.width / 2, v.height * 0.56, {
+    // "STEP INTO THE FRAME" is singular, and it was the only invitation six
+    // two-player games ever issued. Naming the capacity here is free — it
+    // replaces words rather than adding a line — and it is the first surface a
+    // pair standing in the queue actually reads.
+    const invite =
+      this.config.maxPlayers > 2
+        ? `<STEP IN — UP TO ${this.config.maxPlayers} PLAYERS>`
+        : this.config.supportsVersus
+          ? '<STEP IN — 1 OR 2 PLAYERS>'
+          : '<STEP INTO THE FRAME>';
+    drawText(ctx, invite, v.width / 2, v.height * 0.56, {
       size: vh(v, 3.4),
       color: COLORS.text,
       alpha: pulse,
@@ -858,6 +973,34 @@ export abstract class GameBase implements Screen {
       return;
     }
 
+    // WHO IS ACTUALLY GOING TO PLAY — decided here, every frame, not on the
+    // frame the first body happened to be confirmed. See `LATE_JOIN_FLOOR_SEC`.
+    //
+    // Both directions matter. Upward is the friend arriving. Downward is the
+    // friend changing their mind and stepping back out, and without it a
+    // versus round starts against an empty half of the screen — the split
+    // divider, a second HUD and a second score that nobody is attached to.
+    // Only the upward case touches the clock; a departure must never be able
+    // to extend the wait for the person still standing there.
+    const roster = countdownRoster(
+      this.resolvePlayerCount(this.players.length),
+      this.playerCount,
+      this.lateJoins,
+      this.stateTime
+    );
+    this.playerCount = roster.playerCount;
+    this.lateJoins = roster.lateJoins;
+    this.stateTime = roster.stateTime;
+    if (roster.arrived) {
+      this.lateJoinAt = fc.time;
+      // Rewinding can put the numeral back UP (…2, someone joins, 2 again).
+      // Clearing the latch lets that digit re-announce itself instead of
+      // silently repeating, which is the audible half of the acknowledgement.
+      this.lastCountdownTick = -1;
+      audio.play('select', 1.35);
+      this.juice.shake(0.16);
+    }
+
     const remaining = COUNTDOWN_SEC - this.stateTime;
     if (remaining <= 0) {
       this.enter('playing');
@@ -906,14 +1049,50 @@ export abstract class GameBase implements Screen {
       weight: 600,
     });
 
+    // THE INVITATION, AND THE ACKNOWLEDGEMENT OF IT BEING TAKEN.
+    //
+    // Nothing anywhere in the app told a passer-by that six of these games
+    // hold two people. The menu tiles don't say it, the taglines don't say it,
+    // and the waiting screen says "STEP INTO THE FRAME" — singular. So the
+    // most-requested feature on the roster was also the least discoverable
+    // one, and the fix is not a new screen: it is one line on the screen the
+    // player is already standing still and reading.
+    //
+    // It only appears while there is still time to act on it — an invitation
+    // shown at "1" is a taunt — and it is worded as a THING TO DO, because a
+    // player reads about four words off a TV mid-queue.
+    if (this.config.supportsVersus && this.playerCount === 1 && remaining > 1.1) {
+      drawText(ctx, '<A FRIEND CAN STEP IN>', v.width / 2, v.height * 0.2, {
+        size: vh(v, 3),
+        color: COLORS.muted,
+        font: FONTS.body,
+        weight: 700,
+        alpha: 0.6 + idlePulse(fc.time, 2.2, 1) * 0.4,
+        letterSpacing: '0.22em',
+      });
+    }
+
     if (this.playerCount === 2) {
-      drawText(ctx, '<VERSUS>', v.width / 2, v.height * 0.2, {
+      // Landing, not blinking. A banner that simply exists on the next frame
+      // reads as a render glitch; one that overshoots and settles reads as the
+      // machine noticing you. Keyed off the arrival so it only animates when
+      // it was actually EARNED — a pair who were both in frame from the start
+      // get it steady, because for them it is a label, not an event.
+      const since = this.lateJoinAt >= 0 ? fc.time - this.lateJoinAt : Infinity;
+      const popSec = dur(0.45);
+      const pop =
+        popSec > 0 && since < popSec ? 1 + 0.6 * (1 - EASE.out(since / popSec)) : 1;
+      ctx.save();
+      ctx.translate(v.width / 2, v.height * 0.2);
+      ctx.scale(pop, pop);
+      drawText(ctx, '<VERSUS>', 0, 0, {
         size: vh(v, 4),
         color: COLORS.ink,
         shadow: vh(v, SHADOW.base),
         shadowColor: COLORS.yellow,
         letterSpacing: '0.3em',
       });
+      ctx.restore();
     }
   }
 

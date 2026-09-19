@@ -36,10 +36,13 @@ export class Projection {
   private drawW = 0;
   private drawH = 0;
 
-  constructor(
-    private v: Viewport,
-    private opts: ProjectionOptions
-  ) {
+  /** Explicit fields, not parameter properties — see `games/base.ts`. */
+  private v: Viewport;
+  private opts: ProjectionOptions;
+
+  constructor(v: Viewport, opts: ProjectionOptions) {
+    this.v = v;
+    this.opts = opts;
     this.recompute();
   }
 

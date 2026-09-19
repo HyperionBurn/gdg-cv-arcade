@@ -275,8 +275,15 @@ class TunableRegistry {
     // was never actually read, because this registry still said 0.4.
     //
     // Nothing enforces agreement, so at least make the disagreement loud.
+    // `?.` IS LOAD-BEARING. Vite substitutes `import.meta.env` at build time;
+    // nothing else does, so under `node --test` it is plain `undefined` and
+    // the old `import.meta.env.DEV` threw a TypeError. This is a DEV-ONLY
+    // WARNING inside the hottest read path in the app — `get` is called from
+    // every game's tick — and it took every live-tunable threshold in the
+    // project offline for the test runner, which is why `posematch.test.ts`
+    // had to ship a private stub of this very method to test anything.
     if (
-      import.meta.env.DEV &&
+      import.meta.env?.DEV &&
       fallback !== undefined &&
       Math.abs(fallback - spec.default) > 1e-9 &&
       !this.warned.has(key)

@@ -370,6 +370,56 @@ interface Racer {
   finishedWith: number;
 }
 
+/** The subset of a racer that scoring actually reads. */
+export interface ScorableRacer {
+  lane: number;
+  /** 0..100. */
+  progress: number;
+  /** Seconds left on the round clock when they crossed, or 0. */
+  finishedWith: number;
+}
+
+/**
+ * ONE SCORE PER LANE — the pure rule, extracted so it can be tested.
+ *
+ * THE BUG THIS REPLACED. `scoreFor(slot)` ignored `slot` entirely and returned
+ * the same number for every player: Red Light is the only six-player game on
+ * the roster, so six people finished a round, looked at the results screen,
+ * and saw six identical scores. The leaderboard then took that one number six
+ * times. A party game whose entire pitch is "last one standing" was, at the
+ * only moment that pitch pays off, unable to say who won.
+ *
+ * Lane is the right key and slot is the right lookup: `lane` is fixed at first
+ * sight precisely so it survives the tracker re-sorting slots mid-round, and
+ * the base class asks for scores by slot. A racer who has left the frame still
+ * has a lane and still has their frozen progress, so their score survives them
+ * walking off — which is the common case at a stall.
+ *
+ * FINISHING FIRST BEATS FINISHING LAST. Everyone who crossed is on 100
+ * progress, so progress alone makes the whole finishing group tie. The bonus
+ * is the clock they had LEFT when they crossed, stamped per racer at the
+ * moment of crossing — reading `timeLeft` at scoring time would hand every
+ * finisher the same end-of-round value and re-create the tie one layer down.
+ * Ten points a second is enough to separate a two-second gap and not enough to
+ * let a fast finisher out-rank a whole extra lap of progress.
+ */
+export function laneScore(racers: Iterable<ScorableRacer>, slot: number): number {
+  for (const r of racers) {
+    if (r.lane !== slot) continue;
+    if (r.progress >= 100) return 100 + Math.round(Math.max(0, r.finishedWith) * 10);
+    // FLOOR AND CAP, not round. `Math.round(99.9)` is 100, and 100 is what a
+    // racer who crossed the line with no clock left scores — so the player who
+    // was eliminated a hand's width from the finish tied with the player who
+    // actually got there. At a game whose whole drama is who crossed and who
+    // froze, that is the one tie that must never happen. 0..99 is "did not
+    // finish"; 100 and up is "finished", and the two ranges cannot touch.
+    return Math.min(99, Math.floor(r.progress));
+  }
+  // No racer in that lane: an empty lane scores nothing. Never `undefined` —
+  // this feeds a `RollingNumber` and then the leaderboard.
+  return 0;
+}
+
 /**
  * What the lobby learned about one body, carried into the round.
  *
@@ -534,19 +584,7 @@ export class RedLightGame extends GameBase {
    * somebody who did.
    */
   protected scoreFor(slot: number): number {
-    let racer: Racer | undefined;
-    for (const r of this.racers.values()) {
-      if (r.lane === slot) {
-        racer = r;
-        break;
-      }
-    }
-    if (!racer) return 0;
-
-    if (racer.progress >= 100) {
-      return 100 + Math.round(Math.max(0, racer.finishedWith) * 10);
-    }
-    return Math.round(racer.progress);
+    return laneScore(this.racers.values(), slot);
   }
 
   private aliveCount(): number {

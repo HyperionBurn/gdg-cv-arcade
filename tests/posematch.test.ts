@@ -59,35 +59,6 @@ import { holdPose, poseRig, sloppy, REALISTIC, HOSTILE, rng } from './posebody.t
 import { pct } from './scene.ts';
 
 /**
- * `tunables.get` DOES NOT SURVIVE `node --test`, and this shim is a workaround
- * for a one-line bug in a file this track does not own.
- *
- * Its drift guard reads `import.meta.env.DEV`. Vite substitutes a literal for
- * that at build time; nothing else does, so under the node test runner
- * `import.meta.env` is `undefined` and the read throws `TypeError: Cannot read
- * properties of undefined`. Every live-tunable threshold in the app is
- * therefore unreachable from a test — which is how a file whose own docstring
- * promises "never throws, never blocks. [...] A black screen at the stall is
- * worse than a lost setting" ends up being the one thing that throws.
- *
- * The fix is `import.meta.env?.DEV` in `src/meta/tunables.ts` (see the report
- * for the exact diff). Until that lands, this restores the documented contract
- * — a failed read degrades to the caller's own constant — for this file only.
- * Delete it once the guard is optional-chained; the tests below do not depend
- * on it doing anything.
- */
-{
-  const real = tunables.get.bind(tunables);
-  (tunables as unknown as { get: (k: string, f?: number) => number }).get = (key, fallback) => {
-    try {
-      return real(key, fallback);
-    } catch {
-      return fallback ?? 0;
-    }
-  };
-}
-
-/**
  * The seven added after the playtest. Held by id rather than by index so the
  * assertions below keep meaning what they say if the ladder is re-ordered.
  */

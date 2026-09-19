@@ -231,7 +231,12 @@ export class RollingNumber {
   private display = 0;
   private target = 0;
 
-  constructor(private speed = 8) {}
+  /** Explicit field, not a parameter property — see `games/base.ts`. */
+  private speed: number;
+
+  constructor(speed = 8) {
+    this.speed = speed;
+  }
 
   /**
    * NON-FINITE INPUT IS DROPPED, not stored.
