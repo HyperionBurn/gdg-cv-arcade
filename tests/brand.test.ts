@@ -370,3 +370,71 @@ describe('yellow never carries text', () => {
     assert.equal(textColor(COLORS.yellow), COLORS.ink);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* The DOM layer obeys the same kit                                    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * EVERY GUARD IN THIS FILE SCANS THE TYPESCRIPT, AND THE APP IS NOT ONLY CANVAS.
+ *
+ * The operator console, the rig check and the boot screen are real DOM with
+ * real CSS, and `styles.css` sat outside every rule here. It went through the
+ * whole paper conversion carrying five `color: var(--yellow)` rules — the
+ * wordmark, the WARN chip's value, every section heading, and the highlight
+ * that marks a tunable a previous marshal changed — all of them 1.7:1 on the
+ * paper they now sit on, and one `color: var(--muted)` on the rig check's stat
+ * labels at 1.88:1.
+ *
+ * Same rule, same reasoning, different file extension: yellow is a SURFACE.
+ * `background: var(--yellow)` with ink on top is always available and is what
+ * these became.
+ */
+describe('styles.css obeys the same colour rules as the canvas', () => {
+  const css = async (): Promise<string[]> => {
+    const { readFile } = await import('node:fs/promises');
+    // `\r?\n`, not `\n`: this repo checks out CRLF on Windows, and a stray
+    // carriage return left at the head of the NEXT line is enough to make
+    // every `^`-anchored rule below silently match nothing.
+    return (await readFile('src/styles.css', 'utf8')).split(/\r?\n/);
+  };
+
+  test('nothing sets TEXT in yellow', async () => {
+    const bad = (await css())
+      .map((line, i) => [i + 1, line.trim()] as const)
+      .filter(([, l]) => /^color:\s*var\(--yellow\)/.test(l));
+    assert.deepEqual(
+      bad,
+      [],
+      'yellow is 1.7:1 on paper — use `background: var(--yellow)` with ink on top'
+    );
+  });
+
+  test('nothing sets TEXT in muted', async () => {
+    const bad = (await css())
+      .map((line, i) => [i + 1, line.trim()] as const)
+      .filter(([, l]) => /^color:\s*var\(--muted\)/.test(l));
+    assert.deepEqual(bad, [], 'muted is 1.88:1 and means DISABLED — use --text-faint');
+  });
+
+  /**
+   * The console was authored against a dark panel and converted to paper in
+   * pieces. A white fill on a white surface is not a card, and a 14%-white
+   * border is not an edge — on the BRACKET tab that meant ADD, the control the
+   * tab is built around, had no edges at all.
+   */
+  test('no white-on-white fills or borders survive the paper conversion', async () => {
+    const bad = (await css())
+      .map((line, i) => [i + 1, line.trim()] as const)
+      .filter(([, l]) => /^(background|border[^:]*):.*rgba\(255,\s*255,\s*255/.test(l));
+    assert.deepEqual(bad, [], 'invisible against --paper');
+  });
+
+  /** DESIGN.md: shadows are hard and point straight down. No blur, anywhere. */
+  test('no blurred effects', async () => {
+    const bad = (await css())
+      .map((line, i) => [i + 1, line.trim()] as const)
+      .filter(([, l]) => /^(backdrop-filter|filter):.*blur\(/.test(l));
+    assert.deepEqual(bad, []);
+  });
+});

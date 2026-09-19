@@ -59,7 +59,11 @@
   --bg-raised: var(--paper);
   --text: var(--ink);
   --text-dim: #555555;
-  --text-faint: var(--muted);
+  /* WAS `var(--muted)`, which is #BDBDBD — 1.88:1 on paper. The kit gives
+     `muted` exactly one job (placeholders, disabled, empty states) and this
+     alias quietly handed it a second one: every small label in the operator
+     console and the rig check. A marshal reads those under a queue. 4.6:1. */
+  --text-faint: #767676;
 }
 
 * {
@@ -194,7 +198,9 @@ body.kiosk {
 }
 
 .rig-stat span {
-  color: var(--muted);
+  /* `--muted` is 1.88:1. This is the screen an operator squints at to decide
+     whether the camera is good enough to open the stall. */
+  color: var(--text-faint);
 }
 
 .rig-stat b {
@@ -253,6 +259,13 @@ body.kiosk {
   font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
   font-size: 40px;
   letter-spacing: 0.02em;
+  /* The boot screen was the last off-brand text in the app: sentence case, no
+     brackets, while every other headline in the arcade is <LIKE THIS>. It is
+     also the FIRST thing anybody sees on a bad morning, so it is the worst
+     place to look like a different program. The <> come from main.ts; the
+     caps and the weight come from here. */
+  text-transform: uppercase;
+  font-weight: 900;
 }
 
 .boot p {
@@ -320,8 +333,12 @@ body.op-open {
 .op-scrim {
   position: absolute;
   inset: 0;
-  background: rgba(4, 6, 10, 0.72);
-  backdrop-filter: blur(3px);
+  /* Flat ink at 72%, no blur. DESIGN.md allows no blurred effect anywhere, and
+     `backdrop-filter` on a full-screen scrim is also the single most expensive
+     thing this app can ask a booth laptop to composite while it is running
+     inference. The scrim stays dark on purpose: it is over the GAME, not over
+     paper, and its job is to say the console has taken the screen. */
+  background: rgba(17, 17, 17, 0.72);
 }
 
 .op-panel {
@@ -332,9 +349,9 @@ body.op-open {
   margin: 2vh auto;
   max-height: 96vh;
   background: var(--bg-raised);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid var(--muted);
   border-radius: 14px;
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow);
   overflow: hidden;
 }
 
@@ -342,8 +359,8 @@ body.op-open {
 
 .op-head-wrap {
   flex: 0 0 auto;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--muted);
+  background: var(--grid-line);
 }
 
 .op-head {
@@ -360,12 +377,23 @@ body.op-open {
   flex: 0 0 auto;
 }
 
+/* YELLOW IS A SURFACE, NEVER TEXT. #FBBC04 on #FFFFFF is 1.7:1.
+ *
+ * `brand.test.ts` enforces this mechanically for everything the canvas draws,
+ * and the DOM layer is outside its reach — so the console kept five yellow
+ * text rules straight through the paper conversion, including this one. The
+ * fix is the one the kit prescribes everywhere else: fill a sticker with it
+ * and put ink on top. */
 .op-brand-main {
   font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
   font-size: 20px;
   font-weight: 700;
   letter-spacing: 0.1em;
-  color: var(--yellow);
+  color: var(--ink);
+  background: var(--yellow);
+  border: var(--stroke-thin) solid var(--ink);
+  border-radius: 6px;
+  padding: 1px 8px;
 }
 
 .op-brand-sub {
@@ -389,18 +417,27 @@ body.op-open {
   gap: 6px;
   padding: 4px 9px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--grid-line);
+  border: 1px solid var(--muted);
   font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
   font-variant-numeric: tabular-nums;
   font-size: 12px;
-  white-space: nowrap;
+  /* WAS `nowrap`, and the chip it clipped was CAM ERROR — whose value is the
+     browser's own getUserMedia message, the longest string in the strip and
+     the only one worth reading. It ran off the edge of a narrow console. The
+     key stays on one line; the value is allowed to wrap under it. */
+  min-width: 0;
+}
+
+.op-chip {
+  flex-wrap: wrap;
 }
 
 .op-chip-k {
   font-size: 9.5px;
   letter-spacing: 0.1em;
   color: var(--text-faint);
+  white-space: nowrap;
 }
 
 .op-chip-v {
@@ -412,8 +449,20 @@ body.op-open {
   color: var(--green);
 }
 
+/* The whole chip goes yellow and the value stays ink, matching how
+   `.op-chip-bad` tints its whole chip red. A warning nobody can read is not a
+   warning. */
+.op-chip-warn {
+  border-color: var(--ink);
+  background: var(--yellow);
+}
+
 .op-chip-warn .op-chip-v {
-  color: var(--yellow);
+  color: var(--ink);
+}
+
+.op-chip-warn .op-chip-k {
+  color: var(--ink);
 }
 
 .op-chip-bad {
@@ -458,15 +507,15 @@ body.op-open {
   font-weight: 700;
   letter-spacing: 0.08em;
   color: var(--text);
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: var(--grid-line);
+  border: 1px solid var(--muted);
   border-radius: 8px;
   cursor: pointer;
   white-space: nowrap;
 }
 
 .op-btn:hover {
-  background: rgba(255, 255, 255, 0.16);
+  background: var(--muted);
   border-color: var(--blue);
 }
 
@@ -556,7 +605,7 @@ body.op-open {
 .op-tabs {
   flex: 0 0 auto;
   display: flex;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 1px solid var(--muted);
 }
 
 .op-tab {
@@ -575,7 +624,7 @@ body.op-open {
 
 .op-tab:hover {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--grid-line);
 }
 
 .op-tab-on {
@@ -638,9 +687,12 @@ body.op-open {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.18em;
-  color: var(--yellow);
+  /* Ink type over a yellow accent rule — the same move the menu tiles and the
+     live bracket match make. The colour still marks the section; it just is
+     not being asked to carry letterforms. */
+  color: var(--ink);
   padding-bottom: 6px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: var(--stroke) solid var(--yellow);
 }
 
 .op-empty {
@@ -654,8 +706,8 @@ body.op-open {
 .op-tune {
   padding: 12px 14px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.035);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--grid-line);
+  border: 1px solid var(--muted);
   border-left: 3px solid transparent;
 }
 
@@ -687,8 +739,12 @@ body.op-open {
   color: var(--blue);
 }
 
+/* The row already carries the change: a yellow left bar and a yellow wash.
+   The NUMBER just needs to be readable, and ink at full weight reads as
+   emphasis against the blue of an untouched value. */
 .op-changed .op-tune-val {
-  color: var(--yellow);
+  color: var(--ink);
+  font-weight: 900;
 }
 
 .op-slider {
@@ -734,7 +790,7 @@ body.op-open {
 .op-kv {
   display: flex;
   flex-direction: column;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--muted);
   border-radius: 10px;
   overflow: hidden;
 }
@@ -750,7 +806,7 @@ body.op-open {
 }
 
 .op-kv-row:nth-child(odd) {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--grid-line);
 }
 
 .op-kv-row span {
@@ -768,9 +824,9 @@ body.op-open {
   flex: 1 1 260px;
   min-height: 44px;
   padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.07);
+  background: var(--grid-line);
   color: var(--text);
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid var(--muted);
   border-radius: 8px;
   font-family: inherit;
   font-size: 13px;
@@ -793,15 +849,15 @@ body.op-open {
   font-weight: 700;
   letter-spacing: 0.06em;
   color: var(--text-dim);
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--grid-line);
+  border: 1px solid var(--muted);
   border-radius: 8px;
   cursor: pointer;
 }
 
 .op-pick:hover {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.13);
+  background: var(--muted);
 }
 
 .op-pick-on {
@@ -813,7 +869,7 @@ body.op-open {
 .op-board {
   display: flex;
   flex-direction: column;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--muted);
   border-radius: 10px;
   overflow: hidden;
 }
@@ -827,7 +883,7 @@ body.op-open {
 }
 
 .op-entry:nth-child(odd) {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--grid-line);
 }
 
 .op-entry-rank {
@@ -915,7 +971,7 @@ body.op-open {
   flex: 1 1 auto;
   height: 16px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--grid-line);
   overflow: hidden;
 }
 
@@ -942,7 +998,7 @@ body.op-open {
 .op-foot {
   flex: 0 0 auto;
   padding: 10px 16px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid var(--muted);
   font-family: 'Archivo', 'Helvetica Neue', Arial, sans-serif;
   font-variant-numeric: tabular-nums;
   font-size: 11px;
@@ -1063,4 +1119,40 @@ body.op-open {
   color: var(--paper);
   background: var(--red);
   border-color: var(--ink);
+}
+
+/* ------------------------------------------------------------------ */
+/* Reduced motion                                                      */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The canvas already honours this: `dur()` in engine/draw.ts collapses every
+ * pop, slam and shake to an instant cut, and `idlePulse` freezes. None of that
+ * reaches the DOM layer — the operator console, the rig check and the boot
+ * screen are real elements with real CSS — so this is the other half.
+ *
+ * The blanket rule is deliberate. Today it catches one infinite pulse and two
+ * hover transforms, which is little enough that naming them would be tidier;
+ * it is written this way so the next transition added to this file is covered
+ * before anybody remembers to come back here.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* A hover that JUMPS is worse than one that does nothing: the transition is
+     what made it read as a lift rather than a glitch. Colour still changes, so
+     the control still answers the pointer. */
+  .boot button:hover,
+  .op-action:hover,
+  .op-mini:hover,
+  .op-tab:hover {
+    transform: none;
+  }
 }

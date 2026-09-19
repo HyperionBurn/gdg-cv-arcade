@@ -149,6 +149,18 @@ function step(now: number, dt: number): void {
 
 /** When the rig first looked broken, or -1. See `drawRigHealth`. */
 let unhealthySince = -1;
+/** `performance.now()` of the next camera restart attempt. See `drawRigHealth`. */
+let recoverAt = 0;
+let recoverTries = 0;
+/**
+ * Restarts to attempt before the banner gives up and asks for a human.
+ *
+ * Six, which with the backoff below is about 31 seconds. A USB blip or an OS
+ * device suspend recovers inside the first two; anything still dead after half
+ * a minute is a real fault and a marshal needs to know rather than watch a
+ * reassuring word.
+ */
+const RECOVER_QUIET_TRIES = 6;
 
 /**
  * A DEAD CAMERA LOOKS EXACTLY LIKE AN EMPTY STALL.
@@ -172,15 +184,44 @@ function drawRigHealth(fc: FrameContext): void {
 
   if (!broken) {
     unhealthySince = -1;
+    recoverAt = 0;
+    recoverTries = 0;
     return;
   }
   if (unhealthySince < 0) unhealthySince = fc.now;
+
+  // TRY TO FIX IT BEFORE ASKING A HUMAN TO.
+  //
+  // The old banner said PRESS F5 from the first second and then waited. At a
+  // stall the most likely cause is not a broken laptop — it is somebody's bag
+  // catching the webcam's USB lead, or the OS suspending the device — and both
+  // of those come back on their own the moment `getUserMedia` is asked again.
+  // Nobody is watching the screen closely enough to press a key: the marshal is
+  // talking to the queue, which is the entire job.
+  //
+  // Backoff 1s, 2s, 4s, 8s, then every 10s forever. `camera.start()` returns
+  // early while `status === 'starting'`, so overlapping calls are free, and one
+  // getUserMedia every ten seconds costs nothing against a dead stall.
+  if (cam.status === 'error' && fc.now >= recoverAt) {
+    recoverTries++;
+    recoverAt = fc.now + Math.min(10000, 1000 * 2 ** (recoverTries - 1));
+    void camera.start();
+  }
+
   if (fc.now - unhealthySince < 3000) return;
 
   const { ctx, v } = fc;
   const pad = vh(v, 1.6);
   const size = vh(v, 2.4);
-  const text = cam.status === 'error' ? 'CAMERA OFFLINE — PRESS F5' : 'VISION OFFLINE — PRESS F5';
+  // Say what is actually happening. RECONNECTING is true for as long as the
+  // backoff is still short; PRESS F5 is the admission that it has not worked,
+  // and it is only earned after roughly half a minute of trying.
+  const text =
+    cam.status === 'error'
+      ? recoverTries <= RECOVER_QUIET_TRIES
+        ? '<CAMERA LOST — RECONNECTING>'
+        : '<CAMERA LOST — PRESS F5>'
+      : '<VISION OFFLINE — PRESS F5>';
 
   ctx.save();
   ctx.shadowBlur = 0;
@@ -257,7 +298,7 @@ async function boot(): Promise<void> {
   // silently dead camera rather than an obvious error.
   if (!window.isSecureContext) {
     showBoot(
-      'Insecure context',
+      '<INSECURE CONTEXT>',
       `The camera is blocked because this page is served over <code>${location.protocol}//${location.hostname}</code>.
        Use <code>localhost</code> or serve over https.`
     );
@@ -271,8 +312,8 @@ async function boot(): Promise<void> {
   }
 
   if (camera.getState().status === 'error') {
-    showBoot('Camera unavailable', camera.getState().error ?? 'Unknown error', {
-      label: 'Retry',
+    showBoot('<CAMERA ERROR>', camera.getState().error ?? 'Unknown error', {
+      label: '<TRY AGAIN>',
       run: () => void boot(),
     });
     return;
