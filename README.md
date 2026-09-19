@@ -390,6 +390,14 @@ Red Light 0.98ms · Pose Match 0.49ms · Fruit Ninja 3.52ms per frame.
 
 All driven deterministically via `window.__arcade.tick()`:
 
+- **Audio, including its absence.** All twenty sounds played muted and unmuted
+  (forty calls, zero throws), music started, ramped, silenced and stopped. Then
+  the case that actually matters at a stall: with the `AudioContext` removed
+  entirely — no speaker, or a machine that refuses one — a full 67 Speed round
+  still plays start to finish and scores, with no errors. PLAN.md §11 has the
+  Bluetooth speaker as an open item that "has to be someone's own", so turning
+  up without one is a live possibility and it costs nothing but the sound.
+
 - **The two controls a marshal reaches for when it is going wrong**, exercised
   end to end 2026-09-19:
 
