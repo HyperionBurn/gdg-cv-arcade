@@ -214,6 +214,20 @@ Move the trackpad and the hand cursor follows the mouse for 2.5 seconds, then
 hands back to the player. A click selects immediately, with no dwell. On the
 initials screen you can just **type** — A–Z, Backspace, Enter.
 
+### Fair mode — when the queue is out the door
+
+**GAMES ON THE MENU** in the operator console (STALL CONTROL) cuts the menu
+down. 0 is all seven; set **3** or **4** on a busy afternoon.
+
+Choosing is dwell time and dwell time is time nobody is playing, so this buys
+back a few seconds on every single turn. It also makes each tile more than
+twice the area, which makes a mis-pick — the thing that costs a *whole* turn —
+much less likely.
+
+It shows the first N games in menu order, playable ones only, and re-shapes the
+grid (4 games become 2x2, 3 become one row of 3). Put it back to 0 between
+rushes.
+
 ### The only three sliders worth touching
 
 Open the operator console (`CTRL+SHIFT+` `` ` ``), **STALL CONTROL** group:

@@ -1018,4 +1018,19 @@ tunables.registerAll([
       'the queue is out the door: the games still detect two people by ' +
       'themselves, they just cannot be told NOT to.',
   },
+  {
+    key: 'shell.menuSize',
+    label: 'GAMES ON THE MENU',
+    group: 'STALL CONTROL',
+    min: 0,
+    max: 7,
+    step: 1,
+    default: 0,
+    description:
+      'How many games the menu offers. 0 shows all of them. Choosing is dwell ' +
+      'time and dwell time is time nobody is playing, so set 3 or 4 when the ' +
+      'queue is long \u2014 the tiles get bigger as well as fewer, which also makes ' +
+      'them harder to mis-pick. Shows the first N in menu order, playable ' +
+      'games only. Put it back to 0 between rushes.',
+  },
 ]);

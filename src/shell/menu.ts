@@ -56,6 +56,7 @@ import {
   ramp,
 } from './theme';
 import { GAME_COLORS, seatBadge } from '../meta/games';
+import { tunables } from '../meta/tunables';
 import { DWELL, HoverCursor, type HoverTarget } from './hover';
 import { modeScreenApplies, setPendingGame } from './mode';
 import { router } from './router';
@@ -201,6 +202,42 @@ const VISION_STALE_MS = 1500;
 const ROW_SIZES = [4, 3] as const;
 
 /**
+ * FAIR MODE: fewer tiles, bigger targets, shorter turns.
+ *
+ * Reported from an outside playtest as the second most valuable change on the
+ * list: "seven dwell tiles slow down every turn in a queue." It is a real cost
+ * and it is paid by every single player — choosing is dwell time, and dwell
+ * time on a menu is time the screen is not being played.
+ *
+ * `shell.menuSize` is 0 by default, which means all of them. Set it to 3 or 4
+ * on a busy afternoon and the menu shows the first N available games. The
+ * marshal can put it back between rushes; it takes effect on the next frame,
+ * like every other tunable.
+ *
+ * WHICH N. The first N of `MENU_TILES` in its existing order, which is not an
+ * arbitrary choice — that order is already the leaderboard rail's cycle order
+ * and already leads with 67 Speed. Picking a different subset would need a
+ * reordering UI nobody has time to build or learn, and any hard-coded
+ * "best four" would be a guess made in this repo about a hall it has never
+ * seen.
+ *
+ * COMING SOON tiles are dropped entirely rather than counted, because a short
+ * menu that spends one of its four slots on something unplayable is worse than
+ * the long one.
+ */
+export function rowShape(count: number): readonly number[] {
+  // A short menu is not the full grid with holes in it. Two rows of two beats
+  // a row of four for a hand cursor — the targets get taller as well as wider,
+  // and the vertical gutter is the axis a lagging filter overshoots on most.
+  if (count <= 1) return [1];
+  if (count <= 2) return [2];
+  if (count <= 3) return [3];
+  if (count <= 4) return [2, 2];
+  if (count <= 6) return [3, 3];
+  return ROW_SIZES;
+}
+
+/**
  * Tile top and bottom, in vh. Fixed rather than derived from width, so the
  * internal layout below lands identically at 16:9, 4:3 and 21:9 — only the
  * tile WIDTH changes with aspect, and every text run is fitted to it.
@@ -258,6 +295,12 @@ function tilesInDisplayOrder(): MenuTile[] {
   const live: MenuTile[] = [];
   const soon: MenuTile[] = [];
   for (const t of MENU_TILES) (isTileAvailable(t) ? live : soon).push(t);
+
+  // See `rowShape`. A short menu is playable games only — never a COMING SOON
+  // tile occupying one of three slots.
+  const limit = Math.round(tunables.get('shell.menuSize', 0));
+  if (limit > 0) return live.slice(0, limit);
+
   return [...live, ...soon];
 }
 
@@ -517,6 +560,10 @@ export class MenuScreen implements Screen {
     // rects past their visual rects: with tiles this close together that
     // removes the dead band entirely (or overlaps it), which makes the exact
     // reported failure more likely, not less.
+    const order = tilesInDisplayOrder();
+    const shape = rowShape(order.length);
+    const widest = Math.max(...shape);
+
     const gapY = vh(v, SPACE.lg);
     // vh is the right unit for a TV (ARCHITECTURE hard rule 7) and the wrong
     // one for a HORIZONTAL gap on a narrow window: `vh` is a fraction of
@@ -527,17 +574,16 @@ export class MenuScreen implements Screen {
     // reaches it, a windowed screen does.
     const gapX = Math.min(gapY, v.width * 0.035);
     const sideMargin = vh(v, SAFE + SPACE.xs);
-    const rowH = (bottom - top - gapY * (ROW_SIZES.length - 1)) / ROW_SIZES.length;
+    const rowH = (bottom - top - gapY * (shape.length - 1)) / shape.length;
 
-    const order = tilesInDisplayOrder();
     this.targets = [];
     let index = 0;
-    for (let row = 0; row < ROW_SIZES.length; row++) {
-      const count = ROW_SIZES[row]!;
+    for (let row = 0; row < shape.length; row++) {
+      const count = shape[row]!;
       const usable = v.width - sideMargin * 2;
       // Every row uses the widest row's cell width, so a short row is centred
       // rather than stretched into oversized tiles.
-      const cellW = (usable - gapX * (Math.max(...ROW_SIZES) - 1)) / Math.max(...ROW_SIZES);
+      const cellW = (usable - gapX * (widest - 1)) / widest;
       const rowW = cellW * count + gapX * (count - 1);
       const startX = (v.width - rowW) / 2;
       const y = top + row * (rowH + gapY);
