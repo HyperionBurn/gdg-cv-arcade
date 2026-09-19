@@ -628,9 +628,32 @@ measured comfortable.
 
 Three `shadowBlur` hot spots were found and fixed (`drawPose`, `drawHand`,
 `ParticleSystem.drawGlow`) — canvas charges the blur *per stroke*, so attract
-mode was costing 92.8 ms/frame at 4 players. Now ~0.8 ms under a worse load.
+mode was costing 92.8 ms/frame at 4 players. There is no `shadowBlur` left
+anywhere in the app now; the brand conversion removed every blurred effect,
+which is why the numbers below are what they are.
 
-But every measurement here was taken in a 305px-wide preview pane. **The
-full-screen blit and bloom are fill-rate bound and must be re-measured on the
-actual laptop driving the actual TV at the Sept 23 rehearsal.** If it bites, the
-frame-budget watchdog already sheds bloom automatically.
+**Measured 2026-09-19 at 1024x768, two players, 600 deterministic frames each**,
+after the field has had 240 frames to fill. Two players because that is the
+worst case the shell can be in, and these are per-frame WORK, timed around
+`__arcade.tick()`, so they are not affected by the pane throttling rAF:
+
+| | p50 | p99 | over 16.7ms | worst |
+|---|---|---|---|---|
+| Runner 2P | 0.7ms | 7.9ms | **1 / 600** | 17.8ms |
+| Fruit Ninja 2P | 0.2ms | 8.7ms | **3 / 600** | 87.3ms |
+
+Runner is the heavy one by design — two camera rigs through one WebGL context —
+and it is comfortably inside budget.
+
+Fruit Ninja's three spikes are scattered mid-run and grow (33ms, 50ms, 87ms),
+which is the shape of a GC pause rather than a slow frame: it allocates polygon
+arrays on every cut. Three hitches in ten seconds is under the watchdog's
+twelve-strike threshold, correctly — the machine is coping, and shedding
+quality there would make the game look worse for no reason.
+
+**Still to re-measure at the Sept 23 rehearsal**, because none of the above was
+taken on the booth laptop driving the actual TV: the full-screen blit is
+fill-rate bound and scales with the panel, not with this pane. If it bites, the
+watchdog sheds particle density and effect quality automatically (twelve
+frames over 22.2ms, not three — a single slow frame is a GC pause, not a slow
+machine).
