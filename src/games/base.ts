@@ -1629,8 +1629,19 @@ export abstract class GameBase implements Screen {
       highlights.stop();
       this.finishRound();
     } else if (!showedReplay) {
+      // AN INSTRUCTION, NOT A CLOCK.
+      //
+      // "NEXT PLAYER IN 5" states a fact about the software. What the stall
+      // needs is for the person who just finished to physically move, and a
+      // player who has just seen their score is looking at their score, not
+      // working out that a countdown is addressed to them. Reported from a
+      // playtest as wanting an explicit "step out for the next player".
+      //
+      // Both halves on one line, in the place the line already occupied: the
+      // instruction first because it is the part that has to be acted on, the
+      // number after it because it is the part that says how urgently.
       const remain = Math.ceil(RESULTS_SEC - this.stateTime);
-      drawText(ctx, `NEXT PLAYER IN ${remain}`, v.width / 2, v.height * 0.93, {
+      drawText(ctx, `STEP OUT — NEXT PLAYER IN ${remain}`, v.width / 2, v.height * 0.93, {
         size: vh(v, 2),
         color: COLORS.ink,
         font: FONTS.mono,

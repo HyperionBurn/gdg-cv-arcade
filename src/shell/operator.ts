@@ -1011,7 +1011,9 @@ export class OperatorOverlay {
         'p',
         'op-hint',
         'Someone will set a joke score. Deleting an entry also takes its points ' +
-          'back off that faction total, so the faction race stays honest.'
+          'back off that faction total, so the faction race stays honest. ' +
+          'ADD puts a score on the board by hand — use it before doors open so ' +
+          'the menu has something to beat.'
       )
     );
 
@@ -1029,6 +1031,63 @@ export class OperatorOverlay {
       picker.appendChild(b);
     }
     pane.appendChild(picker);
+
+    /* --- add one by hand --- */
+    //
+    // NOTHING TO BEAT IS NOT A LEADERBOARD.
+    //
+    // Reported from an outside playtest: on a fresh install the menu shows
+    // "BE THE FIRST!" on all seven tiles, and a player choosing a game has no
+    // idea what a good score looks like, during the one moment they are
+    // deciding which game to play. A target is most of what makes an arcade
+    // score mean anything.
+    //
+    // The marshal types the NUMBER, deliberately. Scoring scales here are not
+    // comparable — a strong 67 Speed is about 190, a strong Rhythm is about
+    // 2400, a strong Pose Match is single digits — so any "seed a sensible
+    // default" button would be this repo guessing on behalf of a hall it has
+    // never seen. The honest way to get a real target is to play a round
+    // before doors open and type what you got.
+    const addRow = el('div', 'op-entry-row');
+    const initialsInput = el('input', 'op-input');
+    initialsInput.type = 'text';
+    initialsInput.maxLength = 3;
+    initialsInput.placeholder = 'GDG';
+    initialsInput.autocapitalize = 'characters';
+
+    const scoreInput = el('input', 'op-input op-input-num');
+    scoreInput.type = 'number';
+    scoreInput.min = '1';
+    scoreInput.placeholder = 'SCORE';
+
+    const addScore = (): void => {
+      const value = Number(scoreInput.value);
+      const who = initialsInput.value.trim().toUpperCase().slice(0, 3) || 'GDG';
+      if (!Number.isFinite(value) || value <= 0) {
+        scoreInput.focus();
+        return;
+      }
+      // `null` faction on purpose: a staff target is not a team scoring, and
+      // adding it to a faction total would tilt the race that the rest of this
+      // tab works to keep honest.
+      leaderboard.submit(this.scoresGame, value, who, null);
+      scoreInput.value = '';
+      this.renderTab();
+    };
+
+    for (const input of [initialsInput, scoreInput]) {
+      input.addEventListener('keydown', (e) => {
+        // The console swallows keys globally so a stray letter cannot mute the
+        // stall mid-round; these fields need them back.
+        e.stopPropagation();
+        if (e.key === 'Enter') addScore();
+      });
+    }
+
+    addRow.appendChild(initialsInput);
+    addRow.appendChild(scoreInput);
+    addRow.appendChild(button('op-mini', 'ADD', addScore));
+    pane.appendChild(addRow);
 
     const board = leaderboard.getBoard(this.scoresGame);
     const list = el('div', 'op-board');
