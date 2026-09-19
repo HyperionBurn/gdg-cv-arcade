@@ -24,7 +24,7 @@
 import { RepCounter, DEFAULT_REP_TUNABLES } from '../core/gestures';
 import { POSE } from '../core/types';
 import type { TrackedPlayer } from '../core/tracker';
-import { GameBase, type SlotRect } from './base';
+import { GameBase, LEAD_BANNER_VH, type SlotRect } from './base';
 import { BURST } from '../engine/particles';
 import { audio } from '../engine/audio';
 import {
@@ -45,6 +45,20 @@ import type { FrameContext } from '../shell/screen';
 
 /** Fallback bar target before anyone has set a record. */
 const DEFAULT_TARGET = 55;
+
+/**
+ * Top edge of the rep bar, and therefore of the dashed record rule that sits
+ * on it and the "REC nnn" label beside it.
+ *
+ * Shared because `popupFloor` has to clear that label: the bar starts here, the
+ * label is centred on this line, and a popup floor derived from any other
+ * number would drift the moment the bar moved. See `popupFloor` below.
+ */
+const BAR_TOP = (v: Viewport): number => v.height * 0.32;
+
+/** `REC nnn` type size, in vh. Used for the bar and for the popup floor. */
+const REC_LABEL_VH = 1.9;
+
 
 /**
  * WHAT A REP COSTS. Two playtests have hit this gate from opposite directions,
@@ -214,6 +228,35 @@ export class SixtySevenGame extends GameBase {
 
   protected primaryStat(slot: number): string {
     return String(this.scoreFor(slot));
+  }
+
+  /**
+   * BELOW THE RECORD LABEL, NOT BELOW THE HUD.
+   *
+   * The default floor is `hudBottom` — 30vh — but this game owns the strip
+   * underneath it: the bar starts at 32vh and the dashed record rule sits on
+   * its top edge, so "REC nnn" occupies roughly 31-33vh. Every popup this game
+   * spawns was rising straight through that label.
+   *
+   * Measured with two players at 1280x720: `<PLAYER 2 AHEAD>` drew its glyphs
+   * across x 1236-1648 while "REC 184" sat at 1547-1629, overlapping by ~10
+   * device pixels vertically — entirely inside the banner. The overtake is the
+   * best moment in a versus round and it was landing as a smear. `<NEW BEST!>`
+   * and every 10-rep milestone shared the fault.
+   *
+   * Nothing fits in the 2vh between the HUD and the bar, so the popups go over
+   * the bar instead, which is the largest clear area in the slot and where the
+   * eye already is.
+   */
+  protected override popupFloor(v: Viewport): number {
+    // `floorY` is the popup's CENTRE, not its top, so the reserve has to
+    // include the popup's own half-height or the guarantee is only as good as
+    // the rise physics happening to undershoot. Measured at 1280x720: with
+    // just the label's half-height the banner cleared by 23px in practice, but
+    // a popup whose centre landed exactly on the floor would have sat 12px
+    // back inside "REC 184". Reserving the half-height makes it true by
+    // construction instead of by arithmetic that happens to work out.
+    return BAR_TOP(v) + vh(v, REC_LABEL_VH * 0.5 + LEAD_BANNER_VH * 0.5 + 0.6);
   }
 
   protected primaryLabel(): string {
@@ -439,7 +482,7 @@ export class SixtySevenGame extends GameBase {
     const barW = Math.min(rect.width * 0.22, vh(v, 14));
     const barH = v.height * 0.46;
     const x = rect.centerX - barW / 2;
-    const y = v.height * 0.32;
+    const y = BAR_TOP(v);
     const radius = barW * 0.3;
     const stroke = vh(v, STROKE.base);
     const drop = vh(v, SHADOW.base);
@@ -515,7 +558,7 @@ export class SixtySevenGame extends GameBase {
     ctx.restore();
 
     drawTabularNumber(ctx, `REC ${this.target}`, x + barW + overhang + vh(v, 1), recordY, {
-      size: vh(v, 1.9),
+      size: vh(v, REC_LABEL_VH),
       color: COLORS.ink,
       font: FONTS.body,
       weight: WEIGHT.bold,

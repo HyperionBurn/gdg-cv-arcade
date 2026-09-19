@@ -249,6 +249,15 @@ const HUD_SHELF: HudMetrics = {
   bottom: 15.8,
 };
 
+/**
+ * Size of the `<PLAYER n AHEAD>` overtake banner, in vh.
+ *
+ * Exported because a game overriding `popupFloor` has to reserve room for half
+ * of it — `floorY` is a popup's CENTRE, not its top. 67 Speed does exactly
+ * that, and a copy of this number there would silently stop matching.
+ */
+export const LEAD_BANNER_VH = 3.6;
+
 /** Frames a player must be absent before we end their round. */
 const PLAYER_LOST_GRACE_SEC = 2.5;
 /** PLAN.md §6: idle timeout back to attract. */
@@ -1544,7 +1553,7 @@ export abstract class GameBase implements Screen {
       rect.centerX,
       fc.v.height * 0.3,
       COLORS.ink,
-      vh(fc.v, 3.6)
+      vh(fc.v, LEAD_BANNER_VH)
     );
     this.juice.flash(color, 0.12, 8);
     this.juice.shake(0.06);
@@ -2152,6 +2161,27 @@ export abstract class GameBase implements Screen {
     return vh(v, m.labelY + m.labelSize * 0.5);
   }
 
+  /**
+   * THE HIGHEST A RISING POPUP MAY GO.
+   *
+   * The HUD band is the floor for six of the seven games, and was the floor
+   * for all of them. But `floorY` only protects what is ABOVE it, and a game
+   * is free to draw something static just below the HUD — in which case every
+   * popup it spawns rises straight through that thing.
+   *
+   * 67 Speed does exactly this. Its rep bar starts at 32vh and the dashed
+   * record rule sits on the bar's top edge, so "REC 184" occupies roughly
+   * 31–33vh while the floor was 30vh. Measured with two players: the
+   * `<PLAYER 2 AHEAD>` overtake banner was drawn straight over the record
+   * label, which is the single best moment in a versus round landing as a
+   * smear. Every milestone popup in that game had the same problem.
+   *
+   * Override when a game owns the strip under its HUD.
+   */
+  protected popupFloor(v: FrameContext['v']): number {
+    return this.hudBottom(v);
+  }
+
   private hudMetrics(): HudMetrics {
     return this.config.hudShelf ? HUD_SHELF : HUD_FULL;
   }
@@ -2190,7 +2220,7 @@ export abstract class GameBase implements Screen {
     const m = this.hudMetrics();
     // Keep rising popups out of the HUD. One assignment per frame here beats
     // every game remembering the arithmetic at every spawn site.
-    this.popups.floorY = this.hudBottom(v);
+    this.popups.floorY = this.popupFloor(v);
     // The sideways half of the same guarantee. See `PopupLayer.width`.
     this.popups.width = v.width;
 
