@@ -235,7 +235,7 @@ It shows the first N games in menu order, playable ones only, and re-shapes the
 grid (4 games become 2x2, 3 become one row of 3). Put it back to 0 between
 rushes.
 
-### The only three sliders worth touching
+### The only sliders worth touching mid-event
 
 Open the operator console (`CTRL+SHIFT+` `` ` ``), **STALL CONTROL** group:
 
@@ -257,6 +257,28 @@ one was ever started. Both are saved in the browser and survive a reload, so a
 laptop used for tuning last week will otherwise still be running last week's
 numbers, and a half-finished bracket from a rehearsal will sit on the attract
 screen all morning.
+
+### Packing up — two exports, and one of them is the only copy
+
+`CTRL+SHIFT+` `` ` `` → **DATA**. Do this before the laptop goes anywhere.
+
+1. **EXPORT SCORES JSON.** Every board, every faction total, every play count.
+   This is the post-event writeup (PLAN.md §4) and it is **the only copy** — it
+   lives in this browser profile on this laptop and nowhere else. A cleared
+   profile, a different browser, a borrowed laptop, or somebody pressing
+   CLEAR EVERYTHING loses the whole day with no way back.
+2. **EXPORT TUNING JSON.** Every threshold as you left it. This is the handover
+   between the 24th and the 26th: drop it back in on day 2 and you start where
+   day 1 finished instead of re-learning the room.
+
+Then **leave the bracket and the boards alone**. Day 2 starting with day 1's
+leaderboard is a feature — "the thing to beat" is more interesting on the
+second day, and the faction race only means anything if it accumulates.
+
+> If you are moving to a different laptop for day 2, the exports are not enough
+> on their own: copy the whole repo folder, `public/` included. That is the
+> 55MB of models and fonts, and re-downloading it in the hall is exactly what
+> the offline check exists to avoid.
 
 ## Rig Check — read this before Sept 18
 
