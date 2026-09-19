@@ -577,6 +577,23 @@ export class OperatorOverlay {
     if (vs.error) strip.appendChild(this.chip('ERROR', vs.error, 'bad'));
     if (cs.error) strip.appendChild(this.chip('CAM ERROR', cs.error, 'bad'));
 
+    // THE DAY'S SCORES ARE NOT BEING WRITTEN DOWN.
+    //
+    // `leaderboard.saveFailed` was set on every storage failure and READ BY
+    // NOTHING. The board keeps working from memory, which is the right
+    // behaviour and also why it is invisible: play carries on, scores appear,
+    // ranks are correct, and the first reload discards the lot.
+    //
+    // That matters here specifically because the runbook's answer to four
+    // separate problems is F5. A marshal following it while storage is
+    // quietly failing throws away the day and has no way to know they did.
+    //
+    // Loudest chip available, and it stays up — unlike the camera, this does
+    // not recover on its own and there is nothing to wait for.
+    if (leaderboard.saveFailed) {
+      strip.appendChild(this.chip('SCORES', 'NOT SAVING — DO NOT RELOAD', 'bad'));
+    }
+
     const overridden = tunables.overriddenKeys().length;
     if (overridden > 0) strip.appendChild(this.chip('TUNED', `${overridden} changed`, 'warn'));
 

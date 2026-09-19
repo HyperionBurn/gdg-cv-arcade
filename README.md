@@ -97,6 +97,7 @@ anything else on this page.
 | Nothing responds, screen looks frozen | **F5**, then **F**, then **C**. Fullscreen and the hidden pointer do NOT survive a reload. |
 | Camera permission was refused | Press **F** to leave fullscreen, click the camera icon in Chrome's address bar, allow, then **F5**. |
 | Someone is standing there and it says STAND IN FRAME | They are too far back or cropped. Move them to the tape. Press **`d`** to see why — the `framing` and `headroom` rows say which. |
+| Red **SCORES: NOT SAVING** chip in the operator console, or on the `d` overlay | **Do not reload, and tell someone.** The boards are running from memory — play is unaffected and ranks are correct, but an F5 throws the day away. Go to **DATA → EXPORT SCORES JSON** now, while the numbers still exist. Usually a full disk or a locked-down browser profile. |
 | A game is behaving strangely and you need it back | **PANIC** in the operator console (below), or just **F5**. |
 | Camera is dead and the queue is waiting | `http://localhost:4173/?sim=1` runs a demo with no camera. It starts **muted** — press **`M`**. |
 

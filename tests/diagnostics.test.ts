@@ -121,3 +121,51 @@ describe('diagnostics know the simulator is not a fault', () => {
     }
   });
 });
+
+/**
+ * A FLAG NOBODY READS IS A FAILURE NOBODY SEES.
+ *
+ * `leaderboard.saveFailed` was set on every storage failure and read by
+ * nothing. The board keeps working from memory — right behaviour, and exactly
+ * why it is invisible: play carries on, scores appear, ranks are correct, and
+ * the first reload discards the lot.
+ *
+ * That is worse here than it sounds, because the runbook's answer to four
+ * separate problems is F5. A marshal following their own card while storage is
+ * quietly failing throws the day away and has no way to know they did.
+ */
+describe('a silent save failure is not silent', () => {
+  test('saveFailed is read somewhere outside the leaderboard', async () => {
+    const { readdir, readFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+
+    const walk = async (dir: string): Promise<string[]> => {
+      const out: string[] = [];
+      for (const e of await readdir(dir, { withFileTypes: true })) {
+        const p = join(dir, e.name);
+        if (e.isDirectory()) out.push(...(await walk(p)));
+        else if (p.endsWith('.ts')) out.push(p);
+      }
+      return out;
+    };
+
+    const readers: string[] = [];
+    for (const file of await walk('src')) {
+      // `[\\/]`, not `[\/]`. On Windows `join` gives backslashes, so matching
+      // only forward slashes leaves `rel` unchanged, the comparison below never
+      // fires, and leaderboard.ts counts itself as a reader — the test passes
+      // while checking nothing. Same escaping slip as the draw.ts exclusion in
+      // brand.test.ts, which also silently did nothing.
+      const rel = file.split(/[\\/]/).join('/');
+      if (rel === 'src/meta/leaderboard.ts') continue; // where it is SET
+      if (/saveFailed/.test(await readFile(file, 'utf8'))) readers.push(rel);
+    }
+
+    assert.ok(
+      readers.length > 0,
+      'nothing surfaces leaderboard.saveFailed, so a stall whose scores have ' +
+        'stopped persisting looks identical to one whose scores are fine — ' +
+        'until somebody reloads'
+    );
+  });
+});

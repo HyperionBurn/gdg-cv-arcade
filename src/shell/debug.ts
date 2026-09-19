@@ -16,6 +16,7 @@
  * needed, and it costs nothing until switched on.
  */
 
+import { leaderboard } from '../meta/leaderboard';
 import { camera } from '../core/camera';
 import { vision } from '../core/vision';
 import { isSimEnabled } from '../core/simulator';
@@ -187,6 +188,13 @@ function rows(fc: FrameContext): Row[] {
   }
 
   // 6. Render cost, to separate "the game is slow" from "vision is slow".
+  // Scores are running from memory only. Nothing else says so, and the
+  // runbook's answer to four different problems is F5 — which would throw
+  // the day away. See the same chip in the operator console.
+  if (leaderboard.saveFailed) {
+    out.push({ label: 'scores', value: 'NOT SAVING — DO NOT RELOAD', bad: true });
+  }
+
   out.push({ label: 'frame', value: `${(fc.dt * 1000).toFixed(1)}ms` , bad: fc.dt > 0.03 });
 
   return out;
