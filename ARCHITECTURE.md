@@ -16,6 +16,10 @@ of it is shaped this way.
    resolution, and "readable from 3m" is a proportion of height.
 8. **`npm run typecheck` must pass.** `strict`, `noUncheckedIndexedAccess`, and
    `noUnusedLocals` are all on — index access returns `T | undefined`.
+9. **Measure text the way you draw it.** Use `drawText`'s `maxWidth` to fit a
+   string; only reach for `fitText` when you need the NUMBER (a size shared
+   across several elements, or a box sized around the text), and then pass it
+   the same weight, family AND `letterSpacing` the draw will use. See below.
 
 ## Making a game
 
@@ -124,17 +128,45 @@ interface FrameContext {
 ### `engine/draw.ts`
 ```ts
 vh(v, units)                                  // vh units -> logical px
-drawText(ctx, text, x, y, { size, color?, font?, weight?, align?, baseline?,
-                            glow?, glowColor?, letterSpacing?, alpha? })
-measureText(ctx, text, size, weight?, font?)
+drawText(ctx, text, x, y, { size, maxWidth?, color?, font?, weight?, align?,
+                            baseline?, letterSpacing?, alpha?, shadow?,
+                            shadowColor?, knockout? })
+drawTabularNumber(ctx, text, x, y, opts)      // same opts; fixed digit advance
+measureText(ctx, text, size, weight?, font?, letterSpacing?)
+measureTabularNumber(ctx, text, size, weight?, font?, letterSpacing?)
+fitText(ctx, text, maxWidth, size, weight?, font?, letterSpacing?)
+wrapText(ctx, text, maxWidth, size, weight?, font?, maxLines?, letterSpacing?)
 roundRect(ctx, x, y, w, h, r)                 // path only, you fill/stroke
-glowLine(ctx, points, { color, width, glow?, alpha?, cap? })
-glowCircle(ctx, x, y, r, color, glow?, alpha?)
 progressBar(ctx, x, y, w, h, t, color)
-clearFrame(ctx, v, color?)
+graphPaper(ctx, v) / clearFrame(ctx, v, color?)
+wipe(ctx, v, t, mode) / transition(enter, exit, duration)
 
 stickerPill / stickerCard / labelPill / rankedRow / decorShape   // the brand kit
 ```
+
+**The letterSpacing arguments are not optional in practice.** Canvas applies
+tracking as extra advance per glyph, so a measurement without it is a
+measurement of a different string. Sixteen call sites had it wrong and nobody
+saw, because every number in this app was tuned while the app was accidentally
+rendering in Helvetica (see `scripts/woff2-cmap.mjs`) and because most of this
+kit's `TRACK.*` values are NEGATIVE, which errs toward fitting text too small
+rather than clipping it. One value is positive and large enough to matter, and
+that string — `RED LIGHT, GREEN LIGHT` — reached 98% of a 4:3 screen.
+
+Prefer `maxWidth`: it measures inside `drawText`, after the font and the
+spacing are already on the context, so there is nothing for a caller to repeat
+and therefore nothing to get wrong. `tests/brand.test.ts` enforces that every
+`fitText` call states its spacing.
+
+`knockout: true` strokes the glyphs in paper before filling them, which
+separates type from whatever is drawn BEHIND it. It is free on paper (paper on
+paper) so it is safe to leave on anywhere; it earns its place over a camera
+ghost, a 3D track or a moving playfield. It does NOT help against something
+drawn on top — for that you want an opaque band, which is what `hudShelf` is.
+
+Text shadows are capped at 8% of the type size. `SHADOW.base` is a fixed vh
+offset, which reads as a lift on a 108px score and as the word printed twice on
+a 34px label.
 
 `vignette()` and `scanlines()` still exist and DO NOTHING. They are gradients
 and see-through overlays, which the brand rules out; they are kept as no-ops
