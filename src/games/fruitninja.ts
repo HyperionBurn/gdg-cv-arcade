@@ -947,7 +947,18 @@ export class FruitNinjaGame extends GameBase {
     // stroke, which is exactly the brand; and in versus each player is already
     // confined to their own half, so a colour is not what disambiguates them.
     // (Yellow — PLAYER_COLORS[0] — on white paper is invisible at 3m.)
-    const maxWidth = vh(v, 1.5);
+    //
+    // 1.5 -> 2.2vh. At 1.5 the tip disc was 0.93vh — TEN PIXELS across on a
+    // 1080p TV — and a playtest reported the blades as hard to find. This is
+    // the one thing on screen that is the player's own body, competing with
+    // flying fruit, splats and a HUD, and it was the smallest object in the
+    // game. 2.2 puts the tip at 1.36vh, in the same range as Balloon Pop's
+    // hand (2.6vh) and Rhythm's fists (2.6vh), while the stroke stays a pen
+    // line rather than becoming a smear.
+    //
+    // Visual only: the hit test is the blade SEGMENT between frames, not the
+    // drawn width, so nothing about difficulty moves with this number.
+    const maxWidth = vh(v, 2.2);
     for (const blade of this.blades.all) {
       drawBladeTrail(ctx, blade, COLORS.ink, maxWidth);
     }
