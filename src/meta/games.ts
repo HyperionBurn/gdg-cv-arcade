@@ -49,3 +49,38 @@ export const GAME_COLORS: Record<GameId, string> = {
 export function gameColor(id: GameId): string {
   return GAME_COLORS[id] ?? COLORS.blue;
 }
+
+/**
+ * How many people each game seats — the MENU's copy of it.
+ *
+ * WHY A SECOND COPY EXISTS AT ALL. The authority is `config.maxPlayers` inside
+ * each game class, and the menu cannot read it: importing seven game modules
+ * (and through them Three.js, the pose library and the beatmap generator) to
+ * put a two-character badge on a tile would pull the entire app into the first
+ * screen a visitor sees, on a laptop that has to hold 30fps of inference.
+ *
+ * So this is a deliberate duplicate, and `tests/versus.test.ts` asserts every
+ * entry against the real config. Drift fails the build, not the stall.
+ *
+ * WHY THE MENU NEEDS IT. Six of the seven games hold two or more people and
+ * nothing on the menu said so, so the most-requested feature on the roster was
+ * also the least discoverable one. A pair standing in the queue deciding what
+ * to play are looking at exactly this screen.
+ */
+export const GAME_SEATS: Record<GameId, number> = {
+  sixtyseven: 2,
+  fruitninja: 2,
+  balloonpop: 2,
+  /** Six lanes. The only game on the roster that takes a whole group. */
+  redlight: 6,
+  posematch: 2,
+  /** One track, one camera, one runner. See PLAN.md and runner-world.ts. */
+  runner: 1,
+  rhythm: 2,
+};
+
+/** `null` for a solo game — the menu draws nothing rather than a "1P" badge. */
+export function seatBadge(id: GameId): string | null {
+  const n = GAME_SEATS[id] ?? 1;
+  return n > 1 ? `1-${n}P` : null;
+}

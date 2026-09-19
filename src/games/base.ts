@@ -24,7 +24,15 @@ import { Projection } from '../engine/projection';
 import { Juice, RollingNumber, PopupLayer } from '../engine/juice';
 import { ParticleSystem, BURST } from '../engine/particles';
 import { audio } from '../engine/audio';
-import { clearFrame, drawText, vh, progressBar, roundRect, graphPaper } from '../engine/draw';
+import {
+  clearFrame,
+  drawText,
+  vh,
+  progressBar,
+  roundRect,
+  graphPaper,
+  labelPill,
+} from '../engine/draw';
 import {
   COLORS,
   PLAYER_COLORS,
@@ -244,6 +252,36 @@ export const LATE_JOIN_FLOOR_SEC = 1.7;
 export const MAX_LATE_JOINS = 2;
 
 /**
+ * How long the tracker takes to turn a body that walked in into a PLAYER.
+ *
+ * Not a tunable — a MEASUREMENT, taken against the real pipeline: a second
+ * simulated body added mid-countdown was admitted 27 frames (0.45s) later.
+ * That is `minAgeToConfirm` plus `admitStillSec` plus detection lag, and it is
+ * deliberately slow: the same hysteresis is what stops a person walking past
+ * the stall being handed half the screen. Shortening it to make joining
+ * quicker would re-open the bystander bug, so the UI has to be built around
+ * the latency rather than against it. Rounded up from 0.45.
+ */
+export const ADMIT_LATENCY_SEC = 0.5;
+
+/**
+ * Remaining countdown at which "A FRIEND CAN STEP IN" stops being offered.
+ *
+ * THE INVITATION MUST NOT OUTLIVE ITS OWN DEADLINE. An offer shown at "1" is a
+ * taunt: the friend reads it, steps in, and the round has already started
+ * without them — which is worse than never having offered, because now the
+ * machine looks like it lied.
+ *
+ * So the cutoff is derived, not chosen: a person needs roughly 0.8s to read a
+ * badge, decide, and move, and the tracker then needs ADMIT_LATENCY_SEC to
+ * call them a player. Anyone who acts on the invitation on its very last
+ * visible frame is therefore admitted with ~0.2s to spare, and the late-join
+ * rewind gives them a full LATE_JOIN_FLOOR_SEC from there.
+ */
+export const STEP_IN_REACTION_SEC = 0.8;
+export const INVITE_UNTIL_SEC = ADMIT_LATENCY_SEC + STEP_IN_REACTION_SEC + 0.2;
+
+/**
  * How many of the people in frame a game actually plays with.
  *
  * Party games take everyone up to their lane count. Versus games take at most
@@ -260,12 +298,31 @@ export function rosterSize(
   return 1;
 }
 
+/**
+ * How long the tracker must keep reporting FEWER people before the countdown
+ * believes somebody actually left.
+ *
+ * Without this, one dropped frame silently turns a versus round into a solo
+ * one. Two people standing close enough to play side by side occlude each
+ * other constantly — that is the entire reason `PLAYER_LOST_GRACE_SEC` exists
+ * for the round itself — and the countdown was making a permanent decision off
+ * an instantaneous reading, on the one screen where the decision cannot be
+ * revisited afterwards. The friend is standing right there, and the game has
+ * quietly decided they are not playing.
+ *
+ * Shorter than the in-round grace on purpose: the whole countdown is 3.2s, so
+ * a genuine walk-away still has to be caught inside it.
+ */
+export const DEPART_GRACE_SEC = 0.5;
+
 /** What one countdown frame decides about the number of people in frame. */
 export interface CountdownRoster {
   playerCount: number;
   lateJoins: number;
   /** Rewound on an arrival so the newcomer is not mid-stride at GO. */
   stateTime: number;
+  /** Seconds the tracker has continuously reported fewer people than we count. */
+  belowFor: number;
   /** True on the frame an arrival was honoured — drives sound, shake, banner. */
   arrived: boolean;
 }
@@ -275,25 +332,40 @@ export interface CountdownRoster {
  *
  * `want` is what `resolvePlayerCount` makes of the bodies currently tracked.
  * Everything this returns is a decision; `tickCountdown` owns the effects.
+ *
+ * The two directions are deliberately asymmetric, in both time and effect.
+ * An ARRIVAL is believed immediately — the tracker has already spent
+ * ADMIT_LATENCY_SEC deciding this is a player, and doubting it again here
+ * would just be the same hysteresis twice — and it rewinds the clock. A
+ * DEPARTURE has to persist for DEPART_GRACE_SEC, and never touches the clock:
+ * the person still standing there has already waited long enough.
  */
 export function countdownRoster(
   want: number,
-  playerCount: number,
-  lateJoins: number,
-  stateTime: number
+  prev: Pick<CountdownRoster, 'playerCount' | 'lateJoins' | 'stateTime' | 'belowFor'>,
+  dt: number
 ): CountdownRoster {
+  const { playerCount, lateJoins, stateTime, belowFor } = prev;
+
   if (want > playerCount && lateJoins < MAX_LATE_JOINS) {
     return {
       playerCount: want,
       lateJoins: lateJoins + 1,
       stateTime: Math.min(stateTime, COUNTDOWN_SEC - LATE_JOIN_FLOOR_SEC),
+      belowFor: 0,
       arrived: true,
     };
   }
-  // A departure re-resolves the count but must never touch the clock — the
-  // person still standing there has already waited long enough.
-  if (want < playerCount) return { playerCount: want, lateJoins, stateTime, arrived: false };
-  return { playerCount, lateJoins, stateTime, arrived: false };
+
+  if (want < playerCount) {
+    const below = belowFor + dt;
+    if (below < DEPART_GRACE_SEC) {
+      return { playerCount, lateJoins, stateTime, belowFor: below, arrived: false };
+    }
+    return { playerCount: want, lateJoins, stateTime, belowFor: 0, arrived: false };
+  }
+
+  return { playerCount, lateJoins, stateTime, belowFor: 0, arrived: false };
 }
 
 /** Lobby ends early once this many have joined and held still briefly. */
@@ -427,6 +499,8 @@ export abstract class GameBase implements Screen {
   private lateJoins = 0;
   /** `fc.time` of the last arrival, so the VERSUS banner can land rather than blink on. */
   private lateJoinAt = -1;
+  /** Seconds the tracker has continuously reported fewer people than we count. */
+  private rosterBelowFor = 0;
 
   private lastFrameId = -1;
   private idleTime = 0;
@@ -581,6 +655,7 @@ export abstract class GameBase implements Screen {
       this.lastCountdownTick = -1;
       this.lateJoins = 0;
       this.lateJoinAt = -1;
+      this.rosterBelowFor = 0;
     }
     if (state === 'gathering') {
       this.gatherPeak = 0;
@@ -984,13 +1059,18 @@ export abstract class GameBase implements Screen {
     // to extend the wait for the person still standing there.
     const roster = countdownRoster(
       this.resolvePlayerCount(this.players.length),
-      this.playerCount,
-      this.lateJoins,
-      this.stateTime
+      {
+        playerCount: this.playerCount,
+        lateJoins: this.lateJoins,
+        stateTime: this.stateTime,
+        belowFor: this.rosterBelowFor,
+      },
+      fc.dt
     );
     this.playerCount = roster.playerCount;
     this.lateJoins = roster.lateJoins;
     this.stateTime = roster.stateTime;
+    this.rosterBelowFor = roster.belowFor;
     if (roster.arrived) {
       this.lateJoinAt = fc.time;
       // Rewinding can put the numeral back UP (…2, someone joins, 2 again).
@@ -1061,14 +1141,25 @@ export abstract class GameBase implements Screen {
     // It only appears while there is still time to act on it — an invitation
     // shown at "1" is a taunt — and it is worded as a THING TO DO, because a
     // player reads about four words off a TV mid-queue.
-    if (this.config.supportsVersus && this.playerCount === 1 && remaining > 1.1) {
-      drawText(ctx, '<A FRIEND CAN STEP IN>', v.width / 2, v.height * 0.2, {
-        size: vh(v, 3),
-        color: COLORS.muted,
-        font: FONTS.body,
-        weight: 700,
-        alpha: 0.6 + idlePulse(fc.time, 2.2, 1) * 0.4,
-        letterSpacing: '0.22em',
+    // A PILL, NOT A GREY LINE. First pass drew this as muted text and it was
+    // invisible on the TV — `COLORS.muted` is the app's "this is secondary"
+    // grey, which at 3 metres is the same as "this is absent". The yellow
+    // action badge is the shape this app already uses for "do this now"
+    // ("BE THE FIRST!", "NEW BEST!"), so it costs a passer-by nothing to
+    // learn and it survives being read past a moving arm.
+    if (this.config.supportsVersus && this.playerCount === 1 && remaining > INVITE_UNTIL_SEC) {
+      labelPill(ctx, v, v.width / 2, v.height * 0.2, 'A FRIEND CAN STEP IN', vh(v, 5.2), {
+        size: vh(v, 2.6),
+        fill: COLORS.yellow,
+        color: COLORS.ink,
+        outline: COLORS.ink,
+        outlineWidth: vh(v, STROKE.base),
+        shadow: vh(v, SHADOW.base),
+        // Static tilt, like every other action badge in the kit. It sits
+        // directly above the countdown numeral — the largest, most urgent
+        // thing on the roster — and a badge that also moved would be two
+        // things competing for the same second of attention.
+        tilt: -4,
       });
     }
 

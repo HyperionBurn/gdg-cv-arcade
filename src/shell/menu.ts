@@ -55,7 +55,7 @@ import {
   idlePulse,
   ramp,
 } from './theme';
-import { GAME_COLORS } from '../meta/games';
+import { GAME_COLORS, seatBadge } from '../meta/games';
 import { DWELL, HoverCursor, type HoverTarget } from './hover';
 import { router } from './router';
 import type { FrameContext, Screen } from './screen';
@@ -217,6 +217,17 @@ const GRID_BOTTOM = 87;
  */
 const TILE = {
   accentH: 1.6,
+  /**
+   * Seat badge, in the band between the accent bar and the title.
+   *
+   * 1.6 (accent) to ~7.0 (title cap height at 3.6vh centred on 8.8) is 5.4vh
+   * of genuinely empty tile. A 3.8vh pill centred at 4.6 leaves ~1.1vh of air
+   * above and 0.5vh below, and touches nothing. Sized up from 3.4/2.0vh: at
+   * 2.0vh the label was 22px on a 1080p TV, which is below the legibility
+   * floor the blurb is already held to for exactly this reason.
+   */
+  seats: 4.6,
+  seatsH: 3.8,
   title: 8.8,
   blurb: 14.8,
   rule: 20,
@@ -783,6 +794,32 @@ export class MenuScreen implements Screen {
       ctx.restore();
 
       const cx = target.x + target.w / 2;
+
+      // HOW MANY PEOPLE THIS ONE HOLDS.
+      //
+      // Six of the seven games seat two or more and the menu said nothing, so
+      // the most-requested thing on the roster — "can we play together?" — was
+      // also the least discoverable. A pair deciding what to play are standing
+      // in front of exactly this screen.
+      //
+      // Top-right, above the title band, right-aligned so seven badges of
+      // different widths form one clean column edge rather than seven centred
+      // blobs. It carries the tile's own colour because colour is already how
+      // a returning player finds a game, and a badge in a NEW colour would be
+      // a second thing to learn. Solo games draw nothing: a "1P" badge on
+      // Runner would be noise on six tiles to inform one.
+      const seats = active ? seatBadge(tile.id) : null;
+      if (seats) {
+        labelPill(ctx, v, target.x + target.w - vh(v, 1.8), ty + vh(v, TILE.seats), seats, vh(v, TILE.seatsH), {
+          size: vh(v, 2.2),
+          fill: color,
+          color: COLORS.paper,
+          outline: COLORS.ink,
+          outlineWidth: vh(v, STROKE.thin),
+          align: 'right',
+          padRatio: 0.45,
+        });
+      }
 
       drawText(ctx, tile.title, cx, ty + vh(v, TILE.title), {
         size: titleSize,

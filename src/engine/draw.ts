@@ -460,6 +460,15 @@ export interface LabelPillOptions extends StickerOptions {
   tilt?: number;
   /** Horizontal padding as a multiple of the pill height. */
   padRatio?: number;
+  /**
+   * What `cx` means: the pill's centre (default), or the edge it is flush to.
+   *
+   * A pill whose width depends on its own text cannot be right-aligned by the
+   * caller without duplicating the measurement here, and a duplicated
+   * measurement is a pill that drifts a pixel out of its corner the first time
+   * the tracking or the padding changes.
+   */
+  align?: 'center' | 'left' | 'right';
 }
 
 /**
@@ -490,9 +499,11 @@ export function labelPill(
   ctx.restore();
 
   const w = textW + h * padRatio * 2;
+  const centreX =
+    opts.align === 'left' ? cx + w / 2 : opts.align === 'right' ? cx - w / 2 : cx;
   const draw = (): void => {
-    stickerPill(ctx, v, cx - w / 2, cy - h / 2, w, h, opts);
-    drawText(ctx, label, cx, cy, {
+    stickerPill(ctx, v, centreX - w / 2, cy - h / 2, w, h, opts);
+    drawText(ctx, label, centreX, cy, {
       size,
       color: opts.color ?? COLORS.ink,
       font: FONTS.body,
@@ -501,7 +512,7 @@ export function labelPill(
     });
   };
 
-  if (opts.tilt) withTilt(ctx, cx, cy, opts.tilt, draw);
+  if (opts.tilt) withTilt(ctx, centreX, cy, opts.tilt, draw);
   else draw();
   return w;
 }

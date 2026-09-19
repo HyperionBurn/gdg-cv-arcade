@@ -25,8 +25,14 @@ import {
   COUNTDOWN_SEC,
   LATE_JOIN_FLOOR_SEC,
   MAX_LATE_JOINS,
+  DEPART_GRACE_SEC,
+  ADMIT_LATENCY_SEC,
+  STEP_IN_REACTION_SEC,
+  INVITE_UNTIL_SEC,
   type GameConfig,
 } from '../src/games/base.ts';
+import { GAME_SEATS, seatBadge } from '../src/meta/games.ts';
+import type { GameId } from '../src/meta/leaderboard.ts';
 import { laneScore, type ScorableRacer } from '../src/games/redlight.ts';
 import { BalloonPopGame } from '../src/games/balloonpop.ts';
 import { FruitNinjaGame } from '../src/games/fruitninja.ts';
@@ -99,6 +105,34 @@ describe('roster — capacity is one fact, not three', () => {
     }
   });
 
+  test('the menu badge agrees with what the game will actually do', () => {
+    // GAME_SEATS is a deliberate duplicate of `config.maxPlayers` — the menu
+    // cannot import seven game modules to draw a two-character badge. This is
+    // the guard that makes the duplicate safe: a tile promising "1-2P" for a
+    // game that will hard-lock solo is worse than no badge at all, because a
+    // pair will step up together and one of them will be a spectator.
+    const byId = new Map(GAMES.map(([, c]) => [c.gameId, c]));
+    for (const [id, seats] of Object.entries(GAME_SEATS) as [GameId, number][]) {
+      const cfg = byId.get(id);
+      assert.ok(cfg, `GAME_SEATS has "${id}" but no game does`);
+      assert.equal(seats, cfg.maxPlayers, `${id}: menu says ${seats}, game seats ${cfg.maxPlayers}`);
+    }
+    for (const [name, cfg] of GAMES) {
+      assert.ok(cfg.gameId in GAME_SEATS, `${name} is missing from GAME_SEATS`);
+    }
+  });
+
+  test('only games that can actually take a friend advertise one', () => {
+    for (const [name, cfg] of GAMES) {
+      const badge = seatBadge(cfg.gameId);
+      if (cfg.maxPlayers > 1) {
+        assert.equal(badge, `1-${cfg.maxPlayers}P`, `${name} badge`);
+      } else {
+        assert.equal(badge, null, `${name} must not draw a "1P" badge`);
+      }
+    }
+  });
+
   test('a split-screen game declares exactly two slots', () => {
     // `slotRect` halves the viewport; three slots would be three drawings on
     // two halves. Any game that ever wants three needs a layout change first.
@@ -116,23 +150,46 @@ describe('roster — capacity is one fact, not three', () => {
 
 describe('countdown — the friend who is half a step behind', () => {
   const FLOOR_AT = COUNTDOWN_SEC - LATE_JOIN_FLOOR_SEC;
+  const FRAME = 1 / 60;
+
+  type Roster = ReturnType<typeof countdownRoster>;
+
+  /** A countdown that has just been entered, with one person in front of it. */
+  const solo = (stateTime = 0): Roster => ({
+    playerCount: 1,
+    lateJoins: 0,
+    stateTime,
+    belowFor: 0,
+    arrived: false,
+  });
+
+  /** Advance one frame with `want` people visible. */
+  const step = (want: number, s: Roster, dt = FRAME): Roster => countdownRoster(want, s, dt);
+
+  /** Advance `seconds` worth of frames with a steady `want`. */
+  const hold = (want: number, s: Roster, seconds: number): Roster => {
+    let cur = s;
+    for (let t = 0; t < seconds; t += FRAME) cur = step(want, cur);
+    return cur;
+  };
 
   test('a solo turn is not slowed by one millisecond', () => {
     // The whole reason this is in the countdown rather than in a lobby.
-    let t = 0;
+    let s = solo();
     for (let i = 0; i < 200; i++) {
-      const r = countdownRoster(1, 1, 0, t);
-      assert.equal(r.arrived, false);
-      assert.equal(r.stateTime, t, 'a solo countdown must never be rewound');
-      assert.equal(r.lateJoins, 0);
-      t += COUNTDOWN_SEC / 200;
+      const t = s.stateTime;
+      s = step(1, s);
+      assert.equal(s.arrived, false);
+      assert.equal(s.stateTime, t, 'a solo countdown must never be rewound');
+      assert.equal(s.lateJoins, 0);
+      s = { ...s, stateTime: t + COUNTDOWN_SEC / 200 };
     }
   });
 
   test('someone arriving late still gets a real countdown', () => {
     // 2.9s into a 3.2s countdown: without the rewind they would be walking
     // into frame as the round started.
-    const r = countdownRoster(2, 1, 0, 2.9);
+    const r = step(2, solo(2.9));
     assert.equal(r.arrived, true);
     assert.equal(r.playerCount, 2);
     assert.ok(
@@ -144,51 +201,119 @@ describe('countdown — the friend who is half a step behind', () => {
   test('someone arriving early does not get a longer wait than they had', () => {
     // Rewinding to the floor unconditionally would EXTEND the countdown for a
     // pair who walked up together, which is the common case.
-    const r = countdownRoster(2, 1, 0, 0.2);
+    const r = step(2, solo(0.2));
     assert.equal(r.arrived, true);
     assert.equal(r.stateTime, 0.2, 'an early arrival must not push the clock backwards');
   });
 
   test('the rewind lands exactly on the floor and no further', () => {
-    const r = countdownRoster(2, 1, 0, COUNTDOWN_SEC);
+    const r = step(2, solo(COUNTDOWN_SEC));
     assert.ok(Math.abs(r.stateTime - FLOOR_AT) < 1e-9);
   });
 
+  test('an arrival is honoured once, not every frame it persists', () => {
+    // `lateJoins` is the only thing bounding the worst case, so a steady two
+    // people must not keep spending it.
+    let s = step(2, solo(1.0));
+    assert.equal(s.lateJoins, 1);
+    s = hold(2, s, 2.0);
+    assert.equal(s.lateJoins, 1, 'a standing pair kept re-triggering the arrival');
+    assert.equal(s.stateTime, FLOOR_AT > 1.0 ? 1.0 : s.stateTime);
+  });
+
+  /* ---------------- departures ---------------- */
+
+  test('one dropped frame does NOT turn a versus round solo', () => {
+    // Two people close enough to play side by side occlude each other
+    // constantly. This is the failure that would only ever show up with two
+    // real bodies: the friend is standing right there and the game has quietly
+    // decided they are not playing.
+    let s = step(2, solo(0.5));
+    assert.equal(s.playerCount, 2);
+    s = step(1, s); // blink
+    assert.equal(s.playerCount, 2, 'demoted on a single frame of tracker loss');
+    s = step(2, s); // back
+    assert.equal(s.belowFor, 0, 'the grace window did not reset when they reappeared');
+    assert.equal(s.playerCount, 2);
+  });
+
+  test('a run of dropped frames shorter than the grace is survived', () => {
+    let s = step(2, solo(0.5));
+    s = hold(1, s, DEPART_GRACE_SEC * 0.8);
+    assert.equal(s.playerCount, 2, `demoted after ${(DEPART_GRACE_SEC * 0.8).toFixed(2)}s`);
+  });
+
+  test('actually walking away does drop the round back to solo', () => {
+    // Otherwise the round opens with a split divider, a second HUD and a
+    // second score belonging to nobody.
+    let s = step(2, solo(0.5));
+    s = hold(1, s, DEPART_GRACE_SEC + 2 * FRAME);
+    assert.equal(s.playerCount, 1);
+    assert.equal(s.arrived, false);
+  });
+
+  test('a departure never extends the wait for whoever stayed', () => {
+    let s = step(2, solo(1.0));
+    const clock = s.stateTime;
+    s = hold(1, s, DEPART_GRACE_SEC * 2);
+    assert.equal(s.stateTime, clock, 'leaving must not rewind the countdown');
+    assert.equal(s.lateJoins, 1, 'leaving does not refund a join');
+  });
+
+  test('the grace fits inside the countdown a late joiner is given', () => {
+    // A departure must still be CAUGHT before GO in the tightest case, or a
+    // round can start versus with one person in it.
+    assert.ok(
+      DEPART_GRACE_SEC < LATE_JOIN_FLOOR_SEC,
+      `grace ${DEPART_GRACE_SEC}s does not fit in ${LATE_JOIN_FLOOR_SEC}s`
+    );
+  });
+
+  /* ---------------- adversarial ---------------- */
+
   test('a flickering tracker cannot hold the countdown open forever', () => {
-    // A spectator hovering at the edge of the play zone makes the tracker
-    // oscillate 1 <-> 2. Without the cap, every oscillation buys another
-    // LATE_JOIN_FLOOR_SEC and the round never starts.
-    let count = 1;
-    let joins = 0;
-    let t = COUNTDOWN_SEC - 0.05;
+    // A body hovering at the edge of the play zone makes the tracker oscillate
+    // 1 <-> 2. Two independent things have to stop that becoming an infinite
+    // countdown: the grace absorbs the flicker so it reads as ONE arrival, and
+    // the cap bounds it even if the grace is ever removed.
+    let s = solo(COUNTDOWN_SEC - 0.05);
     let honoured = 0;
 
     for (let i = 0; i < 50; i++) {
-      // ... appears ...
-      const up = countdownRoster(2, count, joins, t);
-      if (up.arrived) honoured++;
-      ({ playerCount: count, lateJoins: joins, stateTime: t } = up);
-      // ... and vanishes again.
-      const down = countdownRoster(1, count, joins, t);
-      assert.equal(down.arrived, false, 'a departure is never an arrival');
-      ({ playerCount: count, lateJoins: joins, stateTime: t } = down);
-      t += 0.05;
+      s = step(2, s);
+      if (s.arrived) honoured++;
+      s = step(1, s);
+      assert.equal(s.arrived, false, 'a departure is never an arrival');
+      s = { ...s, stateTime: s.stateTime + 0.05 };
     }
 
-    assert.equal(honoured, MAX_LATE_JOINS, 'the cap is the only thing ending this round');
-    assert.ok(t > COUNTDOWN_SEC, 'the clock ran out despite the flicker');
+    assert.equal(honoured, 1, 'the grace should have read 50 flickers as one arrival');
+    assert.ok(honoured <= MAX_LATE_JOINS, 'and the cap bounds it regardless');
+    assert.ok(s.stateTime > COUNTDOWN_SEC, 'the clock ran out despite the flicker');
+  });
+
+  test('a flicker faster than the grace is absorbed, not counted', () => {
+    // The pair case: player two blinks out every few frames for the whole
+    // countdown. They must still be in the round at GO, and it must still be
+    // ONE join, because `lateJoins` is what bounds the worst case.
+    let s = step(2, solo(0.3));
+    for (let i = 0; i < 40; i++) {
+      s = step(i % 5 === 0 ? 1 : 2, s);
+    }
+    assert.equal(s.playerCount, 2);
+    assert.equal(s.lateJoins, 1);
   });
 
   test('worst case is bounded, and it is short enough to stand still for', () => {
     // Two honoured arrivals, each at the last possible moment.
-    let { playerCount, lateJoins, stateTime } = { playerCount: 1, lateJoins: 0, stateTime: COUNTDOWN_SEC };
+    let s = solo(COUNTDOWN_SEC);
     let spent = COUNTDOWN_SEC;
     for (let i = 0; i < MAX_LATE_JOINS; i++) {
-      const r = countdownRoster(playerCount + 1, playerCount, lateJoins, stateTime);
-      assert.equal(r.arrived, true);
-      spent += stateTime - r.stateTime;
-      ({ playerCount, lateJoins, stateTime } = r);
-      stateTime = COUNTDOWN_SEC;
+      const before = s.stateTime;
+      s = step(s.playerCount + 1, s);
+      assert.equal(s.arrived, true);
+      spent += before - s.stateTime;
+      s = { ...s, stateTime: COUNTDOWN_SEC };
     }
     assert.ok(
       spent <= COUNTDOWN_SEC + MAX_LATE_JOINS * LATE_JOIN_FLOOR_SEC + 1e-9,
@@ -197,21 +322,35 @@ describe('countdown — the friend who is half a step behind', () => {
     assert.ok(spent < 7, 'nobody stands still in front of a crowd for seven seconds');
   });
 
-  test('the friend changing their mind drops the round back to solo', () => {
-    // Otherwise the round opens with a split divider, a second HUD and a
-    // second score belonging to nobody.
-    const r = countdownRoster(1, 2, 1, 1.0);
-    assert.equal(r.playerCount, 1);
-    assert.equal(r.arrived, false);
-    assert.equal(r.stateTime, 1.0, 'a departure must not extend the wait for whoever stayed');
-    assert.equal(r.lateJoins, 1, 'leaving does not refund a join');
+  test('the invitation never outlives its own deadline', () => {
+    // The pill says "A FRIEND CAN STEP IN". Someone acting on it on its last
+    // visible frame has to actually make it into the round, or the machine
+    // lied — which is worse than never offering. Reaction plus the tracker's
+    // admission latency must fit inside what is left on the clock.
+    assert.ok(
+      INVITE_UNTIL_SEC >= STEP_IN_REACTION_SEC + ADMIT_LATENCY_SEC,
+      `invite runs to ${INVITE_UNTIL_SEC}s but joining costs ` +
+        `${STEP_IN_REACTION_SEC + ADMIT_LATENCY_SEC}s`
+    );
+    // And it has to be shown long enough to be read at all.
+    assert.ok(COUNTDOWN_SEC - INVITE_UNTIL_SEC >= 1.5, 'the invitation is barely on screen');
+  });
+
+  test('a friend admitted on the last honest frame still gets a real countdown', () => {
+    // Worst case that the invitation actually promises: they moved on the
+    // final visible frame of the pill and the tracker took its full latency.
+    const admittedAt = COUNTDOWN_SEC - INVITE_UNTIL_SEC + STEP_IN_REACTION_SEC + ADMIT_LATENCY_SEC;
+    assert.ok(admittedAt < COUNTDOWN_SEC, 'admitted after GO — the offer was a lie');
+    const r = step(2, solo(admittedAt));
+    assert.equal(r.arrived, true);
+    assert.ok(COUNTDOWN_SEC - r.stateTime >= LATE_JOIN_FLOOR_SEC - 1e-9);
   });
 
   test('a party game can absorb two arrivals, not just one', () => {
     // Red Light holds six. Two people joining a lobby of one is ordinary.
-    const first = countdownRoster(2, 1, 0, 1.0);
+    const first = step(2, solo(1.0));
     assert.equal(first.playerCount, 2);
-    const second = countdownRoster(3, first.playerCount, first.lateJoins, first.stateTime);
+    const second = step(3, first);
     assert.equal(second.playerCount, 3);
     assert.equal(second.arrived, true);
   });
