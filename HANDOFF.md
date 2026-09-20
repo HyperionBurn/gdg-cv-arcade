@@ -20,13 +20,13 @@ The authority for everything else is:
 
 ## State
 
-Green as of the last commit: **483 tests, 97 suites, 0 failures**, typecheck
+Green as of the last commit: **544 tests, 115 suites, 0 failures**, typecheck
 clean, production build verified to make **zero external requests**.
 
 ```bash
 npm run setup      # fetch models + fonts — REQUIRED before first run
 npm run dev        # http://localhost:5173
-npm test           # 483 tests, ~10s
+npm test           # 544 tests, ~10s
 npm run typecheck
 npm run kiosk      # production build, served on :4173 — use this on the day
 ```
@@ -130,6 +130,56 @@ word anywhere. `d` now has `replay` and `reel` rows; the operator console has
 **DATA → REPLAYS & ATTRACT REEL** with buffer size, grab cost, shed level and
 switches for both. Exactly the storage-flag problem from the 19th, one layer
 down.
+
+---
+
+## Count the things that never happen
+
+The single most productive thing done on the 20th, and it takes one sweep.
+
+Run `await window.__arcade.turn()` with `audio.play` and
+`CanvasRenderingContext2D.fillText` patched to COUNT rather than assert, then
+look at what came back zero. **A cue that never plays, or a string that never
+draws, is a mechanic nobody is testing** — and four of them turned out to be
+unreachable by construction rather than merely rare:
+
+| Never happened | Why | Now |
+|---|---|---|
+| `duck` (15 `wallhit`, 0 `duck`) | Neither harness ever crouched | Both duck; Rhythm scores 1077 → **1864** |
+| `<MAX SPEED>` | `STREAK_CAP` 12, above the mean rows a round holds | Cap **8**, confirmed firing |
+| `<FINAL STANDINGS>` | Sweep chose JUST ME for a 3-body Red Light, then a replay covered it | Party mode picked; replay no longer takes over a party round |
+| `<QUAD!>` / the combo clip | Threshold set to a chain that never occurs | Triple, where the confetti already fires |
+| `<FIRST ON THE BOARD>` | Only fires on an empty board — which guarantees a replay covers it | Carried on the replay stamp instead |
+
+Two things make this work that are worth repeating:
+
+- **Patch the prototype, not the module.** A dynamic `import()` of
+  `PopupLayer` counted zero of everything — that is the second-instance trap
+  below, hit again. `CanvasRenderingContext2D.prototype` is the real render
+  path whatever the module graph is doing.
+- **Then check the trigger, not just the guard.** Every one of these had
+  passing tests. They tested the mechanism and never asked whether the
+  condition could occur.
+
+---
+
+## Numbers I got wrong today, and how
+
+Both the same shape, and both caught by re-measuring rather than by review.
+
+- **The combo-clip threshold.** Committed at a quad with a comment saying
+  "MEASURED over the chain distribution this game actually produces". No such
+  measurement existed. The real distribution is DOUBLE 2120 frames, TRIPLE 320,
+  **QUAD 0** — the feature could not fire.
+- **The Runner row count.** Measured ONCE, got exactly 12, which made a tidy
+  story about the cap sitting precisely on the ceiling. The next round gave 17.
+  The real spread is 10, 10, 7, 17.
+
+A single sample of a seeded generator is not a measurement, and **the tidiness
+of the first answer is what made it convincing.** Three test guards also passed
+or failed for the wrong reason today; each time the cause was a regex reading a
+different piece of code than I thought it was. Mutate the fix away and watch
+the test go red, every time — a green test proves nothing about itself.
 
 ---
 
