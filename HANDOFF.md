@@ -194,6 +194,47 @@ word anywhere. `d` now has `replay` and `reel` rows; the operator console has
 switches for both. Exactly the storage-flag problem from the 19th, one layer
 down.
 
+### Later the same day
+
+**All four owed rows are instrumented now.** Initials entry times were listed
+as unrecordable because entry is a screen, not a round {DASH} true of the hook,
+and not a reason to ask somebody running a queue to hold a stopwatch. And Red
+Light lane holding was called "an identity question with no counter", which
+was right about the question: a lane IS an identity, so the tracker counts
+reservations made, reclaimed and lost, and every round row carries them.
+
+**The shipped bundle can be swept at last.** `turn`, `smoke` and `census` all
+hang off `__arcade`, which was DEV-only, so every automated check in this repo
+tested the dev build while the artifact that goes to the stall was verified by
+hand. `vite build --mode probe` keeps the handle; the real build still strips
+it, verified by grepping both bundles. First run: 13 turns green on
+production, and a census that draws exactly what dev draws.
+
+**A particle-pool bug, found by writing the first test that imported the
+file.** The ring recycles a live slot when full, which is right, and counted
+it as a new particle, which is not {DASH} so `count` drifted upward for good and
+reported 10000 in a 3000-slot pool. Latent, because nothing reads it yet, and
+exactly the accessor a `d` row would use.
+
+**Four core inputs had no tests at all:** `VerticalGestures` (the Runner's
+jump and Rhythm's duck), `BladeTracker` (the whole of Fruit Ninja),
+`RollingNumber` (whose NaN guard its own comment calls the last thing between
+a bad score and "NaN" on a television), and `Projection` (every
+consumer-facing coordinate).
+
+**The Runner's two inputs are not equally risky**, which is the go/no-go
+question. Measured per obstacle: the jump clears from about 0.24s to 0.7s of
+lead, roughly half a second of tolerance, and has to be AIMED. The slide
+clears from any start inside 0.45s and survives being released a quarter
+second early, because the crouch gate's hysteresis holds it {DASH} negative
+control, never ducking, 0 of 3.
+
+**And a lot of documentation was simply wrong.** Rhythm Punch was missing
+from README's map of the stall; Runner was still described as 1P; the Status
+table called the tournament unreachable while the section it cited said the
+opposite; `meta/` was listed as two modules against nine; `src/dev` was absent
+entirely. Each is guarded now, derived rather than listed.
+
 ---
 
 ## Count the things that never happen
