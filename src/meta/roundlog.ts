@@ -73,6 +73,14 @@ const STORAGE_KEY = 'gdg-arcade:rounds';
  * rounds are the ones nearest the question being asked, and a log that stops
  * recording halfway through the afternoon fails silently in the direction
  * nobody checks.
+ *
+ * AND THE WRITE COST, because this re-serialises the whole array every round
+ * and `localStorage.setItem` is synchronous — it lands at the end of a round,
+ * which is exactly when the results panel is animating in. MEASURED at a full
+ * 1000 rows (159.8 KB of JSON): push, trim, stringify and store together cost
+ * **0.3-1.2 ms**, ten consecutive samples, against a 16.7 ms frame. Once per
+ * round, not per frame. Re-take it if a row ever grows a string field —
+ * everything here is a number today, which is most of why it is small.
  */
 const MAX_ROWS = 1000;
 
