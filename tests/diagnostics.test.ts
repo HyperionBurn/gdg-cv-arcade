@@ -222,7 +222,14 @@ describe('diagnostics know the simulator is not a fault', () => {
 
     const start = md.indexOf('### If something is wrong');
     assert.ok(start >= 0, 'the README no longer has a failure table');
-    const table = md.slice(start, start + 12000);
+    // Bounded by the next heading, not by a character count. The table is
+    // ~3,200 characters and the window was 12,000, so it read 8,000 characters
+    // of unrelated README — and a chip string mentioned anywhere in that span
+    // would have satisfied this while the table said nothing. There is already
+    // one such mention elsewhere in the file, in the production-build notes.
+    const next = md.indexOf('\n### ', start + 10);
+    const table = md.slice(start, next > start ? next : undefined);
+    assert.ok(table.length < 8000, `the failure table is ${table.length} chars; heading lost?`);
 
     // Both strings, taken from the code rather than retyped here, so the two
     // cannot drift apart without this failing.
