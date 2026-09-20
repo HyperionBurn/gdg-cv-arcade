@@ -469,6 +469,20 @@ All driven deterministically via `window.__arcade.tick()`:
   a booth laptop will not notice. Re-take this if anything starts allocating
   per frame.
 
+- **Endurance again, 2026-09-20, after the day's changes.** The run above
+  predates the particle-pool fix, the tracker's identity counters and the
+  initials entry log, none of which should allocate per frame — but "should
+  not" is not a measurement. Two full roster passes, **26 turns**, every one
+  green. JS heap sampled between batches: **15, 19, 15, 18, 18, 18, 20 MB**,
+  and one `<canvas>` throughout.
+
+  **The absolute numbers are NOT comparable to the Sept 19 line above** — a
+  different session, a fresh page, and 26 turns rather than 65 back to back.
+  What is comparable is the SHAPE, and it is the same one: the band sawtooths
+  instead of climbing (it came back down twice), and the canvas count never
+  moves, so the Runner's WebGL context is still not being re-created per
+  round. Nothing added on the 20th leaks.
+
 - **A whole bracket, end to end, 2026-09-20** — the feature whose own source
   comment said it could not be reached. Operator console -> BRACKET -> two
   names -> **START 2-PLAYER BRACKET**; the START control is replaced by RESET,
