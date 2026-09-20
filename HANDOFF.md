@@ -20,13 +20,13 @@ The authority for everything else is:
 
 ## State
 
-Green as of the last commit: **553 tests, 119 suites, 0 failures**, typecheck
+Green as of the last commit: **555 tests, 120 suites, 0 failures**, typecheck
 clean, production build verified to make **zero external requests**.
 
 ```bash
 npm run setup      # fetch models + fonts — REQUIRED before first run
 npm run dev        # http://localhost:5173
-npm test           # 553 tests, ~10s
+npm test           # 555 tests, ~10s
 npm run typecheck
 npm run kiosk      # production build, served on :4173 — use this on the day
 ```
