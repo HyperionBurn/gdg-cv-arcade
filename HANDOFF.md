@@ -422,7 +422,16 @@ every off-stage string back to the edge, and an edge-aligned box overflows
 the stage by exactly zero. The tell was that at a 3.5% inset everything
 overflowed by exactly the inset. The clip starts unbounded now.
 
-**The 13px is real and it is not the clamp.** `tests/popups.test.ts` only
+**Pinned precisely, three games at 1024x768: `<BLADES OUT!>` reaches 17px
+past the RIGHT edge and 2px past the left.** Both from the same string, and
+the asymmetry is the interesting part — ink bearing alone would be roughly
+even. Traced to `PopupLayer.draw`, which clamps against
+`measureText(text).width / 2 + size * 0.17`: the measurement is real, so the
+residual lives in that 0.17 margin, and **0.17 is the knob** if the rehearsal
+shows a clipped word. 17px is 1.7% of the stage, and TV overscan crops that
+edge regardless.
+
+**And it is not the clamp being wrong.** `tests/popups.test.ts` only
 ever ran at 1920 — one aspect, the comfortable one — so 4:3 cases are added
 there now and they PASS. They pass because that file models text width as
 `length * size * 0.56` rather than measuring Archivo, which is the same
