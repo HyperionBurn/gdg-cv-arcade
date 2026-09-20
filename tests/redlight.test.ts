@@ -20,6 +20,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { judgeRedLight, DEFAULT_REDLIGHT_TUNABLES } from '../src/games/redlight.ts';
+import { tunables } from '../src/meta/tunables.ts';
 
 const FRAME = 1 / 60;
 const BREACH = 0.3;
@@ -382,5 +383,91 @@ describe('a derived number is current or dated', () => {
       `the file says the product is ${m[1]} today; the constants give ` +
         `${product.toFixed(2)}`
     );
+  });
+});
+
+
+/**
+ * THE REGISTRY WINS, SO THE REGISTRY HAS TO AGREE WITH THE GAME.
+ *
+ * `tunables.get(key, fallback)` returns the REGISTERED default, not the call
+ * site's fallback. tunables.ts says so in its own words: "the code change you
+ * just made is not in effect." It is not hypothetical — that comment exists
+ * because `redlight.graceSec` was widened in the game, documented in the
+ * README as being in effect, and silently did nothing.
+ *
+ * The guard against it is a `console.warn` behind `import.meta.env?.DEV`. That
+ * is a dev-only, console-only warning in a project whose whole discipline is
+ * that a thing nobody can see does not count — and under `node --test`,
+ * `import.meta.env` is undefined, so it never fires here at all.
+ *
+ * So the same comparison is made statically, for every Red Light knob. These
+ * are the constants the runbook calls unrecoverable if they are wrong, and
+ * "wrong" includes "edited in the game and ignored by the registry".
+ */
+describe('every Red Light tunable matches the game it tunes', () => {
+  const PAIRS: ReadonlyArray<readonly [string, keyof typeof DEFAULT_REDLIGHT_TUNABLES]> = [
+    ['redlight.moveEnter', 'moveEnter'],
+    ['redlight.exitRatio', 'exitRatio'],
+    ['redlight.graceSec', 'graceSec'],
+    ['redlight.breachSec', 'breachSec'],
+    ['redlight.quietMult', 'quietMult'],
+    ['redlight.quietCeiling', 'quietCeiling'],
+    ['redlight.driveSpan', 'driveSpan'],
+  ];
+
+  for (const [key, field] of PAIRS) {
+    test(`${key} is the value the game ships`, () => {
+      const spec = tunables.list().find((t) => t.key === key);
+      assert.ok(spec, `${key} is no longer a slider, so the marshal cannot reach it`);
+      assert.equal(
+        spec.default,
+        DEFAULT_REDLIGHT_TUNABLES[field],
+        `the registry defaults ${key} to ${spec.default} and the game ships ` +
+          `${DEFAULT_REDLIGHT_TUNABLES[field]}. The REGISTRY wins, so the game's ` +
+          `value is not in effect — and the console shows and resets to the wrong one.`
+      );
+    });
+  }
+
+  /**
+   * WHICH KNOBS ARE DELIBERATELY NOT ON THE CONSOLE.
+   *
+   * My first version of this asserted that every shipped value has a slider,
+   * which is a policy I invented rather than one this project states — and
+   * five failed it. Exposing everything is its own failure: the console is
+   * read by somebody deciding one thing quickly, and a wall of knobs on the
+   * game the runbook says to tune FIRST is worse than five that matter.
+   *
+   * So the list is explicit, with a reason each. A new value added without a
+   * slider fails this until somebody decides which side it belongs on.
+   */
+  const NOT_EXPOSED: ReadonlyArray<readonly [string, string]> = [
+    ['advanceRate', 'race pace; changing it mid-event re-times the whole round against a fixed clock'],
+    ['energyTau', 'the smoother; it moves the effective grace via judgeOpensAt, so STOPPING GRACE is the knob for that'],
+    ['calibrateSec', 'how long the lobby learns for; a lobby-length change, not a feel one'],
+    ['calibrateDown', 'lobby learning rate, down'],
+    ['calibrateUp', 'lobby learning rate, up'],
+  ];
+
+  test('the knobs without a slider are the ones we decided to leave off', () => {
+    const keys = new Set(tunables.list().map((t) => t.key));
+    const missing = Object.keys(DEFAULT_REDLIGHT_TUNABLES)
+      .filter((f) => !keys.has(`redlight.${f}`))
+      .sort();
+    assert.deepEqual(
+      missing,
+      NOT_EXPOSED.map(([f]) => f).sort(),
+      `the set of Red Light values with no slider has changed. Either give the ` +
+        `new one a slider, or add it to NOT_EXPOSED with a reason — on the game ` +
+        `the runbook says to tune first, "you cannot change this without a ` +
+        `rebuild" is a decision, not an oversight.`
+    );
+  });
+
+  test('and each of those carries a reason', () => {
+    for (const [field, why] of NOT_EXPOSED) {
+      assert.ok(why.length > 15, `${field} is left off the console with no reason given`);
+    }
   });
 });
