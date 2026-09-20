@@ -733,3 +733,61 @@ describe('the first score of the day says so', () => {
     assert.equal(highlights.clipMeta()?.label, 'NEW RECORD');
   });
 });
+
+
+/**
+ * THE ONE PIECE OF TYPE THAT SAYS WHAT THE RECTANGLE IS.
+ *
+ * Without the pill, a silent loop of somebody waving on the attract screen
+ * reads as a stuck camera feed — which is the entire reason it is there. I
+ * built it at 1.55vh, and theme.ts reserves `micro` (1.5) for "operator,
+ * diagnostic and decorative only. Never player-facing content".
+ *
+ * Found by measuring every string drawn across a sweep AT 4:3 and reading the
+ * smallest. It is the aspect that matters: the card is narrower there, which
+ * is also why the size cannot simply be raised. MEASURED at 1536x1152, a flat
+ * TYPE.label put the longest label — 'FIRST ON THE BOARD', added this morning
+ * for the first score of the day — at 339px against a 354px card, 4px off the
+ * right edge.
+ *
+ * Fitted instead, so only the labels that need it shrink:
+ *
+ *   4:3    #2 TODAY 2.2vh   NEW RECORD 2.2vh   FIRST ON THE BOARD 1.64vh
+ *   16:9   all three at 2.2vh
+ */
+describe('the reel card says what it is showing', () => {
+  const attractSrc = async (): Promise<string> => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/shell/attract.ts', 'utf8');
+    return src
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\/\/.*$/, ''))
+      .join('\n');
+  };
+
+  test('the label is player-facing type, not the diagnostic size', async () => {
+    const code = await attractSrc();
+    const at = code.indexOf('labelPill(ctx, v, x + pad * 2');
+    assert.ok(at > 0, 'the reel card no longer labels itself');
+    const span = code.slice(at, at + 320);
+    assert.match(
+      span,
+      /TYPE\.label/,
+      'the reel pill is back on a hardcoded size; theme.ts reserves anything ' +
+        'near micro for operator and diagnostic text, never player-facing content'
+    );
+  });
+
+  test('and it is fitted, so the longest one cannot run off the card', async () => {
+    const code = await attractSrc();
+    const at = code.indexOf('labelPill(ctx, v, x + pad * 2');
+    const span = code.slice(Math.max(0, at - 260), at + 320);
+    assert.match(
+      span,
+      /fitText\(ctx, pillLabel/,
+      "'FIRST ON THE BOARD' at a flat TYPE.label is 339px against a 354px " +
+        'card at 4:3 — it needs fitting, not a smaller constant'
+    );
+  });
+});

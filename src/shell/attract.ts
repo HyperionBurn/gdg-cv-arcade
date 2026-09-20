@@ -541,9 +541,29 @@ export class AttractScreen implements Screen {
 
     // The one piece of type that says what this rectangle IS. Without it a
     // silent loop of somebody waving reads as a stuck camera feed.
-    const pillH = vh(v, 3.4);
-    labelPill(ctx, v, x + pad * 2, y + pad * 2 + pillH / 2, probe.label || 'HIGHLIGHT', pillH, {
-      size: vh(v, 1.55),
+    // TYPE.label, NOT micro. I set this to 1.55vh when I built the card, and
+    // measuring every string on the screen at 4:3 found it: theme.ts reserves
+    // `micro` (1.5) for "operator, diagnostic and decorative only. Never
+    // player-facing content", and this is the one piece of type that says what
+    // the rectangle IS. Without it a silent loop of somebody waving reads as a
+    // stuck camera feed — which is the entire reason the pill is there.
+    //
+    // FITTED, because the labels are not all the same length. At a flat
+    // TYPE.label the longest of them — 'FIRST ON THE BOARD', the one added
+    // this morning for the first score of the day — measured 339px against a
+    // 354px card and pushed its right edge 4px OFF it. Shrinking only the
+    // labels that need it keeps 'NEW RECORD' and '#2 TODAY' at full size.
+    const pillH = vh(v, 4.2);
+    const pillLabel = probe.label || 'HIGHLIGHT';
+    const pillText = w - pad * 4 - pillH * 1.24;
+    labelPill(ctx, v, x + pad * 2, y + pad * 2 + pillH / 2, pillLabel, pillH, {
+      // TRACK.pill for BOTH the fit and the draw. It was '0.14em' twice, a raw
+      // value copied from the replay stamp's pill, and brand.test.ts caught it:
+      // fitText's last argument is the spacing it measures against, and a
+      // literal there is a value that can drift away from the one the draw
+      // uses. Tighter tracking also makes the longest label narrower, which is
+      // spare room the fit no longer has to take out of the type size.
+      size: fitText(ctx, pillLabel, pillText, vh(v, TYPE.label), WEIGHT.bold, FONTS.body, TRACK.pill),
       align: 'left',
       // Yellow is a SURFACE here and the label is ink on top of it. Yellow
       // type on paper is 1.7:1 and BRAND.md rules it out outright.
@@ -551,7 +571,7 @@ export class AttractScreen implements Screen {
       outline: COLORS.ink,
       outlineWidth: vh(v, STROKE.thin),
       shadow: vh(v, SHADOW.base),
-      letterSpacing: '0.14em',
+      letterSpacing: TRACK.pill,
     });
   }
 
