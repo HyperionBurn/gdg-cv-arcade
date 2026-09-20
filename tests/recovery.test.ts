@@ -26,6 +26,8 @@ import {
   recoveryDelayMs,
   recoveryElapsedMs,
   RECOVER_CAP_MS,
+  RECOVER_QUIET_TRIES,
+  cameraBannerText,
 } from '../src/core/camera.ts';
 
 const readme = async (): Promise<string> => {
@@ -134,5 +136,98 @@ describe('the app runs the schedule that is tested', () => {
       /Math\.min\(\s*10000\s*,/,
       'main.ts has an inline backoff again, so the tested function is decoration'
     );
+  });
+
+  /**
+   * Same check for the words. Testing `cameraBannerText` proves nothing if
+   * `main.ts` went back to choosing the string itself — the tested function
+   * would be decoration and the bar on screen could say anything.
+   */
+  test('main.ts asks core/camera for the words too', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/main.ts', 'utf8');
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\/\/.*$/, ''))
+      .join('\n');
+
+    assert.match(code, /cameraBannerText\s*\(/, 'main.ts no longer calls the tested function');
+    assert.doesNotMatch(
+      code,
+      /'<CAMERA LOST/,
+      'main.ts spells a bar out again, so the tested function is decoration',
+    );
+  });
+});
+
+/**
+ * AND THE WORDS ON THE BAR, WHICH ARE THE OTHER HALF OF THE SAME PROMISE.
+ *
+ * The schedule above is guarded because it was an inline expression in
+ * `main.ts` that no test could import. The three STRINGS README's failure
+ * table tells a marshal to act on were sitting in the same file, in the same
+ * shape, unguarded — a ternary nobody could reach. Changing any of them, or
+ * the threshold between them, would have turned the runbook into fiction on
+ * exactly the screen somebody reads when they have no time to read anything.
+ *
+ * The distinction is the whole point: RECONNECTING means "wait, it is already
+ * retrying", PRESS F5 is the admission that waiting has not worked, and
+ * VISION OFFLINE is a different fault with different instructions.
+ */
+describe('the red bar says which fault it is', () => {
+  test('a camera that has just gone says to wait', () => {
+    assert.equal(cameraBannerText('error', 1), '<CAMERA LOST — RECONNECTING>');
+    assert.equal(
+      cameraBannerText('error', RECOVER_QUIET_TRIES),
+      '<CAMERA LOST — RECONNECTING>',
+      'the last quiet try still says wait',
+    );
+  });
+
+  test('a camera that is not coming back asks for a human', () => {
+    assert.equal(cameraBannerText('error', RECOVER_QUIET_TRIES + 1), '<CAMERA LOST — PRESS F5>');
+  });
+
+  /**
+   * The README promises the give-up point is "half a minute". That number and
+   * this threshold are the same fact stated twice, so they are checked
+   * against each other rather than both against a literal.
+   */
+  test('and it waits about half a minute before saying so', () => {
+    const ms = recoveryElapsedMs(RECOVER_QUIET_TRIES + 1);
+    assert.ok(ms >= 25_000 && ms <= 40_000, `gave up after ${ms}ms, not about half a minute`);
+  });
+
+  /**
+   * A dead pose worker is not a dead camera, and the README sends the marshal
+   * somewhere different for it — including that the shell walks itself back to
+   * attract, so the stall is blind rather than frozen.
+   */
+  test('a dead worker is a different bar, whatever the camera is doing', () => {
+    for (const status of ['idle', 'starting', 'live'] as const) {
+      assert.equal(cameraBannerText(status, 99), '<VISION OFFLINE — PRESS F5>', status);
+    }
+  });
+
+  test('the README failure table quotes these three bars exactly', async () => {
+    const { readFile } = await import('node:fs/promises');
+    // The table escapes the angle brackets for Markdown, so compare against
+    // the escaped form rather than stripping it — a bar the README spells
+    // differently is a bar the marshal cannot find.
+    const readme = await readFile('README.md', 'utf8');
+    const bars = [
+      cameraBannerText('error', 1),
+      cameraBannerText('error', RECOVER_QUIET_TRIES + 1),
+      cameraBannerText('live', 0),
+    ];
+    for (const bar of bars) {
+      const escaped = bar.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      assert.ok(
+        readme.includes(escaped),
+        `README's failure table does not mention ${bar}. A bar with no row is ` +
+          'a marshal reading an unfamiliar string with a queue waiting.',
+      );
+    }
   });
 });

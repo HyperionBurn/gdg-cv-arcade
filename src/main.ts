@@ -6,7 +6,7 @@
  * one — and exactly one getUserMedia — camera.ts.
  */
 
-import { camera, recoveryDelayMs } from './core/camera';
+import { camera, recoveryDelayMs, cameraBannerText } from './core/camera';
 import { vision } from './core/vision';
 import { setCameraAspect } from './core/tracker';
 import { audio } from './engine/audio';
@@ -159,16 +159,6 @@ let unhealthySince = -1;
 let recoverAt = 0;
 let recoverTries = 0;
 /**
- * Restarts to attempt before the banner gives up and asks for a human.
- *
- * Six, which with the backoff below is about 31 seconds. A USB blip or an OS
- * device suspend recovers inside the first two; anything still dead after half
- * a minute is a real fault and a marshal needs to know rather than watch a
- * reassuring word.
- */
-const RECOVER_QUIET_TRIES = 6;
-
-/**
  * A DEAD CAMERA LOOKS EXACTLY LIKE AN EMPTY STALL.
  *
  * Attract draws the same "STAND IN FRAME" invitation whether the camera is
@@ -224,12 +214,7 @@ function drawRigHealth(fc: FrameContext): void {
   // Say what is actually happening. RECONNECTING is true for as long as the
   // backoff is still short; PRESS F5 is the admission that it has not worked,
   // and it is only earned after roughly half a minute of trying.
-  const text =
-    cam.status === 'error'
-      ? recoverTries <= RECOVER_QUIET_TRIES
-        ? '<CAMERA LOST — RECONNECTING>'
-        : '<CAMERA LOST — PRESS F5>'
-      : '<VISION OFFLINE — PRESS F5>';
+  const text = cameraBannerText(cam.status, recoverTries);
 
   ctx.save();
   ctx.shadowBlur = 0;

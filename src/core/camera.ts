@@ -74,6 +74,43 @@ export function recoveryElapsedMs(n: number): number {
   return t;
 }
 
+/**
+ * Restarts to attempt before the banner gives up and asks for a human.
+ *
+ * Six, which with the backoff above is about 31 seconds. A USB blip or an OS
+ * device suspend recovers inside the first two; anything still dead after half
+ * a minute is a real fault and a marshal needs to know rather than watch a
+ * reassuring word.
+ */
+export const RECOVER_QUIET_TRIES = 6;
+
+/**
+ * WHICH RED BAR THE MARSHAL IS LOOKING AT.
+ *
+ * This lived as an inline ternary in `main.ts`, which is the exact situation
+ * `recoveryDelayMs` was pulled out of and for the same reason: no test can
+ * import `main.ts`, because it boots the whole app on evaluation. So the three
+ * strings README's failure table tells a marshal to act on were unguarded, and
+ * a change to any of them would have turned the runbook into fiction silently
+ * — on the one screen somebody reads when they have no time to read anything.
+ *
+ * The distinction the words carry is the whole point. RECONNECTING means
+ * "wait, it is already retrying"; PRESS F5 is the admission that waiting has
+ * not worked and is only earned after roughly half a minute. VISION OFFLINE is
+ * a different fault entirely — the pose worker died, not the camera — and the
+ * README gives it different instructions, including that the shell walks
+ * itself back to attract so the stall is blind rather than frozen.
+ */
+export function cameraBannerText(
+  status: 'idle' | 'starting' | 'live' | 'error',
+  recoverTries: number,
+): string {
+  if (status !== 'error') return '<VISION OFFLINE — PRESS F5>';
+  return recoverTries <= RECOVER_QUIET_TRIES
+    ? '<CAMERA LOST — RECONNECTING>'
+    : '<CAMERA LOST — PRESS F5>';
+}
+
 const STORAGE_KEY = 'gdg-arcade:camera-device';
 
 type Listener = (state: CameraState) => void;
