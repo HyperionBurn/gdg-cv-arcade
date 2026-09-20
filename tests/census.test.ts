@@ -137,6 +137,27 @@ const EXPECTED_ABSENT: Record<string, string> = {
   '<RECORD PACE>': 'mid-round, on pace to beat an existing best',
 };
 
+/**
+ * Cues that never played in the recorded census, each with the condition that
+ * would play it. Same rule as the banners: a cue nobody can reach is a
+ * mechanic nobody is testing.
+ *
+ * This list exists because the census collected `audio.play` counts from the
+ * first sweep and nothing ever read them. 18 of the 20 names in `SoundName`
+ * played; the two that did not are both real and both explainable, and
+ * finding that out took driving Red Light by hand.
+ */
+const EXPECTED_SILENT: Record<string, string> = {
+  // Red Light's most dramatic moment, and the simulator is a PERFECT PLAYER:
+  // it freezes on red, so nobody is ever caught. Driven by hand on the 20th
+  // with a body that holds still and then moves only on red, it fired three
+  // times for three racers, so the cue and the mechanic both work.
+  eliminate: 'a racer caught moving on red; the sim freezes correctly and is never caught',
+  // Absent BECAUSE a fix works, exactly like the `<WALL!>` banner: both
+  // drivers duck now. If this starts playing, the duck has regressed.
+  wallhit: 'the runner hits a wall; both drivers duck, so zero is the goal',
+};
+
 interface Census {
   drawn: string[];
   cues: string[];
@@ -289,6 +310,59 @@ describe('every banner the source can draw is accounted for', () => {
     const union = new Set(census.runs.flatMap((r) => r.bracketed));
     for (const s of census.drawn) {
       assert.ok(union.has(s), `${s} is in drawn but in neither run`);
+    }
+  });
+
+  /**
+   * THE CUES, which the census counted from the beginning and nobody read.
+   *
+   * `SoundName` is the complete list of sounds the app can make. Derived from
+   * the union type rather than listed here, so a new cue is checked without
+   * anybody remembering to update this test.
+   */
+  test('every sound the app can make either played or says why not', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/engine/audio.ts', 'utf8');
+    const union = /export type SoundName =([\s\S]*?);/.exec(src);
+    assert.ok(union, 'SoundName is gone or no longer a union');
+
+    const names = [...(union[1] ?? '').matchAll(/'([a-z]+)'/g)].map((m) => m[1] ?? '');
+    assert.ok(names.length >= 15, 'the cue list stopped parsing');
+
+    const census = await loadCensus();
+    const played = new Set(census.cues);
+    const unexplained = names.filter((n) => !played.has(n) && !EXPECTED_SILENT[n]);
+    assert.deepEqual(
+      unexplained,
+      [],
+      'These cues exist but never played in the recorded census and no reason ' +
+        'is written down. A cue that cannot be reached is a mechanic nobody ' +
+        'is testing — that is how the duck input was found missing.',
+    );
+  });
+
+  test('no reason survives a cue starting to play', async () => {
+    const census = await loadCensus();
+    const played = new Set(census.cues);
+    const obsolete = Object.keys(EXPECTED_SILENT).filter((c) => played.has(c));
+    assert.deepEqual(
+      obsolete,
+      [],
+      'These cues now play, so their reason is wrong. This matters most for ' +
+        '`wallhit`: it fires on a wall HIT, and hearing it again means the ' +
+        'duck fix has regressed.',
+    );
+  });
+
+  test('and every silent cue is still a real sound', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/engine/audio.ts', 'utf8');
+    for (const cue of Object.keys(EXPECTED_SILENT)) {
+      assert.ok(
+        src.includes(`case '${cue}'`),
+        `${cue} is excused for never playing but has no implementation either, ` +
+          'so the reason is covering for dead code',
+      );
     }
   });
 });

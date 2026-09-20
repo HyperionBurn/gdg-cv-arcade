@@ -259,6 +259,26 @@ Two of the nineteen were worth chasing past the label, and both paid:
   **zero console errors**. The seat is NOT re-assigned mid-round, which is
   right — re-seating would hand a walk-off's score to whoever stepped in.
 
+**And the CUES, which the census counted from the first sweep and nobody
+read.** 18 of the 20 names in `SoundName` play; both that do not are real and
+both are now in the allowlist beside the banners.
+
+`eliminate` is the interesting one. It is Red Light's most dramatic moment
+and it never fired in any automated run — because the simulator is a PERFECT
+PLAYER. It freezes on red, so nobody is ever caught. Driven by hand with a
+body that holds still and moves only on red, it fired three times for three
+racers, so the cue and the mechanic are both fine.
+
+Worth knowing while you are there: a player in CONSTANT motion is not
+eliminated, and that is deliberate rather than a hole. `calibrateQuiet`
+converges on roughly the 10th percentile of what THAT body does, so somebody
+who never stops raises their own floor — measured mid-round at energy 3.76
+against a learned quiet of 3.06. `quietCeiling` bounds how far that can go.
+The alternative is a fixed threshold, which is what eliminated a motionless
+player ten seconds into every round (FEEDBACK row 11). If a bouncing kid
+proves un-catchable at the rehearsal, **MOVE THRESHOLD** is the knob, and it
+is the one FEEDBACK's Red Light row already names.
+
 Also worth knowing: the brackets are not always what draws. `drawRankLine`
 writes `<FIRST ON THE BOARD>`, and what appears on screen at that moment is
 the instant replay stamp drawing `FIRST ON THE BOARD` unbracketed, 450 times
