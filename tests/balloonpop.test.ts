@@ -191,3 +191,77 @@ describe('a balloon pops on contact, not on a graze', () => {
     );
   });
 });
+
+/**
+ * AND THE GAME HAS TO ASK FOR THE SHELF — row 19 of FEEDBACK.md.
+ *
+ * "The score was behind a balloon for most of every round." The fix is two
+ * halves: an opaque paper shelf with a hard ink rule, and the playfield CULLED
+ * underneath it, because a shelf alone would leave balloons poppable while
+ * hidden.
+ *
+ * The second half is well covered above — `isPoppable` refuses anything past
+ * the shelf. The FIRST half was not covered at all. Found by semantic
+ * mutation: flipping `hudShelf: true` to `false` in this game's config failed
+ * nothing in the suite except the ledger's anchor check, because every test
+ * here passes `shelfBottom` in by hand and none of them asked where the game
+ * gets it from.
+ *
+ * Without the flag `hudBottom()` returns the full-width HUD's band, the shelf
+ * is not drawn, and the score is back over the playfield — the reported bug,
+ * with the cull still faithfully culling against the wrong line.
+ */
+describe('Balloon Pop puts its score on a shelf, not over the playfield', () => {
+  const read = async (f: string): Promise<string> => {
+    const { readFile } = await import('node:fs/promises');
+    return readFile(f, 'utf8');
+  };
+
+  test('the game asks for the shelf HUD', async () => {
+    const src = await read('src/games/balloonpop.ts');
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\/\/.*$/, ''))
+      .join('\n');
+    assert.match(
+      code,
+      /hudShelf:\s*true/,
+      'Balloon Pop no longer requests the shelf, so its score sits over the ' +
+        'playfield again and the cull is measuring against the wrong line'
+    );
+  });
+
+  /**
+   * And the flag has to still MEAN something. If the two HUD layouts ever
+   * converge, the test above is checking a switch with nothing behind it.
+   */
+  test('and the shelf layout really is a different band from the full one', async () => {
+    const src = await read('src/games/base.ts');
+    const bottomOf = (name: string): number => {
+      const at = src.indexOf(`const ${name}: HudMetrics = {`);
+      assert.ok(at >= 0, `${name} is gone from base.ts`);
+      const block = src.slice(at, src.indexOf('};', at));
+      const m = /bottom:\s*(-?\d+(?:\.\d+)?)/.exec(block);
+      assert.ok(m, `${name} has no bottom`);
+      return Number(m[1]);
+    };
+
+    const shelf = bottomOf('HUD_SHELF');
+    const full = bottomOf('HUD_FULL');
+    assert.notEqual(
+      shelf,
+      full,
+      `both HUD layouts end at ${shelf}vh, so hudShelf selects between two ` +
+        `identical bands and the flag is decoration`
+    );
+    // The shelf is the SHALLOWER of the two, and that is the point: a slim
+    // opaque header the playfield slides under, rather than a tall block of
+    // HUD sitting in the middle of the screen the balloons need.
+    assert.ok(
+      shelf < full,
+      `the shelf band ends at ${shelf}vh and the full HUD at ${full}vh. The shelf ` +
+        `is supposed to give the playfield back the screen it was taking`
+    );
+  });
+});
