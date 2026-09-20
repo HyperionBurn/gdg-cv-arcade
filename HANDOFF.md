@@ -151,6 +151,18 @@ here so you can overrule it properly.
   automatically, so the downside is "the reel disappears", not "the stall
   stutters" — but check the `reel` row on `d` after an hour at the rehearsal.
   If it says OFF, this laptop is past the cliff and the reel is not for it.
+
+  **What IS measured, at the real capture cadence:** a grab costs **0.07 ms
+  mean, 0.10 p50, 0.30 max** with 30 ms between grabs. The budget is 4 ms, so
+  there is 57x of headroom — by far the most reassuring number taken this
+  week. Still a hidden dev pane, so re-take it on the booth laptop; but if the
+  buffer sheds there, it will be because of the panel size, not this code.
+
+  **Do not read a shed from a `turn()` sweep as a fault.** The harness
+  fast-forwards a synthetic clock, which used to drive the guard to shed three
+  times in fourteen seconds. `setSynthetic` now suspends cost SAMPLING during a
+  fast-forward (capture keeps running). If you see a shed after a sweep now, it
+  is real.
 - **Perf numbers need re-taking on the real rig.** Every measurement in
   `README.md` was taken in this dev pane. The full-screen blit is fill-rate
   bound and scales with the panel, not with the pane. Re-measure at the
