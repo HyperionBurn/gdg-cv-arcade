@@ -248,6 +248,21 @@ here so you can overrule it properly.
   lanes. Rewriting a measurement to a number nobody measured would falsify the
   record, and `LANES` documents the six-to-five change directly above the
   constant.
+- **The HUD shakes with the playfield, and nothing says whether it should.**
+  `drawHud` is called from inside `juice.pushTransform`, so the clock, the
+  score and the chase line all move with screen shake — up to `height × 0.035`,
+  which is 40px on a 1152 stage. At rest they now sit exactly on the overscan
+  boundary, so a shake carries them past it, and on a panel that crops 3.5% the
+  edge digit of the round timer can clip for those frames. The popups are in
+  the same transform, which is the whole of the residual overflow left after
+  today's clamp work.
+
+  Moving the HUD outside the transform is a two-line change and a real
+  question: information you want readable exactly when things are violent
+  against a HUD that looks detached from a world that is moving. It is a FEEL
+  judgement and a dev pane cannot settle it — look at it on the TV at the
+  rehearsal and decide there.
+
 - **The reel's memory budget wants one real measurement.** Total canvas backing
   store is now 21.2 MB against a cliff measured at roughly 20 MB on THIS
   machine, and a failure measured at 28. The guard sheds the reel first and
