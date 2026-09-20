@@ -565,6 +565,19 @@ export class Tournament {
   addPlayer(initials: string): Player | null {
     if (this._state !== 'lobby') return null;
     if (this.players.length >= MAX_PLAYERS) return null;
+    // A BLANK FIELD IS NOT A PLAYER.
+    //
+    // `normaliseInitials('')` returns 'AAA', so pressing ADD on an empty box
+    // — or leaning on Enter after adding somebody — silently seeded a phantom
+    // entrant. Duplicates are suffixed ('AAA·2'), so it is not ambiguous, but
+    // it IS invisible: the marshal is looking at the field they just cleared,
+    // not at the bottom of the list, and a ghost in the bracket means a real
+    // player draws a bye against somebody who is not at the stall.
+    //
+    // The bracket is also the one store that cannot be reconstructed by asking
+    // people, which is why this is rejected at the model rather than patched
+    // at the one button that happens to call it today.
+    if (!initials.replace(/[^A-Za-z0-9]/g, '')) return null;
 
     const clean = normaliseInitials(initials);
     const dupes = this.players.filter((p) => p.initials === clean).length;

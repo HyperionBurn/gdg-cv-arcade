@@ -787,4 +787,30 @@ describe('Tournament', () => {
     assert.equal(r.next, null);
     assert.equal(r.size, 0);
   });
+
+  /**
+   * A BLANK FIELD IS NOT A PLAYER.
+   *
+   * `normaliseInitials('')` returns 'AAA', so ADD on an empty box seeded a
+   * phantom entrant. It is not ambiguous — duplicates are suffixed, as the
+   * test above shows — but it IS invisible: the marshal is looking at the
+   * field they just cleared, not at the bottom of the list. A ghost in the
+   * bracket means a real player draws a bye against somebody who is not at the
+   * stall, and the bracket is the one store nobody can reconstruct by asking.
+   */
+  test('an entrant with no name is refused', () => {
+    const t = fresh('t:blank');
+    assert.equal(t.addPlayer(''), null);
+    assert.equal(t.addPlayer('   '), null);
+    assert.equal(t.addPlayer('!!!'), null);
+    assert.equal(t.addPlayer('-·-'), null);
+    assert.equal(t.getPlayers().length, 0, 'a blank ADD seeded a phantom entrant');
+  });
+
+  test('but a real name is still added, and still sanitised', () => {
+    const t = fresh('t:blank2');
+    assert.ok(t.addPlayer(' was '));
+    assert.equal(t.getPlayers()[0]!.initials, 'WAS');
+  });
+
 });

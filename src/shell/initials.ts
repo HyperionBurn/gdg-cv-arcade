@@ -660,8 +660,12 @@ export class InitialsScreen implements Screen {
     if (this.submitted) return;
     this.submitted = true;
 
-    const entered = this.letters.join('');
-    const initials = entered.length > 0 ? entered : 'AAA';
+    // No local default. `cleanInitials` in meta/leaderboard.ts is the single
+    // definition of what an initials string is allowed to be, and an empty
+    // entry is one of the cases it defines — it comes back as `ANONYMOUS`.
+    // Substituting a name here meant this file and the board disagreed about
+    // what a skip means, and this file's answer was 'AAA'.
+    const initials = this.letters.join('');
 
     // REACH `done` NO MATTER WHAT `submit` DOES.
     //

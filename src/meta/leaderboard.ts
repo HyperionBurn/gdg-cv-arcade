@@ -109,13 +109,42 @@ function isGameId(k: string): k is GameId {
 }
 
 /**
+ * What the board holds when nobody gave a name.
+ *
+ * IT USED TO BE 'AAA', AND THAT IS A PERSON.
+ *
+ * SKIP makes leaving without a name one dwell instead of a sixteen-second
+ * wait, which is the right call for a queue and was asked for directly in the
+ * playtest — but the cheaper an exit is, the more people take it. Every one of
+ * those wrote 'AAA', and the boards persist across BOTH DAYS. A column of
+ * identical rows reading like somebody called AAA undercuts the exact thing
+ * the leaderboard exists to create, and it does it worst on the morning of day
+ * one, when every board is empty and nearly every score places.
+ *
+ * '---' instead, which is not a new vocabulary: `padEnd(3, '-')` already
+ * writes it, because a deadline-triggered 'W' is stored as 'W--'. So the glyph
+ * already means "nothing was given here" everywhere else on the board.
+ *
+ * WHAT WAS NOT DONE, and why. The alternative was to stop showing the initials
+ * screen at all for a score that cannot place. It would cut queue time and
+ * almost all of these rows — but a skip bypasses the FACTION picker too, so
+ * gating the screen on rank trades every non-placing player's faction
+ * contribution for queue speed, and PLAN.md §4 calls factions the
+ * highest-leverage feature in the doc. That is a trade to make with the
+ * stranger playtest's numbers, not with a guess.
+ */
+export const ANONYMOUS = '---';
+
+/**
  * Three glyphs, A-Z0-9 only. The single definition of what an initials string
  * is allowed to be, applied on the way IN from storage as well as on submit —
  * a loaded entry used to bypass sanitising entirely, so a corrupt store could
  * put a 4KB string or an emoji straight onto the board screen.
+ *
+ * An empty entry falls through to the pad and comes out as `ANONYMOUS`.
  */
 function cleanInitials(raw: string): string {
-  return (raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) || 'AAA').padEnd(3, '-');
+  return raw.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3).padEnd(3, '-');
 }
 
 interface Store {
@@ -372,8 +401,20 @@ class Leaderboard {
     // Always three glyphs. The auto-accept deadline can submit a partial entry,
     // and 'P' sitting in a column of 'GDG' looks like a bug rather than a name.
     const stored = cleanInitials(initials);
+
+    // A PERSONAL BEST NEEDS A PERSON.
+    //
+    // This matches on the initials string, so with one shared anonymous marker
+    // every player who skipped would be told their "personal best" is the best
+    // score any anonymous player has ever set. That was already true of 'AAA'
+    // and is the reason a shared marker has to be excluded here rather than
+    // just renamed: two people who both declined to be named are not the same
+    // person, and telling one of them they beat themselves is a lie the screen
+    // has no way to walk back.
     const personalBest =
-      board.filter((e) => e.initials === stored).reduce((m, e) => Math.max(m, e.score), 0) || null;
+      stored === ANONYMOUS
+        ? null
+        : board.filter((e) => e.initials === stored).reduce((m, e) => Math.max(m, e.score), 0) || null;
 
     const preview = this.previewRank(game, score);
 
@@ -451,6 +492,15 @@ class Leaderboard {
   factionFor(initials: string): Faction | null {
     const key = initials.trim().toUpperCase();
     if (!key) return null;
+    // THE SAME RULE AS `personalBest`: a shared marker is not a person.
+    //
+    // This matches entries by their initials string, so without this line the
+    // anonymous marker would make every player who skipped share one identity
+    // — and the answer returned would be whichever of them played last. The
+    // grid cannot type '-', so nothing reaches this today; it is here because
+    // the invariant is "ANONYMOUS is never a person", and an invariant with one
+    // enforcement point is a coincidence.
+    if (key === ANONYMOUS) return null;
 
     let best: { faction: string; at: number } | null = null;
     for (const board of Object.values(this.store.boards)) {
