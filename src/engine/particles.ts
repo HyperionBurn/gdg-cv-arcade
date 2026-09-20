@@ -86,8 +86,21 @@ export class ParticleSystem {
       this.drag[idx] = opts.drag ?? 0.98;
       this.streak[idx] = opts.streak ? 1 : 0;
       this.colors[idx] = opts.color;
+      // ONLY COUNT A SLOT THAT WAS NOT ALREADY ALIVE.
+      //
+      // `claim()` recycles when the pool is full and hands back an index that
+      // is still live, which is the right call for the look — dropping the
+      // newest particle makes a big effect appear truncated. But that slot is
+      // already in `liveCount`, and counting it twice drifts the total upward
+      // for good, because it is only ever decremented once when it dies.
+      //
+      // MEASURED before the fix: ten thousand emits into a three thousand
+      // slot pool reported 10000 alive, and the pool still claimed 7000 after
+      // every particle had expired. Nothing reads `count` today, which is why
+      // it went unnoticed — and it is exactly the accessor a particle row on
+      // the `d` overlay would use.
+      if (!this.alive[idx]) this.liveCount++;
       this.alive[idx] = 1;
-      this.liveCount++;
     }
   }
 
