@@ -238,7 +238,10 @@ describe('the dev handle reaches the real singletons', () => {
     assert.ok(at > 0, 'the dev handle is gone');
     const block = src.slice(at, src.indexOf('\n  };', at));
 
-    for (const name of ['router', 'camera', 'vision', 'audio', 'simulator', 'highlights', 'tournament']) {
+    for (const name of [
+      'router', 'camera', 'vision', 'audio', 'simulator',
+      'highlights', 'tournament', 'leaderboard', 'tunables', 'ghosts',
+    ]) {
       assert.match(
         block,
         new RegExp('(^|[^\w.])' + name + '\s*,'),

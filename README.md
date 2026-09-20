@@ -464,6 +464,20 @@ All driven deterministically via `window.__arcade.tick()`:
   `tournament.active` is false for every round the stall will ever play, which
   was true when written and stopped being true when the console grew the tab.
 
+- **A locked-down browser profile, 2026-09-20.** The condition the boot probe
+  exists for, forced: `Storage.prototype.setItem` made to throw the way a
+  managed or private profile does, then a score submitted through the operator
+  console.
+
+  The app does not flinch — the submit does not throw, the round keeps its
+  score in memory and the screen carries on. And BOTH readouts say so: the
+  console header shows a red **SCORES NOT SAVING — DO NOT RELOAD** chip, and
+  the `d` overlay carries the same words on its `scores` row.
+
+  Then the part that makes the warning worth obeying: after a reload the entry
+  is gone. That is the whole failure in one line — play continues, ranks look
+  right, and the first F5 throws the morning away.
+
 - **Production build**, `npm run kiosk` on 4173: all four Archivo weights fetch
   and report `loaded`, canvas text measures as Archivo rather than the
   fallback, `?sim=1` and the `d` overlay both work, `window.__arcade` is
