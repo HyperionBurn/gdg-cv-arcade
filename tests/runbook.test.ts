@@ -703,3 +703,81 @@ describe('the dev handle is reachable for sweeps and absent from the build', () 
     assert.match(ignored, /dist-probe/, 'the probe bundle would be committed');
   });
 });
+
+/**
+ * THE MAP OF THE REPO HAS TO MATCH THE REPO.
+ *
+ * README's Layout block is how somebody taking this over orients themselves,
+ * and `ARCHITECTURE.md` is named right underneath it as the contract for
+ * adding a game. It had drifted badly: `meta/` was described as "leaderboard,
+ * factions" when it holds nine modules, `factions` is not a file at all (the
+ * leaderboard owns them), `shell/` was missing four, and `src/dev/` — the
+ * three sweeps that every check in this repo runs through — was absent
+ * entirely.
+ *
+ * A stale map is not a cosmetic problem. Somebody looking for where the round
+ * log lives finds a directory the README says contains two things and
+ * concludes it is not there.
+ *
+ * Directories are the checkable part, so that is what is checked: every one
+ * under `src/` must appear, and nothing may be listed that does not exist.
+ * The prose after each name is a description and is left to a human.
+ */
+describe('README’s layout map matches the source tree', () => {
+  const block = async (): Promise<string> => {
+    const { readFile } = await import('node:fs/promises');
+    // Normalise first: this file is CRLF on disk, and an anchor written with
+    // a bare \n silently matches nothing, which reads as "the block is gone"
+    // rather than as "the anchor is wrong".
+    const readme = (await readFile('README.md', 'utf8')).replace(/\r\n/g, '\n');
+    const at = readme.indexOf('\nsrc/\n');
+    assert.ok(at > 0, "README's layout block is gone");
+    const end = readme.indexOf('```', at);
+    return readme.slice(at, end === -1 ? undefined : end);
+  };
+
+  const dirs = async (): Promise<string[]> => {
+    const { readdir } = await import('node:fs/promises');
+    const out: string[] = [];
+    for (const e of await readdir('src', { withFileTypes: true })) {
+      if (e.isDirectory()) out.push(e.name);
+    }
+    return out.sort();
+  };
+
+  test('every directory under src/ is on the map', async () => {
+    const listed = await block();
+    const missing = (await dirs()).filter((d) => !listed.includes(`${d}/`));
+    assert.deepEqual(
+      missing,
+      [],
+      'these directories exist and the README does not mention them, so ' +
+        'somebody looking for what is inside them concludes it is not there',
+    );
+  });
+
+  test('and nothing is on the map that does not exist', async () => {
+    const listed = await block();
+    const real = new Set(await dirs());
+    const named = [...listed.matchAll(/^ {2}(\w+)\//gm)].map((m) => m[1] ?? '');
+    assert.ok(named.length >= 4, 'the layout block stopped parsing');
+    const ghosts = named.filter((n) => !real.has(n));
+    assert.deepEqual(ghosts, [], 'the README maps directories that are not there');
+  });
+
+  /**
+   * `src/dev` is the one worth naming explicitly. Its modules are the sweeps,
+   * they only exist in the dev and probe builds, and a reader who does not
+   * know that will look for `__arcade` in a production bundle and conclude
+   * the tooling is broken.
+   */
+  test('the map says the dev sweeps are not in the shipped build', async () => {
+    const listed = await block();
+    const line = listed.slice(listed.indexOf('  dev/'));
+    assert.match(
+      line.slice(0, 200),
+      /probe|strips|Dev and probe/i,
+      'the map lists src/dev without saying it is absent from the shipped build',
+    );
+  });
+});

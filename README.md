@@ -288,9 +288,13 @@ second day, and the faction race only means anything if it accumulates.
 > 55MB of models and fonts, and re-downloading it in the hall is exactly what
 > the offline check exists to avoid.
 
-## Rig Check — read this before Sept 18
+## Rig Check — the camera test
 
-This is the tool for the camera test in PLAN.md §8, the **first immovable date**.
+This is the tool for the camera test in PLAN.md §8. That date (Sept 18) has
+passed; the procedure below is the same one to run at the **Sept 22 rehearsal**,
+and it is the only thing that can answer the one open item in HANDOFF.md — the
+game has never met a real camera and two real bodies.
+
 It answers, in the real room:
 
 - **Is the whole body in frame?** Green/red verdict with a specific fix
@@ -310,12 +314,17 @@ mark is the most valuable artefact of the whole test.
 
 ```
 src/
-  core/      camera, MediaPipe worker, tracker, One Euro filter,
-             gestures, blades, simulator
+  core/      camera, MediaPipe worker + vision, tracker + candidates,
+             One Euro filter, gestures, blades, simulator, shared types
+  dev/       turn / smoke / census sweeps. Dev and probe builds only —
+             `vite build` strips the handle they hang off entirely
   engine/    draw, projection, skeleton, juice, particles, procedural audio
-  games/     base (round lifecycle) + 7 games + geometry + poses + runner-world
-  meta/      leaderboard, factions
-  shell/     theme, router, attract, menu, hover, initials, rigcheck
+  games/     base (round lifecycle) + 7 games + geometry, poses, reach,
+             beatmap, runner-world
+  meta/      leaderboard (which owns factions), tournament, ghosts,
+             highlights, tunables, roundlog, storage, games, mode
+  shell/     theme, router, screen, attract, menu, mode, hover, initials,
+             rigcheck, operator, debug
 scripts/     one-time model + font fetch
 tests/       node --test, no browser needed
 ```
