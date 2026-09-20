@@ -343,6 +343,29 @@ const CANCEL_SPEED = 3;
 /* Types                                                               */
 /* ------------------------------------------------------------------ */
 
+/**
+ * What a pending operator mouse click does this frame.
+ *
+ * A marshal needs to drive the screen without walking into frame — row 27 of
+ * FEEDBACK.md. Mouse and keyboard are for the OPERATOR only; nobody in the
+ * queue touches the laptop, which is what makes it safe for a click to commit
+ * AT ONCE with no dwell.
+ *
+ * THE PENDING FLAG IS CLEARED WHETHER OR NOT THE CLICK LANDS. That is the
+ * whole reason this is a function rather than two lines: a click on empty
+ * space that stays pending fires later, on whatever the cursor happens to be
+ * over by then — including a game tile, in front of a queue. It is one deleted
+ * assignment away and reads like a tidy-up.
+ */
+export function resolveOperatorClick(
+  pending: boolean,
+  hovered: { id: string } | null,
+  locked: boolean
+): { commit: string | null; pending: boolean } {
+  if (!pending) return { commit: null, pending: false };
+  return { commit: hovered && !locked ? hovered.id : null, pending: false };
+}
+
 export interface HoverTarget {
   id: string;
   /** Screen-space rect, logical px. */
@@ -600,18 +623,17 @@ export class HoverCursor {
     // Consumed here whether or not it lands on a target, so a click on empty
     // space cannot queue itself up and fire later on whatever the cursor
     // happens to be over — including a game tile, in front of a queue.
-    if (pointer.clickPending) {
-      pointer.clickPending = false;
-      if (hovered && !locked) {
-        this.progress = 0;
-        this.dwellTicks = 0;
-        this.latchedId = hovered.id;
-        committed = hovered.id;
-        this.commitAt = fc.time;
-        this.commitX = x;
-        this.commitY = y;
-        audio.play('select');
-      }
+    const click = resolveOperatorClick(pointer.clickPending, hovered, locked);
+    pointer.clickPending = click.pending;
+    if (click.commit !== null) {
+      this.progress = 0;
+      this.dwellTicks = 0;
+      this.latchedId = click.commit;
+      committed = click.commit;
+      this.commitAt = fc.time;
+      this.commitX = x;
+      this.commitY = y;
+      audio.play('select');
     }
 
     if (!committed && canFill && hovered) {

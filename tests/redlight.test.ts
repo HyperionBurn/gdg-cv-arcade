@@ -19,7 +19,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { judgeRedLight, DEFAULT_REDLIGHT_TUNABLES } from '../src/games/redlight.ts';
+import { judgeRedLight, calibrateQuiet, DEFAULT_REDLIGHT_TUNABLES } from '../src/games/redlight.ts';
 import { tunables } from '../src/meta/tunables.ts';
 
 const FRAME = 1 / 60;
@@ -468,6 +468,136 @@ describe('every Red Light tunable matches the game it tunes', () => {
   test('and each of those carries a reason', () => {
     for (const [field, why] of NOT_EXPOSED) {
       assert.ok(why.length > 15, `${field} is left off the console with no reason given`);
+    }
+  });
+});
+
+/**
+ * "RED LIGHT IS VERY BUGGY" — row 11 of FEEDBACK.md.
+ *
+ * Stillness calibration ran inside a branch that could never be true, so a
+ * player standing perfectly still read 1.95 against a threshold of 0.85 and was
+ * eliminated ten seconds into every round. The whole game, for everybody.
+ *
+ * It had no test. Found by semantic mutation of the ledger's identifier
+ * anchors: pushing `calibrateSec` out of reach — which is the same shape of
+ * failure, a calibration whose result is never trusted — failed nothing in the
+ * suite except the check that FEEDBACK.md still quotes the line.
+ *
+ * Two halves, and the second is the one that actually broke: the statistic has
+ * to be right, and it has to RUN.
+ */
+describe('a still body teaches the game what still looks like', () => {
+  const TUN = { calibrateDown: 0.5, calibrateUp: 4.5 };
+  const step = (quiet: number, energy: number, seconds: number, dtv = 1 / 30): number => {
+    let q = quiet;
+    for (let t = 0; t < seconds; t += dtv) q = calibrateQuiet(q, energy, dtv, TUN);
+    return q;
+  };
+
+  test('it drops quickly toward a body that is holding still', () => {
+    const settled = step(2.0, 0.2, 2.2);
+    assert.ok(
+      settled < 0.5,
+      `after the full ${2.2}s lobby window a motionless body still reads ${settled.toFixed(2)}. ` +
+        `That is the reported bug: standing perfectly still and being eliminated`
+    );
+  });
+
+  /**
+   * And rises SLOWLY, which is the half that makes it a floor rather than an
+   * average. A player who fidgets for a second must not teach the detector
+   * that fidgeting is their "still" — that is a threshold learning to ignore
+   * the one thing it exists to catch.
+   */
+  test('and rises only slowly toward a body that is moving', () => {
+    const down = 2.0 - step(2.0, 0.2, 1);
+    const up = step(0.2, 2.0, 1) - 0.2;
+    assert.ok(
+      down > up * 2,
+      `the calibration moves down ${down.toFixed(2)} and up ${up.toFixed(2)} in the same ` +
+        `second. It is supposed to be far quicker to believe stillness than movement`
+    );
+  });
+
+  test('and a second of fidgeting does not rewrite a learned floor', () => {
+    const learned = step(2.0, 0.2, 2.2);
+    const afterFidget = step(learned, 2.5, 1);
+    assert.ok(
+      afterFidget < learned + 0.5,
+      `one second of movement moved the floor from ${learned.toFixed(2)} to ` +
+        `${afterFidget.toFixed(2)}, which is a detector learning to ignore movement`
+    );
+  });
+
+  test('and it converges rather than overshooting', () => {
+    assert.ok(Math.abs(step(2.0, 0.6, 30) - 0.6) < 0.01);
+    assert.ok(Math.abs(step(0.1, 0.6, 60) - 0.6) < 0.05);
+  });
+});
+
+/**
+ * AND IT HAS TO RUN, which is what actually broke.
+ *
+ * `onPreTick` is the lobby pass — the room's noise floor measured on every body
+ * in frame BEFORE anybody can be eliminated by it. The base class calls it in
+ * `gathering` and `countdown` and nowhere else, and those two states are the
+ * entire window the calibration has. Red Light's lobby is ten seconds of
+ * gathering plus the countdown; drop the gathering call and all that is left is
+ * a countdown barely longer than `calibrateSec`.
+ */
+describe('the lobby pass actually runs', () => {
+  const codeOf = (src: string): string =>
+    src
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\/\/.*$/, ''))
+      .join('\n');
+
+  test('Red Light calibrates inside its lobby pass', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const code = codeOf(await readFile('src/games/redlight.ts', 'utf8'));
+    const at = code.indexOf('protected onPreTick(');
+    assert.ok(at >= 0, 'Red Light no longer has a lobby pass at all');
+    const end = code.indexOf('\n  protected ', at + 10);
+    const body = code.slice(at, end > at ? end : undefined);
+    assert.match(
+      body,
+      /this\.calibrate\(c, dtv\)/,
+      'the lobby pass no longer calibrates, so every player is judged by the ' +
+        'absolute floor and a still body reads as movement'
+    );
+
+    // And `calibrate` has to feed it the OBSERVED energy. A call that is
+    // present but handed the wrong argument is the same bug wearing the right
+    // shape — the statistic above would still be correct and still be useless.
+    assert.match(
+      code,
+      /c\.quiet = calibrateQuiet\(c\.quiet, c\.energy, dtv, this\.tun\)/,
+      'calibrate no longer feeds the observed energy into the statistic, so the ' +
+        'floor it learns is not this body'
+    );
+  });
+
+  test('and the base class calls that pass in BOTH lobby states', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const code = codeOf(await readFile('src/games/base.ts', 'utf8'));
+
+    for (const state of ['gathering', 'countdown']) {
+      const at = code.indexOf(`case '${state}':`);
+      assert.ok(at >= 0, `the ${state} state is gone`);
+      // Bounded by the NEXT case, not by a character count. A fixed window
+      // spills into the following branch: with 400 chars this found the
+      // countdown's call while checking `gathering`, and passed with the
+      // gathering call deleted.
+      const next = code.indexOf("case '", at + 8);
+      const chunk = code.slice(at, next > at ? next : at + 400);
+      assert.match(
+        chunk,
+        /this\.onPreTick\?\.\(/,
+        `the ${state} state no longer runs the lobby pass, so the calibration ` +
+          `window is shorter than the calibration needs`
+      );
     }
   });
 });

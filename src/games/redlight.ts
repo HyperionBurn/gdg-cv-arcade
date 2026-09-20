@@ -508,6 +508,35 @@ export function bannerWord(light: 'red' | 'green'): string {
   return light === 'red' ? '<FREEZE>' : '<PUMP>';
 }
 
+/**
+ * One step of a body's stillness calibration.
+ *
+ * ASYMMETRIC ON PURPOSE, and that asymmetry is the whole statistic. It falls
+ * toward a lower reading fast (`calibrateDown`) and rises toward a higher one
+ * slowly (`calibrateUp`), so the value converges on roughly the 10th percentile
+ * of what this body does rather than on its mean. A player who fidgets for a
+ * second while the lobby watches must not teach the game that fidgeting is what
+ * their "still" looks like — that is a threshold learning to ignore the thing
+ * it exists to catch.
+ *
+ * Reported as "red light is very buggy": this calibration ran inside a branch
+ * that could never be true, so a player standing perfectly still read 1.95
+ * against a threshold of 0.85 and was eliminated ten seconds into every round.
+ * Row 11 of FEEDBACK.md.
+ *
+ * Exported and pure so both halves can be checked — that the statistic is the
+ * one described, and separately that it is actually REACHED.
+ */
+export function calibrateQuiet(
+  quiet: number,
+  energy: number,
+  dtv: number,
+  tun: { calibrateDown: number; calibrateUp: number }
+): number {
+  const tau = energy < quiet ? tun.calibrateDown : tun.calibrateUp;
+  return quiet + (energy - quiet) * (1 - Math.exp(-dtv / tau));
+}
+
 export function laneScore(racers: Iterable<ScorableRacer>, slot: number): number {
   for (const r of racers) {
     if (r.lane !== slot) continue;
@@ -1163,8 +1192,7 @@ export class RedLightGame extends GameBase {
    * the elimination threshold should be a multiple of.
    */
   private calibrate(c: Calib, dtv: number): void {
-    const tau = c.energy < c.quiet ? this.tun.calibrateDown : this.tun.calibrateUp;
-    c.quiet += (c.energy - c.quiet) * (1 - Math.exp(-dtv / tau));
+    c.quiet = calibrateQuiet(c.quiet, c.energy, dtv, this.tun);
   }
 
   /**

@@ -26,7 +26,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { HoverCursor, DWELL } from '../src/shell/hover.ts';
+import { HoverCursor, DWELL, resolveOperatorClick } from '../src/shell/hover.ts';
 import { PoseTracker, type TrackedPlayer } from '../src/core/tracker.ts';
 import { POSE } from '../src/core/types.ts';
 import type { RawPose } from '../src/core/types.ts';
@@ -398,5 +398,66 @@ describe('a menu pick takes a deliberate hold', () => {
       `dwell times are ${DWELL.deliberate} / ${DWELL.standard} / ${DWELL.fast}; a menu ` +
         `tile must be the slowest and a letter the quickest`
     );
+  });
+});
+
+/**
+ * THE MARSHAL DRIVES THE SCREEN WITHOUT WALKING INTO FRAME — row 27.
+ *
+ * Mouse and keyboard are for the OPERATOR only. Nobody in the queue touches
+ * the laptop, which is what makes it safe for a click to commit AT ONCE with
+ * no dwell — a marshal fixing something mid-queue cannot stand in front of the
+ * camera to do it, because they would become a player.
+ *
+ * No test. Found by semantic mutation of the ledger's identifier anchors:
+ * deleting the line that consumes the pending click failed nothing in the suite
+ * except the check that FEEDBACK.md still quotes the anchor.
+ */
+describe('an operator click commits at once, and only once', () => {
+  test('a click on a live target commits it immediately', () => {
+    const r = resolveOperatorClick(true, { id: 'runner' }, false);
+    assert.equal(r.commit, 'runner', 'an operator click no longer selects anything');
+    assert.equal(r.pending, false);
+  });
+
+  /**
+   * THE HAZARD. A click on empty space that stays pending fires later, on
+   * whatever the cursor happens to be over by then — including a game tile,
+   * in front of a queue. So it is consumed whether or not it lands.
+   */
+  test('and a click on empty space is spent, not queued', () => {
+    const r = resolveOperatorClick(true, null, false);
+    assert.equal(r.commit, null, 'clicking nothing selected something');
+    assert.equal(
+      r.pending,
+      false,
+      'a click on empty space stayed pending. It will fire on whatever the ' +
+        'cursor is over next, which is how a marshal launches a game by accident'
+    );
+  });
+
+  test('and a click on a locked target is spent too', () => {
+    const r = resolveOperatorClick(true, { id: 'photobooth' }, true);
+    assert.equal(r.commit, null, 'a locked tile was launched by a click');
+    assert.equal(r.pending, false, 'the click survived a locked tile and will fire later');
+  });
+
+  test('and no click commits nothing', () => {
+    assert.deepEqual(resolveOperatorClick(false, { id: 'runner' }, false), {
+      commit: null,
+      pending: false,
+    });
+  });
+
+  /** And the cursor still routes its clicks through it. */
+  test('the cursor resolves its clicks through that helper', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const code = (await readFile('src/shell/hover.ts', 'utf8'))
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\/\/.*$/, ''))
+      .join('\n');
+    assert.match(code, /resolveOperatorClick\(pointer\.clickPending,/, 'the click handling is inline again');
+    assert.match(code, /pointer\.clickPending = click\.pending;/, 'the pending flag is no longer written back');
   });
 });
