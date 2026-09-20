@@ -610,6 +610,10 @@ describe('Fruit Ninja asks for a clip on a big chain', () => {
       .map((l) => l.replace(/\/\/.*$/, ''))
       .join('\n');
     assert.match(code, /this\.captureMoment\s*\(/, 'nothing in Fruit Ninja asks for a clip');
-    assert.match(code, /chain\s*>=\s*4/, 'the chain threshold for a clip is gone');
+    // Three, not four: measured, a quad never happens at all with the
+    // simulator's blade (DOUBLE 2120 frames, TRIPLE 320, QUAD 0), so a
+    // higher line is dead code that looks implemented. Three is also where
+    // `celebrateAt` already fires, so the clip agrees with the confetti.
+    assert.match(code, /chain\s*>=\s*3/, 'the chain threshold for a clip is gone');
   });
 });

@@ -243,8 +243,10 @@ Rolling ~8s frame buffer. On a top-5 score or a big combo, export a clip. No ema
 > one capture, at the end of a round, if the score placed. That is common on
 > the morning of day one when every board is empty and RARE by the afternoon
 > once they fill — so a reel fed by scores alone goes stale exactly as the hall
-> gets busy. Fruit Ninja now asks for a clip past a quad chain, which can
-> happen at any time regardless of the board. Mid-round captures are spaced,
+> gets busy. Fruit Ninja now asks for a clip on a TRIPLE chain or better,
+> which can happen at any time regardless of the board — measured, a quad
+> never happens at all with the simulator's blade, and three is where the
+> game already fires confetti. Mid-round captures are spaced,
 > and refused near the end of a round, because `capture()` swaps atlases and
 > would otherwise leave the END-of-round replay with no footage.
 

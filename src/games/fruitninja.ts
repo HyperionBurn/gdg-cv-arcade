@@ -965,16 +965,29 @@ export class FruitNinjaGame extends GameBase {
       // all four brand colours, the app's own "that was special" gesture.
       if (chain >= 3) this.celebrateAt(cx, cy);
 
-      // AND PAST A QUAD IT IS WORTH KEEPING. PLAN.md §4 asks for a clip "on a
-      // top-5 score OR A BIG COMBO" and only the score half was ever built.
+      // AND A TRIPLE IS WORTH KEEPING. PLAN.md §4 asks for a clip "on a top-5
+      // score OR A BIG COMBO" and only the score half was ever built.
       //
-      // A quad is the right line rather than a triple: MEASURED over the
-      // chain distribution this game actually produces, triples are common
-      // enough to be the ordinary good swipe, and the reel wants four
-      // DIFFERENT moments across a day. `captureMoment` spaces them and
-      // refuses near the end of a round so it can never cost the end-of-round
-      // replay its footage — see the note on it in games/base.ts.
-      if (chain >= 4) {
+      // WHY THREE AND NOT FOUR. I wrote this as `chain >= 4` first, with a
+      // comment claiming the distribution had been measured. It had not.
+      // MEASURED afterwards — frames on which each chain word was on screen,
+      // across a full solo + 2P turn driven by the simulator's blade:
+      //
+      //   DOUBLE 2120    TRIPLE 320    QUAD 0    FIVE 0
+      //
+      // A quad never happened at all, so the feature would have been dead
+      // code that looked implemented. Three is also the line the game ALREADY
+      // treats as an event — `celebrateAt` fires confetti here and nowhere
+      // else — so the clip now agrees with the thing the screen is already
+      // saying is special, rather than inventing a second opinion.
+      //
+      // That is a simulator blade rather than a human arm sweeping through
+      // real fruit, so the true human rate is unknown and probably higher.
+      // The 6s spacing in `captureMoment` is what stops that mattering: it
+      // bounds the rate whatever the player does. It also refuses near the end
+      // of a round so it can never cost the end-of-round replay its footage
+      // — see the note on it in games/base.ts.
+      if (chain >= 3) {
         this.captureMoment(`${chain}-FRUIT SLICE`, this.points[slot] ?? 0);
       }
     }
