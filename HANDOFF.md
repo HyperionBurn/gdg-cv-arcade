@@ -396,9 +396,20 @@ to 525px, because `withTilt` ROTATES some elements and a naive
 `left + width * scaleX` means nothing under rotation.
 
 Three attempts, three answers, none trustworthy. The app was not the
-unreliable thing. If you re-run this, project all four corners through the
-full matrix rather than an axis-aligned box, and do not report a number until
-two independent methods agree.
+unreliable thing.
+
+**So the arithmetic is a module now, not advice.** `src/dev/layout.ts` has
+`textBounds` (four corners through the full matrix), `overflowOf` (worst edge,
+with an overscan inset) and `drawnVh` (size AFTER the transform, so a popup
+mid-pop reads as genuinely small). `tests/layout.test.ts` covers the three
+mistakes directly: a translate that was ignored, a rotation that an
+axis-aligned box cannot describe, and a nominal size read instead of a drawn
+one.
+
+Mutating it earned its keep immediately. Projecting only the two OPPOSITE
+corners passed every test in the file — it reports a 56.6-wide box where the
+true one is 84.9 — because the assertions said "narrower and taller" rather
+than naming the numbers. The 45-degree case pins exact bounds now.
 
 **And the size floor is not 3vh.** `MIN_LEGIBLE` is 3, but `TYPE.body` is 2.8
 BY DESIGN — the constant is "the smallest a stranger is ever asked to read"
