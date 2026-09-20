@@ -309,14 +309,30 @@ interface Popup {
 /**
  * Half the width a popup will occupy, without a canvas to measure against.
  *
- * `spawn` has no ctx, and the alternative — measuring at draw time — is too
- * late, because by then the position is already committed. 0.56em per glyph is
- * the measured average for Archivo Black across the digits and capitals these
- * strings are made of; it only has to be close enough to decide whether two
- * labels are in each other's way.
+ * `spawn` has no ctx. The note here used to say measuring at draw time is "too
+ * late, because by then the position is already committed" — which was only
+ * true because the clamp lived in `spawn`. It does not any more: `draw`
+ * measures and clamps exactly, and this is left for the SEPARATION test, where
+ * being roughly right is the whole job.
+ *
+ * 0.68, not 0.56. MEASURED in the browser against Archivo at the sizes these
+ * popups actually use, 0.56em per glyph is 14-31% too small on every string in
+ * the app — it is the average for digits and capitals and these strings are
+ * full of brackets, spaces and exclamation marks, and they are drawn with
+ * letter spacing on top:
+ *
+ *   <BLADES OUT!>  est 246  real 299   x1.22
+ *   <DOUBLE!>      est 217  real 275   x1.27
+ *   GOTCHA!        est  90  real 118   x1.31
+ *   x5             est  31  real  36   x1.18
+ *
+ * 0.68 is 0.56 x 1.22, the mean of those. Under-reserving here does not put a
+ * word off the screen any more, but it does let two labels that overlap slip
+ * past the separation check and land on each other — which is the smear this
+ * function exists to prevent.
  */
 function estimateHalfWidth(text: string, size: number): number {
-  return (text.length * size * 0.56) / 2;
+  return (text.length * size * 0.68) / 2;
 }
 
 /** Floating "+3", "COMBO x4", "MISS" text at the point of impact. */
@@ -411,21 +427,18 @@ export class PopupLayer {
     // stroke the draw adds (`lineWidth = size * 0.17`, so half of that each
     // side) plus a little air, so the text is not welded to the bezel.
     //
-    // RESERVED AT THE POP-IN WIDTH, not the settled one.
+    // A FIRST APPROXIMATION ONLY. The real clamp is in `draw`, where the width
+    // can be MEASURED — `estimateHalfWidth` is 14-31% too small on every popup
+    // string in this app, and clamping against it is what let `<BLADES OUT!>`
+    // reach x = -45 on a 1536-wide stage.
     //
-    // This used to reserve the settled width on the argument that the
-    // overshoot is brief. Measured, it was not brief enough: 'TOO SLOW!'
-    // spawned 35px in reached -62.6 — the clamp was defeated for eight frames
-    // by the pop, which is precisely the Red Light elimination case it was
-    // added for. The old argument was that reserving the peak would shove
-    // every edge popup a long way from its subject, and at 1.9x it would
-    // have. At POP_PEAK it costs 26.5px more than reserving the settled width
-    // (81.0 -> 107.5 for 'TOO SLOW!' at size 30) against a word 151px wide, so
-    // the taunt still lands squarely over the racer it names — which is the
-    // only thing the position has to achieve.
+    // This one still earns its place: the separation loop below compares
+    // spawn positions, so a popup that will be moved at draw time has to be
+    // moved here too, or two labels that end up on top of each other never
+    // get staggered apart. Approximate is the whole job here; exact is `draw`.
     let safeX = x;
     if (this.width > 0) {
-      const half = halfW * POP_PEAK + size * 0.18;
+      const half = halfW + size * 0.18;
       // Narrower than the word itself: centre it and accept the overflow,
       // rather than letting the two clamps fight and pick an arbitrary side.
       safeX = this.width < half * 2 ? this.width / 2 : Math.min(Math.max(x, half), this.width - half);
@@ -484,11 +497,60 @@ export class PopupLayer {
 
       ctx.save();
       ctx.globalAlpha = alpha;
-      ctx.translate(p.x, p.y);
-      ctx.scale(scale, scale);
       ctx.font = `900 ${p.size}px ${font}`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
+
+      // THE EDGE CLAMP BELONGS HERE, NOT IN `spawn`.
+      //
+      // `spawn` has no context, so it clamped against `estimateHalfWidth` —
+      // `length * size * 0.56`. MEASURED against the real thing for every
+      // popup string in the app, that estimate is 14-31% TOO SMALL:
+      //
+      //   <BLADES OUT!>  est 246  real 299   x1.22
+      //   <DOUBLE!>      est 217  real 275   x1.27
+      //   GOTCHA!        est  90  real 118   x1.31
+      //   x5             est  31  real  36   x1.18
+      //
+      // So the clamp reserved about a fifth too little and the word still ran
+      // off: `<BLADES OUT!>` was drawn at x = -45 on a 1536-wide stage, which
+      // is the exact bug the clamp was added for this morning, one size down.
+      //
+      // Here the width is MEASURED and the pop scale is already known, so the
+      // guarantee is exact rather than approximate. `spawn` keeps the estimate
+      // for its vertical stagger, where being roughly right is the whole job.
+      //
+      // AND THE POP IS DAMPED AT THE EDGE RATHER THAN THE POSITION BEING
+      // PUSHED FURTHER IN.
+      //
+      // Clamping per frame against the SCALED width does keep the word on
+      // screen, but the popup then slides sideways as it settles — new motion,
+      // on the one label that is supposed to sit on the thing it names.
+      // Clamping against the scaled width ONCE has a worse problem: with the
+      // real width, `TOO SLOW!` needs its centre at 129.6 to survive the peak
+      // and at most 127.2 to still cover a racer 35px from the edge. Those do
+      // not overlap. It is infeasible by 2.4px, so one of them has to go.
+      //
+      // The pop goes. It is decoration; covering the right racer is the entire
+      // function of an elimination taunt, and this is the moment the game
+      // speaks directly to the person who just went out. So the position is
+      // clamped against the SETTLED width, which is stable, and the overshoot
+      // is capped at whatever the remaining room allows — which is a full pop
+      // everywhere except hard against an edge, and no pop exactly where a pop
+      // would push the word off the screen.
+      const halfSettled = ctx.measureText(p.text).width / 2 + p.size * 0.17;
+      let drawX = p.x;
+      let drawScale = scale;
+      if (this.width > 0) {
+        drawX =
+          this.width < halfSettled * 2
+            ? this.width / 2
+            : Math.min(Math.max(p.x, halfSettled), this.width - halfSettled);
+        const room = Math.min(drawX, this.width - drawX);
+        if (halfSettled > 0) drawScale = Math.min(scale, room / halfSettled);
+      }
+      ctx.translate(drawX, p.y);
+      ctx.scale(drawScale, drawScale);
 
       // PAPER KNOCKOUT, then the hard ink shadow, then the glyphs.
       //

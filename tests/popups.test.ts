@@ -22,12 +22,35 @@ import { PopupLayer } from '../src/engine/juice.ts';
 const SIZE = 30;
 const WIDE = 1920;
 
-/** Mirrors `estimateHalfWidth` in juice.ts — the same guess the clamp uses. */
-const halfOf = (text: string, size = SIZE): number => (text.length * size * 0.56) / 2;
+/**
+ * HOW MUCH WIDER THE REAL GLYPHS ARE THAN `estimateHalfWidth` GUESSES.
+ *
+ * `spawn` has no context, so it guessed `length * size * 0.56`. MEASURED in
+ * the browser against Archivo at the sizes these popups actually use, that is
+ * 14-31% too small on every string in the app:
+ *
+ *   <BLADES OUT!>  est 246  real 299   x1.22
+ *   <DOUBLE!>      est 217  real 275   x1.27
+ *   GOTCHA!        est  90  real 118   x1.31
+ *   x5             est  31  real  36   x1.18
+ *
+ * So the fake below deliberately reports a width the ESTIMATE WOULD GET
+ * WRONG. A clamp that still relies on the guess cannot pass these tests; only
+ * one that measures can.
+ */
+const REAL_RATIO = 1.22;
+
+/** The real drawn half-width, which is what has to stay on screen. */
+const halfOf = (text: string, size = SIZE): number =>
+  (text.length * size * 0.56 * REAL_RATIO) / 2;
+
+/** What `spawn`'s context-free guess would have said. Kept to show the gap. */
+const guessedHalfOf = (text: string, size = SIZE): number => (text.length * size * 0.56) / 2;
 
 /** The layer keeps its pool private; the draw is the only public read. */
 const spawnedAt = (layer: PopupLayer): Array<{ x: number; text: string }> => {
   const out: Array<{ x: number; text: string }> = [];
+  let fontSize = SIZE;
   const ctx = {
     save() {},
     restore() {},
@@ -40,8 +63,10 @@ const spawnedAt = (layer: PopupLayer): Array<{ x: number; text: string }> => {
       if (last && !last.text) last.text = t;
     },
     fillText() {},
-    measureText: () => ({ width: 0 }),
-    set font(_v: string) {},
+    measureText: (t: string) => ({ width: t.length * fontSize * 0.56 * REAL_RATIO }),
+    set font(v: string) {
+      fontSize = Number(/(\d+(?:\.\d+)?)px/.exec(v)?.[1] ?? SIZE);
+    },
     set textAlign(_v: string) {},
     set textBaseline(_v: string) {},
     set globalAlpha(_v: number) {},
@@ -235,7 +260,7 @@ describe('a popup is on screen for every frame it exists', () => {
         right = Math.max(right, tx + hw);
       },
       fillText() {},
-      measureText: () => ({ width: 0 }),
+      measureText: (t: string) => ({ width: t.length * SIZE * 0.56 * REAL_RATIO }),
       set font(_v: string) {}, set textAlign(_v: string) {}, set textBaseline(_v: string) {},
       set globalAlpha(_v: number) {}, set lineJoin(_v: string) {}, set miterLimit(_v: number) {},
       set lineWidth(_v: number) {}, set strokeStyle(_v: string) {}, set fillStyle(_v: string) {},
@@ -287,5 +312,76 @@ describe('a popup is on screen for every frame it exists', () => {
       `the taunt sits at ${placed.toFixed(1)} ± ${hw.toFixed(1)} and no longer ` +
         `covers the racer at 35 — it is naming empty floor`
     );
+  });
+});
+
+
+/**
+ * THE SEPARATION CHECK IS THE ONE THING THE ESTIMATE STILL DECIDES.
+ *
+ * `draw` measures and clamps exactly now, so an under-reserving estimate no
+ * longer pushes a word off the screen. It still decides whether two labels are
+ * considered to be in each other's way — and under-reserving there lets two
+ * that really do overlap slip past the check and land on each other, which is
+ * the smear the separation exists to prevent.
+ *
+ * These two spawn 130px apart at size 30. `GOTCHA!` is 7 glyphs:
+ *
+ *   at 0.56em  half = 58.8   sum 117.6   130 > 117.6  ->  NOT staggered
+ *   at 0.68em  half = 71.4   sum 142.8   130 < 142.8  ->  staggered
+ *
+ * So this gap is chosen to sit between the guess and the truth. It is the
+ * only place the constant is observable, and without it the estimate can be
+ * reverted with every test still green — which is exactly what happened when
+ * this was mutated.
+ */
+describe('the separation check uses a width that is not too small', () => {
+  test('two labels that really overlap are staggered apart', () => {
+    const layer = new PopupLayer();
+    layer.width = WIDE;
+    layer.spawn('GOTCHA!', 500, 400, '#ea4335', SIZE);
+    layer.spawn('GOTCHA!', 630, 400, '#ea4335', SIZE);
+
+    const ys: number[] = [];
+    const ctx = {
+      save() {}, restore() {},
+      translate(_x: number, y: number) { ys.push(y); },
+      scale() {}, strokeText() {}, fillText() {},
+      measureText: (t: string) => ({ width: t.length * SIZE * 0.56 * REAL_RATIO }),
+      set font(_v: string) {}, set textAlign(_v: string) {}, set textBaseline(_v: string) {},
+      set globalAlpha(_v: number) {}, set lineJoin(_v: string) {}, set miterLimit(_v: number) {},
+      set lineWidth(_v: number) {}, set strokeStyle(_v: string) {}, set fillStyle(_v: string) {},
+    } as unknown as CanvasRenderingContext2D;
+    layer.draw(ctx, 'Archivo');
+
+    assert.equal(ys.length, 2, 'both popups should be drawn');
+    assert.notEqual(
+      ys[0],
+      ys[1],
+      `both labels sit at y=${ys[0]}. 130px apart at size 30 they overlap by ` +
+        `13px of real glyphs, and the separation check missed it — the width ` +
+        `estimate is back to one that is too small`
+    );
+  });
+
+  /** And two that genuinely do not overlap are left where they were put. */
+  test('but two that are clear of each other are not moved', () => {
+    const layer = new PopupLayer();
+    layer.width = WIDE;
+    layer.spawn('GOTCHA!', 400, 400, '#ea4335', SIZE);
+    layer.spawn('GOTCHA!', 900, 400, '#ea4335', SIZE);
+
+    const ys: number[] = [];
+    const ctx = {
+      save() {}, restore() {},
+      translate(_x: number, y: number) { ys.push(y); },
+      scale() {}, strokeText() {}, fillText() {},
+      measureText: (t: string) => ({ width: t.length * SIZE * 0.56 * REAL_RATIO }),
+      set font(_v: string) {}, set textAlign(_v: string) {}, set textBaseline(_v: string) {},
+      set globalAlpha(_v: number) {}, set lineJoin(_v: string) {}, set miterLimit(_v: number) {},
+      set lineWidth(_v: number) {}, set strokeStyle(_v: string) {}, set fillStyle(_v: string) {},
+    } as unknown as CanvasRenderingContext2D;
+    layer.draw(ctx, 'Archivo');
+    assert.equal(ys[0], ys[1], 'a popup 500px away was staggered for nothing');
   });
 });
