@@ -431,3 +431,45 @@ describe('no slider is running on an invented range', () => {
     );
   });
 });
+
+
+/**
+ * THE HIT RADIUS IS ON THE RISK TABLE NOW, SO IT IS A CLAIM LIKE THE REST.
+ *
+ * It is the one Rhythm constant a tester's words produced directly, and until
+ * 2026-09-20 it had no declared slider at all — so the playtest it exists for
+ * could not retune it without a rebuild. The row states both the value and the
+ * cliff, and both are derived from the code.
+ */
+describe('the hit radius row is the code', () => {
+  test('the README quotes the value the game ships', async () => {
+    const md = await readme();
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/games/rhythm.ts', 'utf8');
+
+    const stated = /`HIT_RADIUS_TORSOS = ([\d.]+)`/.exec(md);
+    assert.ok(stated, 'the README stopped quoting the hit radius');
+    const real = /^const HIT_RADIUS_TORSOS = ([\d.]+);/m.exec(src);
+    assert.ok(real, 'HIT_RADIUS_TORSOS is gone from rhythm.ts');
+    assert.equal(Number(stated[1]), Number(real[1]));
+  });
+
+  /**
+   * The cliff the row is about: the slider must stop below the measured gap
+   * between the nearest two targets, or the report that produced the constant
+   * comes back through the console.
+   */
+  test('and the slider it names stops below the cliff it names', async () => {
+    const md = await readme();
+    const gap = /sit \*\*([\d.]+)\*\* apart/.exec(md);
+    assert.ok(gap, 'the README stopped stating the target spacing');
+
+    const spec = tunables.list().find((t) => t.key === 'rhythm.hitRadiusTorsos');
+    assert.ok(spec, 'PUNCH REACH is not a slider');
+    assert.ok(
+      spec.max < Number(gap[1]),
+      `the README says targets are ${gap[1]} apart and the slider goes to ` +
+        `${spec.max}. A marshal can drag it into the state the playtest complained about.`
+    );
+  });
+});
