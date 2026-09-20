@@ -50,7 +50,7 @@
  * the stripe, against a wash that covered 100% at roughly a fifth of one.
  * Saturated area beats tinted area for pop-out at distance, it survives a
  * badly calibrated panel, and it carries the instruction — `<FREEZE>` /
- * `<MOVE>` in ink at 8.6vh — instead of a ghost word nobody could read. See
+ * `<PUMP>` in ink at 8.6vh — instead of a ghost word nobody could read. See
  * `onRenderBackground` and `drawBanner`.
  */
 
@@ -1465,7 +1465,7 @@ export class RedLightGame extends GameBase {
    *
    * The replacement is three flat, fully saturated, full-opacity shapes:
    *
-   *   1. the `<FREEZE>` / `<MOVE>` band — full-bleed, ~13vh tall (drawBanner)
+   *   1. the `<FREEZE>` / `<PUMP>` band — full-bleed, ~13vh tall (drawBanner)
    *   2. this stripe under the lanes — full-bleed, ~3vh tall
    *   3. the doll's dress (drawDoll)
    *

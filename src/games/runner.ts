@@ -116,7 +116,46 @@ import {
  * AND applies a temporary speed penalty on top, so the cost of a collision is
  * obvious without a word of text: the number stops climbing.
  */
-const STREAK_CAP = 12;
+/**
+ * Clean rows to reach MAX SPEED. 12 -> 8.
+ *
+ * TWELVE WAS THE CEILING ITSELF, so nobody could ever reach it.
+ *
+ * MEASURED, solo, full 60s rounds, counting scoring rows (breathers excluded)
+ * with momentum forced to MAX for the whole round — the most rows a round can
+ * possibly contain:
+ *
+ *   10, 10, 7, 17      mean 11, min 7, max 17
+ *
+ * The spread is the generator's breather placement, and it is the whole point:
+ * a cap of 12 is above the MEAN of the best case. A real run also starts at
+ * momentum 1 and accelerates as the streak builds, so it sees fewer rows than
+ * any of those numbers. Reaching 12 therefore needs a lucky long round AND a
+ * flawless one, and in a typical round the `<MAX SPEED>` popup never fires,
+ * the `record` sting never plays, and the top of the momentum curve is never
+ * felt by anybody.
+ *
+ * I FIRST MEASURED THIS ONCE and got 12 exactly, which made a tidy story about
+ * the cap sitting precisely on the ceiling. The next round produced 17. One
+ * sample of a generator with this much variance is not a measurement, and the
+ * tidiness of the first answer is what made it convincing.
+ *
+ * Found by counting which on-screen strings never get drawn across a full
+ * seven-game sweep. `<MAX SPEED>` was one of thirteen, and the only one that
+ * turned out to be unreachable by construction rather than merely rare.
+ *
+ * Eight sits below the min of that best case, so it is reachable in a short
+ * round as well as a long one, and still leaves rows to enjoy it on a good
+ * run. It also makes
+ * each clean row worth MORE speed — `MOMENTUM_PER_STREAK` divides by this — so
+ * the thing the comment below calls "the most legible reward a runner has"
+ * gets more legible, and a hit costs more visibly.
+ *
+ * This is a game-feel number on the one game PLAN.md pre-authorises cutting,
+ * so confirm it with people at the Sept 21 go/no-go rather than taking a
+ * simulator's word for it.
+ */
+const STREAK_CAP = 8;
 const MOMENTUM_PER_STREAK = (MOMENTUM_MAX - 1) / STREAK_CAP;
 /** Instant speed cost of a hit, on top of losing the streak. */
 const HIT_PENALTY = 0.4;

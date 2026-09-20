@@ -657,6 +657,17 @@ PLAN.md §3 flags the Runner as most likely to be cut. The build is good, but th
 jump window is **0.37–0.45s minus 0.10s of unavoidable detection latency**, which
 is rhythm-game tight for a body under hall lighting.
 
+**Also confirm the streak cap with people.** `STREAK_CAP` was 12 and is now
+**8**. Measured over full 60s rounds with momentum forced to MAX — the most
+rows a round can possibly hold — a round contains **10, 10, 7, 17** scoring
+rows (mean 11). A real run starts slow and accelerates, so it sees fewer than
+any of those. Against a cap of 12 that meant `<MAX SPEED>` essentially never
+fired and the top of the momentum curve was never felt; it was found by
+counting which on-screen strings never get drawn across a full sweep. Eight is
+below the minimum of the best case, so it is reachable in a short round too.
+**It is still a game-feel number taken from a simulator — watch whether real
+players reach it, and whether the speed at the cap is enjoyable or unfair.**
+
 **The test:** five people, count hit rate on `low` (jump) obstacles specifically,
 not overall. If a first-timer's jump success is under ~60%, **don't cut the
 game** — set the `low` weight in `TrackGenerator.pickKind` to near zero and ship
