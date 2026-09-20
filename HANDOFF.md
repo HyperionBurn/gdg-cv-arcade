@@ -380,6 +380,30 @@ the test go red, every time — a green test proves nothing about itself.
 
 ---
 
+## The eight items the goal refers to
+
+The standing goal says "adding whats left including those 8 features you just
+mentioned". That list was my answer to "so whats left for us to do?" and it
+predates a context compaction, so it had become a reference to something
+nobody could read. It is recovered here from the transcript and audited
+against the code, because a goal that names eight things should not be
+checkable only by whoever happened to be in the room.
+
+| # | The item, as written | Now |
+|---|---|---|
+| 1 | Two-player exists but is nearly unreachable; give versus games a 4-5s gather window | **Done, and not the way I proposed.** A gather window taxes every SOLO turn 1.5-2.6s at a stall whose problem is throughput. The countdown re-resolves the player count every frame instead, and an arrival rewinds it to `LATE_JOIN_FLOOR_SEC` (1.7s), capped at `MAX_LATE_JOINS`. Solo turns pay nothing. |
+| 2 | No mode-select screen | **Done.** `src/shell/mode.ts`; `<HOW MANY PLAYING?>` draws in the census. |
+| 3 | Neon Runner is 1P only | **Done.** `maxPlayers: 2`, `supportsVersus: true`; two seeded tracks through a scissor rect. Scored 821 in the 2P sweep on the 20th. |
+| 4 | Nothing tells a pair which games they can play together | **Done.** `seatBadge()` in `meta/games.ts` draws `1-2P` / `1-5P`, and `null` for a solo game rather than a pointless "1P". |
+| 5 | Zero 2P regression coverage | **Done.** 75 tests across `versus.test.ts` and `runner-versus.test.ts`. |
+| 6 | It has never met a real camera and two real bodies | **OPEN, and only the rehearsal can close it.** Everything else here is simulator-verified. The fragile one is the solo identity lock across a track loss, which cannot be proven in sim. |
+| 7 | Faction remembered per kiosk vs asked every turn | **Done, as neither.** Remembered per PLAYER and confirmed (`<STILL PLAYING FOR X?>`), explicitly not one kiosk-wide value — see the note at initials.ts:271. |
+| 8 | Rhythm's HUD is the least legible thing at 3m | **Done.** The combo readout was `TYPE.micro`, 1.5vh, about 16px on a 1080p panel. It is `TYPE.label` now; the only `TYPE.micro` left in rhythm.ts is the comment explaining why. |
+
+Seven of eight. The eighth is a rehearsal, not a commit.
+
+---
+
 ## Open, and deliberate
 
 Things I looked at and chose not to change. If you disagree, the reasoning is
