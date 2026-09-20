@@ -1638,9 +1638,31 @@ export abstract class GameBase implements Screen {
     // Not a cosmetic mix-up either: a default clip is 8s and RESULTS_SEC is 7,
     // so it covers the whole window, and `showedReplay` suppresses the score,
     // the rank and the near-miss line — the retry hook PLAN.md §4 is built on.
+    //
+    // AND NEVER IN A PARTY ROUND.
+    //
+    // A clip is 8s against a 7s results window, so a replay does not sit
+    // alongside the results — it REPLACES them. For one player that is the
+    // designed reward: their own run, stamped with their own score, and it is
+    // the retry hook. For three to five people who just raced each other it
+    // takes away the only thing they do not already know. They watched the
+    // round happen in the room thirty seconds ago; what they came for is who
+    // won, and `<FINAL STANDINGS>` is the whole payoff of the most social game
+    // on the roster.
+    //
+    // MEASURED, a three-body Red Light round with the board cleared so the
+    // score places: the replay drew for 421 frames and `<FINAL STANDINGS>`
+    // drew ZERO. On the morning of the 24th every board is empty, so every
+    // score places, so this is EVERY round of the busiest part of the day.
+    //
+    // The clip is still captured — it feeds the attract reel and somebody can
+    // film the TV. Only the takeover is suppressed.
     const meta = highlights.clipMeta();
     const ownFreshClip =
-      !!meta && meta.gameId === this.config.gameId && this.capturedThisRound;
+      !this.config.partyMode &&
+      !!meta &&
+      meta.gameId === this.config.gameId &&
+      this.capturedThisRound;
 
     const replaying =
       highlights.isPlaying ||

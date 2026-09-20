@@ -112,3 +112,41 @@ describe('both harnesses play the game the same way', () => {
     );
   });
 });
+
+/**
+ * THE MOST SOCIAL GAME ON THE ROSTER RAN SOLO IN EVERY CHECK EVER MADE.
+ *
+ * `turn()` puts THREE bodies in frame for Red Light and then picked JUST ME on
+ * the mode screen, so the round locked to one player with two strangers
+ * standing in it. Red Light seats five, scores per lane, and ends on
+ * `<FINAL STANDINGS>` — none of which any automated check had ever rendered.
+ *
+ * Found by counting never-drawn strings across a full sweep: `<FINAL
+ * STANDINGS>` appeared zero times, and the SOLO near-miss line `1 OFF SEVENTH`
+ * appeared instead, which is what gave it away.
+ */
+describe('the sweep plays Red Light the way the stall will', () => {
+  test('it picks ALL OF US, not JUST ME', async () => {
+    const code = codeOf(await read('src/dev/turn.ts'));
+    assert.match(
+      code,
+      /game === 'redlight'\s*\?\s*'mode:open'/,
+      `turn() chooses the mode card, and for Red Light it must choose the party ` +
+        `one — otherwise three bodies stand in a round only one of them is playing`
+    );
+  });
+
+  /**
+   * The body count and the mode choice have to agree. Three bodies with JUST
+   * ME selected is the bug that was there; one body with ALL OF US selected
+   * would be the mirror of it.
+   */
+  test('and puts more than one body in frame for it', async () => {
+    const code = codeOf(await read('src/dev/turn.ts'));
+    assert.match(
+      code,
+      /game === 'redlight'\s*\?\s*3/,
+      'Red Light is seated for five and the sweep no longer brings a crowd'
+    );
+  });
+});

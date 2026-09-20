@@ -231,7 +231,9 @@ const GAMES: GameId[] = [
  * see any of it: the code paths that break are the ones guarded by
  * `playerCount > 1`.
  *
- * Red Light is absent because its 1P pass already runs three bodies.
+ * Red Light is absent because its own pass runs three bodies AND picks ALL OF
+ * US on the mode screen. It used to put the bodies in frame and then choose
+ * JUST ME, so the three were present and only one of them was playing.
  */
 const VERSUS_GAMES = ['sixtyseven', 'fruitninja', 'balloonpop', 'posematch', 'rhythm', 'runner'];
 
@@ -403,7 +405,19 @@ async function oneTurn(host: Host, game: string, players = 1): Promise<TurnResul
     // that choosing VERSUS with two bodies really opens two seats.
     if (id() === 'mode') {
       await settle();
-      const card = players > 1 ? 'mode:open' : 'mode:solo';
+      // RED LIGHT'S HEADLINE MODE IS THE PARTY ONE, so ask for it.
+      //
+      // The sweep already puts THREE bodies in frame for Red Light (see
+      // `setPlayerCount` above) and then picked JUST ME, which locks the round
+      // to one player with two strangers standing in it. So the game the stall
+      // is most social with — five people, one set of lanes, per-lane scoring,
+      // `<FINAL STANDINGS>` at the end — ran solo in every automated check ever
+      // made of it.
+      //
+      // FOUND BY COUNTING never-drawn strings: `<FINAL STANDINGS>` appeared
+      // zero times across a full seven-game sweep, and the solo near-miss line
+      // `1 OFF SEVENTH` appeared instead, which is what gave it away.
+      const card = players > 1 || game === 'redlight' ? 'mode:open' : 'mode:solo';
       const mode = await dwell(card);
       step('mode card selects by dwell', mode, `${card}: ${mode ? 'committed' : 'timed out'}`);
       await run(300, (s) => s === game);

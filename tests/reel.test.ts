@@ -617,3 +617,68 @@ describe('Fruit Ninja asks for a clip on a big chain', () => {
     assert.match(code, /chain\s*>=\s*3/, 'the chain threshold for a clip is gone');
   });
 });
+
+/**
+ * A REPLAY REPLACES THE RESULTS. IN A PARTY ROUND THAT IS THE WRONG TRADE.
+ *
+ * A clip is 8s against a 7s results window, so `showedReplay` does not sit
+ * alongside the score — it suppresses it. For one player that is the designed
+ * reward and the retry hook PLAN.md §4 is built on. For three to five people
+ * who just raced each other it removes the only thing they do not already
+ * know: they watched the round happen in the room thirty seconds ago, and what
+ * they came for is who won.
+ *
+ * MEASURED, a three-body Red Light round with the board cleared so the score
+ * places: the replay drew for 421 frames and `<FINAL STANDINGS>` drew ZERO. On
+ * the morning of the 24th every board is empty, so every score places, so that
+ * was every round of the busiest part of the day.
+ *
+ * Verified after the fix, in the same round: capture "ok NEW RECORD
+ * (redlight)", reel filled 1 of 4, standings 421 frames, replay 0. The clip is
+ * still kept — it feeds the attract reel and somebody can film the TV — and
+ * only the takeover is gone.
+ */
+describe('a party round shows who won', () => {
+  test('the replay gate excludes party mode', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/games/base.ts', 'utf8');
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\/\/.*$/, ''))
+      .join('\n');
+
+    const gate = /const ownFreshClip\s*=([\s\S]{0,220}?);/.exec(code);
+    assert.ok(gate, 'the replay gate has moved or been renamed');
+    assert.match(
+      gate[1]!,
+      /!this\.config\.partyMode/,
+      'a replay can take over a party round again, so three to five people ' +
+        'finish a race and never see the standings'
+    );
+  });
+
+  /** And the capture itself must NOT be gated on it — the reel still wants it. */
+  test('but the clip is still captured for the reel', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/games/base.ts', 'utf8');
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\/\/.*$/, ''))
+      .join('\n');
+    // BOTH SIDES OF THE CALL. My first version matched from `captureIfWorthy(`
+    // onwards and missed a mutation that put the party check in FRONT of it;
+    // my second anchored on `capturedThisRound =` and matched the round-reset
+    // assignment instead, so it failed on clean code and "caught" the mutation
+    // for the wrong reason. This takes a window either side of the call.
+    const at = code.indexOf('captureIfWorthy(');
+    assert.ok(at > 0, 'nothing captures a highlight at the end of a round any more');
+    const span = code.slice(Math.max(0, at - 200), at + 220);
+    assert.doesNotMatch(
+      span,
+      /partyMode/,
+      'party rounds stopped feeding the attract reel; only the REPLAY should be suppressed'
+    );
+  });
+});
