@@ -862,3 +862,70 @@ describe('a versus pair is told where to stand before the round starts', () => {
     assert.match(countdown, /this\.drawStandingMarks\(fc\)/, 'the gate no longer draws anything');
   });
 });
+
+/**
+ * A BRACKET NOBODY CAN START IS THE STATE THIS USED TO BE IN.
+ *
+ * `meta/tournament.ts` is a complete single-elimination engine — seeding,
+ * byes, propagation, persistence — and for a while NOTHING in the app set it
+ * running. `base.ts` carried a long note saying so, whose stated purpose was
+ * to save a reader an hour of wondering why `reportCurrent` never fires.
+ *
+ * The console grew a BRACKET tab and the note went stale, which is the more
+ * expensive direction: it told a reader that a branch deciding who advances in
+ * a live bracket was dead code. Anybody tidying up had every reason to delete
+ * it, and the failure would only surface at the one announced event of the
+ * afternoon.
+ *
+ * So the wiring is asserted rather than described. If the START button ever
+ * goes away, this fails and whoever removed it has to say what replaced it.
+ */
+describe('a marshal can actually start a bracket', () => {
+  const codeOf = (src: string): string =>
+    src
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\/\/.*$/, ''))
+      .join('\n');
+
+  test('the operator console starts one', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const code = codeOf(await readFile('src/shell/operator.ts', 'utf8'));
+    assert.match(
+      code,
+      /tournament\.start\(/,
+      'nothing in the console starts a bracket any more, so the engine is ' +
+        'unreachable again and the note in base.ts is wrong in the other direction'
+    );
+    assert.match(code, /PLAYER BRACKET/, 'the START control is gone from the BRACKET tab');
+  });
+
+  /** And the round still reports into it. */
+  test('and a finished versus round reports into a live one', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const code = codeOf(await readFile('src/games/base.ts', 'utf8'));
+    assert.match(
+      code,
+      /tournament\.reportCurrent\(this\.scoreFor\(0\), this\.scoreFor\(1\)\)/,
+      'a versus round no longer reports its result into a running bracket, so ' +
+        'matches are played and never advance'
+    );
+    assert.match(
+      code,
+      /tournament\.active/,
+      'the report is no longer gated on a bracket being live'
+    );
+  });
+
+  /** The engine end, played through, so the wiring has something to wire to. */
+  test('and the engine advances on a real result', () => {
+    const game = TOURNAMENT_GAMES[0];
+    tournament.reset();
+    tournament.addPlayer('WAS');
+    tournament.addPlayer('AMY');
+    assert.equal(tournament.start(game), true, 'a two-player bracket would not start');
+    assert.equal(tournament.active, true);
+    assert.equal(tournament.reportCurrent(10, 20), true, 'a decided match did not advance');
+    tournament.reset();
+  });
+});

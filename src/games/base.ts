@@ -912,18 +912,26 @@ export abstract class GameBase implements Screen {
 
     // A live bracket owns the result of a versus round.
     //
-    // DORMANT AS OF TODAY, and deliberately left wired. `meta/tournament.ts`
-    // is a complete, tested single-elimination engine — seeding, byes,
-    // propagation, persistence, `drawBracket` — and NOTHING IN THE APP EVER
-    // SETS IT RUNNING. There is no menu opt-in and no operator control, so
-    // `tournament.active` is false for every round the stall will ever play
-    // and this branch cannot be reached.
+    // LIVE, AND REACHABLE. This note used to say the opposite — that nothing
+    // in the app ever starts a bracket, so `tournament.active` is false for
+    // every round the stall will ever play and this branch cannot be reached.
+    // That was true when it was written and is not true now: the operator
+    // console grew a BRACKET tab, and `tournament.start()` is wired to its
+    // START button.
     //
-    // Said out loud here because the alternative is somebody losing an hour to
-    // "why does reportCurrent never fire". What is missing is the wiring, not
-    // the bracket: a way for a marshal to enter names and start one, and a
-    // surface to show it on. PLAN.md §4 wants that surface to be attract,
-    // between rounds.
+    // Left corrected rather than deleted, because the stale version was the
+    // more expensive kind of wrong. It told a reader this was dead code, in a
+    // comment whose stated purpose was to save them an hour — so the next
+    // person to tidy up would have had every reason to remove a branch that
+    // decides who advances in a live bracket, and the failure would only show
+    // at the one announced event of the afternoon.
+    //
+    // TO REACH IT: operator console (CTRL+SHIFT+`) -> BRACKET -> type at least
+    // two names -> START N-PLAYER BRACKET. Then play that game two-up. The
+    // guard below is four conditions and all four have to hold.
+    //
+    // `tests/versus.test.ts` plays a whole one-match bracket out, and
+    // `tests/tournament.test.ts` covers the engine.
     if (
       this.playerCount === 2 &&
       tournament.active &&
