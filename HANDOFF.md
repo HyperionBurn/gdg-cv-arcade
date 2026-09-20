@@ -386,6 +386,26 @@ The method is the same each time: patch `fillText`, record the size and the
 left/right extent of every string against the viewport and the overscan safe
 area, and read the worst.
 
+**A THIRD TRAP, and it cost a re-run on the 20th.** Measuring horizontal
+extent from the raw `x` argument is wrong, and wrong in a way that looks like
+a finding. Popups draw inside `juice.pushTransform`, so the first attempt
+reported `<SAVED!>` 272px off the right edge of a 1024 stage — pure fiction,
+because the transform had not been applied. Applying `getTransform()` brought
+that to 17px. Then taking the worst frame instead of the settled one sent it
+to 525px, because `withTilt` ROTATES some elements and a naive
+`left + width * scaleX` means nothing under rotation.
+
+Three attempts, three answers, none trustworthy. The app was not the
+unreliable thing. If you re-run this, project all four corners through the
+full matrix rather than an axis-aligned box, and do not report a number until
+two independent methods agree.
+
+**And the size floor is not 3vh.** `MIN_LEGIBLE` is 3, but `TYPE.body` is 2.8
+BY DESIGN — the constant is "the smallest a stranger is ever asked to read"
+for a headline, not a floor under every string. Flagging everything under 3
+produced 96 "findings" on a clean build, most of them the chase line at its
+intended size.
+
 **Two traps in doing it.** `#stage` reports **300×150** until the render loop
 has run once, and the loop is throttled while the pane is hidden — so drive
 `__arcade.tick(3)` first and refuse to measure while the stage looks like that,
