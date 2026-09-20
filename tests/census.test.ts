@@ -74,10 +74,21 @@ const EXPECTED_ABSENT: Record<string, string> = {
   '<TRY AGAIN>': 'shown beside a failure screen',
   '<VISION OFFLINE — PRESS F5>': 'the pose worker dies and does not restart',
 
-  // ── Rig check: the sim path enters already rigged ───────────────────────
-  '<FULL BODY OK>': 'rig check sees hips and ankles',
-  '<T-POSE OK>': 'rig check sees the arms out',
-  '<STARTING CAMERA>': 'rig check while the camera opens',
+  // ── Rig check: driven on the 20th, and it is live ───────────────────────
+  // `router.go('rigcheck')` with a simulated body reaches the screen, reports
+  // "LEGS CUT OFF" and offers the fix ("TILT THE LID BACK / RAISE THE
+  // CAMERA"), and draws `<FULL BODY OK>` once the body frames. So the screen
+  // works; these three are states the SIMULATOR cannot produce.
+  //
+  // `<T-POSE OK>` is the one that would matter if it were untested, because
+  // it gates the marshal's setup. It is not: `TPoseDetector` has its own
+  // block in gestures.test.ts, including the aspect correction that once made
+  // the ring physically impossible to complete. The simulator drives joint
+  // angles and cannot hold a convincing T-pose, which is why the BANNER never
+  // draws while the mechanism behind it is covered.
+  '<FULL BODY OK>': 'drawn when a simulated body frames; framing varies by sim position',
+  '<T-POSE OK>': 'needs a held T-pose; the detector is covered in gestures.test.ts',
+  '<STARTING CAMERA>': 'rig check while a real camera opens; sim starts already open',
 
   // ── Rare by construction, and deliberately so ───────────────────────────
   '<DEAD HEAT>': 'two players finish on exactly the same score',
