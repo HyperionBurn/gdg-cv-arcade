@@ -205,6 +205,41 @@ describe('diagnostics know the simulator is not a fault', () => {
         'is: call isSimEnabled() and say so'
     );
   });
+
+  /**
+   * A NEW RED CHIP IS A NEW THING A MARSHAL HAS TO LOOK UP.
+   *
+   * README's "If something is wrong" table is the card somebody reads with a
+   * queue in front of them, and it is the reason `runbook.test.ts` exists —
+   * four of its five slider labels had drifted before anybody checked. The
+   * INFER chip now has two states that mean opposite things, so both belong in
+   * that table, spelled the way the code spells them.
+   */
+  test('the day-of card explains both states of the INFER chip', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const md = await readFile('README.md', 'utf8');
+    const src = await readFile('src/shell/operator.ts', 'utf8');
+
+    const start = md.indexOf('### If something is wrong');
+    assert.ok(start >= 0, 'the README no longer has a failure table');
+    const table = md.slice(start, start + 12000);
+
+    // Both strings, taken from the code rather than retyped here, so the two
+    // cannot drift apart without this failing.
+    const states = [...src.matchAll(/this\.chip\(\s*'INFER',\s*'([^']+)'/g)].map((m) => m[1]!);
+    const notFps = states.filter((s) => !/fps/.test(s));
+    assert.ok(
+      notFps.length >= 2,
+      `expected the worker-missing chip to have both a sim and a non-sim state, found ${notFps.join(', ') || 'none'}`
+    );
+    for (const s of notFps) {
+      assert.ok(
+        table.includes(s),
+        `the operator console can show "INFER ${s}" and the day-of failure ` +
+          `table never mentions it, so a marshal reading a red chip has nowhere to look`
+      );
+    }
+  });
 });
 
 /**
