@@ -114,9 +114,26 @@ record rather than forgotten:
 
 Rows above are closed. These are open, and each names the number to watch:
 
-| Game | What to measure | The knob |
-|---|---|---|
-| Pose Match | Pass rate on the first wall. The gate is expected to want LOWER on real bodies than on the simulator. | **MATCH THRESHOLD** |
-| Runner | First-timer hit rate on `low` (jump) obstacles specifically. Under ~60%, weight them to near zero and ship lanes + slides. | `TrackGenerator.pickKind` |
-| Initials | Real entry times. The 16 s backstop can shrink if nobody needs it. | `HARD_DEADLINE_SEC` |
-| Red Light | Whether five racers in one frame hold their lanes for a full round. | **MOVE THRESHOLD** |
+| Game | What to measure | The knob | Where the number comes from |
+|---|---|---|---|
+| Pose Match | Pass rate on the first wall. The gate is expected to want LOWER on real bodies than on the simulator. | **MATCH THRESHOLD** | **Recorded.** `firstWallCleared`, `firstWallGate`, `wallsFaced`, `wallsCleared` |
+| Runner | First-timer hit rate on `low` (jump) obstacles specifically. Under ~60%, weight them to near zero and ship lanes + slides. | `TrackGenerator.pickKind` | **Recorded.** `lowFaced` / `lowHit`, and the same by `high` and `block` |
+| Initials | Real entry times. The 16 s backstop can shrink if nobody needs it. | `HARD_DEADLINE_SEC` | Not recorded — initials is a screen, not a round, so it does not pass through the hook |
+| Red Light | Whether five racers in one frame hold their lanes for a full round. | **MOVE THRESHOLD** | Not recorded — it is an identity question, and lane holding has no counter yet |
+
+**Take the export before you pack up.** Operator console → **DATA** →
+**EXPORT ROUNDS JSON**. One line per finished round, with the per-round detail
+above; `meta/roundlog.ts` says what is in it and why. The other three exports
+carry what a round ENDED on and cannot answer any of these.
+
+Two of the four are instrumented because two of them are countable from
+inside a round. The other two are not deferred out of laziness: initials
+entry does not go through the round hook at all, and "did five people keep
+their own lanes" is a question about tracker identity rather than a tally.
+Both still need somebody watching — which is fine, because both are things a
+person standing at the stall can actually see.
+
+Instrumenting the Runner row paid for itself before the playtest: the first
+numbers it produced were a 100% hit rate on every obstacle kind, which turned
+out to be the automated probe never jumping. See the note in
+`tests/probes.test.ts`.

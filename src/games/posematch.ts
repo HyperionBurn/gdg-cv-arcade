@@ -275,8 +275,39 @@ export class PoseMatchGame extends GameBase {
 
   /* ---------------- lifecycle ---------------- */
 
+  /**
+   * PLAYTEST INSTRUMENTATION. See `meta/roundlog.ts`.
+   *
+   * FEEDBACK.md's open Pose Match row asks for the pass rate ON THE FIRST WALL
+   * and expects the gate to want LOWER on real bodies than on the simulator.
+   * `state.faced` and `state.cleared` already give the round's overall rate;
+   * the first wall is the one a person meets before they have worked out what
+   * the game wants, so it is the one that says whether the gate is set for
+   * strangers. It is also the only wall everybody in the queue attempts.
+   *
+   * The gate travels with it because it moves — it ramps with progress and
+   * with walls cleared — so a pass rate recorded without the threshold it was
+   * measured against cannot be compared across a session in which somebody
+   * moved the slider. Which is the entire point of the slider.
+   */
+  private firstWallCleared = -1;
+  private firstWallGate = 0;
+
+  protected override roundDetail(): Record<string, number> {
+    const live = this.slots.slice(0, this.playerCount);
+    return {
+      wallsFaced: live.reduce((n, s) => n + s.faced, 0),
+      wallsCleared: live.reduce((n, s) => n + s.cleared, 0),
+      ...(this.firstWallCleared >= 0
+        ? { firstWallCleared: this.firstWallCleared, firstWallGate: this.firstWallGate }
+        : {}),
+    };
+  }
+
   protected onStart(): void {
     this.slots = [emptySlot(), emptySlot()];
+    this.firstWallCleared = -1;
+    this.firstWallGate = 0;
   }
 
   protected scoreFor(slot: number): number {
@@ -473,6 +504,14 @@ export class PoseMatchGame extends GameBase {
     const cleared = wall.best >= wall.gate;
     wall.resolved = cleared ? 'clear' : 'fail';
     wall.since = 0;
+
+    // The first wall RESOLVED in the round, whichever player met it first. In
+    // a duel both runners get the same chart, so the first resolution is still
+    // a first-wall attempt by somebody who has not played yet.
+    if (this.firstWallCleared < 0) {
+      this.firstWallCleared = cleared ? 1 : 0;
+      this.firstWallGate = Number(wall.gate.toFixed(3));
+    }
 
     state.faced++;
     state.accuracySum += wall.best;
