@@ -455,6 +455,29 @@ All driven deterministically via `window.__arcade.tick()`:
   network on a code path this session never took — but it is the strongest
   evidence available without the physical test.
 
+- **The failure screen itself, 2026-09-20 — it was unreadable, in production,
+  and every automated check was green.** With the camera denied, the built app
+  correctly shows `<CAMERA ERROR>`, the cause in plain English, and a
+  `<TRY AGAIN>` button. It rendered **#111111 on #000000**: headline
+  **1.11:1**, detail line **2.82:1**, against floors of 3:1 and 4.5:1. The
+  yellow button was the only legible thing on the screen, which is exactly why
+  it read as styled rather than as broken.
+
+  `#stage` is created with `getContext('2d', { alpha: false })`, and an opaque
+  2D canvas initialises to SOLID BLACK rather than transparent. It covers the
+  paper-white `body` until the render loop paints a screen — and `showBoot()`
+  is called on the paths where the render loop never got there.
+
+  **Worth knowing for the next one of these:** walking the DOM for the first
+  painted ancestor REPORTS IT AS FINE. The computed cascade says
+  `rgb(255, 255, 255)` from BODY and a comfortable 18.88:1, because the black
+  is in a `<canvas>` and not in anybody's `background-color`. Sampling the
+  canvas with `getImageData` returned `[0, 0, 0, 255]`. Screenshot the thing.
+
+  Fixed by giving `.boot` its own `background: var(--paper)`; guarded by
+  "the boot overlay paints its own background" in `tests/brand.test.ts`, which
+  reads styles.css and main.ts TOGETHER, because neither file is wrong alone.
+
 - **67**: 4 Hz full reach × 5s = **exactly 40 reps**; 1.5 Hz × 4s = **exactly 12**;
   quarter-height twitching at the same rate = **0** (anti-cheat holds)
 - **Fruit Ninja**: hands still = **0** (activation gate); swiping sliced 11 with

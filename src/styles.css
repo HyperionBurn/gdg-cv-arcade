@@ -283,6 +283,31 @@ body.kiosk {
   gap: 20px;
   text-align: center;
   padding: 40px;
+
+  /* OPAQUE, BECAUSE THE CANVAS UNDERNEATH IS BLACK UNTIL THE FIRST FRAME.
+     `#stage` is built with `getContext('2d', { alpha: false })` in main.ts, and
+     an opaque 2D canvas initialises to SOLID BLACK rather than transparent. It
+     fills the viewport, so it hides the paper-white `body` for as long as the
+     render loop has not painted a screen.
+     `showBoot()` is called on exactly the paths where the render loop never
+     got there. Measured on the production build with the camera denied:
+     `<CAMERA ERROR>` is #111111 on #000000 — 1.11:1, against the 3:1 that large
+     text wants — and the detail line lands at 2.82:1 against 4.5:1. The only
+     legible thing on the screen was the yellow button, which is why the whole
+     thing read as deliberately styled rather than as broken.
+     Every value in this palette was picked against paper (see the note on
+     `--text-dim`), so the fix is to put the paper back, not to relight the
+     text.
+
+     THIS DELIBERATELY HIDES THE CANVAS, including the health banner main.ts
+     draws across the top. That banner is a MID-ROUND control — it tells a
+     marshal the camera dropped out from under a game that is still running —
+     and on a boot failure it only contradicts the screen it sits above:
+     `<CAMERA LOST — RECONNECTING>` over a `<TRY AGAIN>` button says both
+     that the app is handling it and that a human must. One message is better
+     than two. `.boot` is only ever mounted before a screen exists, so there is
+     nothing else underneath worth seeing. */
+  background: var(--paper);
 }
 
 .boot h1 {
