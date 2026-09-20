@@ -697,10 +697,29 @@ tunables.registerAll([
     step: 0.01,
     default: 0.66,
     description:
-      'Score a pose must reach to clear the wall. Only 0.07 of headroom over ' +
-      'the worst confusable pair, and real jitter pulls scores DOWN — expect ' +
-      'to lower this, not raise it. Below about 0.66 poses start passing for ' +
-      'each other and the game stops meaning anything.',
+      'Score a pose must reach to clear the wall. Only 0.009 of headroom over ' +
+      'the worst confusable pair (GOALPOST/FLEX at 0.651) — the tightest margin ' +
+      'in the app, and real jitter pulls scores DOWN. Lowering this at all ' +
+      'makes those two poses interchangeable and the game stops meaning ' +
+      'anything. The 0.07 this said until 2026-09-20 was the headroom at the ' +
+      'OLD gate of 0.72.',
+  },
+  {
+    key: 'posematch.passThresholdEnd',
+    label: 'MATCH THRESHOLD — LAST WALL',
+    group: 'POSE MATCH',
+    min: 0.35,
+    max: 0.95,
+    step: 0.01,
+    default: 0.82,
+    description:
+      'The gate the LAST wall of a round is judged against; the first uses ' +
+      'MATCH THRESHOLD and the rest ramp between them. Raise it to make a ' +
+      'round get harder as it goes. Dragging it BELOW the start gate does not ' +
+      'invert the ramp — it flattens it at the start value — so the two cannot ' +
+      'fight. It had no declared spec until 2026-09-20, which meant an ' +
+      'inferred range of 0 to 3.28 on a similarity score that cannot exceed 1: ' +
+      'most of that slider made every wall unpassable.',
   },
 
   /* ---- games/runner-world.ts: the clearance model ---- */
@@ -906,6 +925,34 @@ tunables.registerAll([
       'the door; raise it if people are not getting a proper go.',
   },
   /* ---- games/rhythm.ts: the only game judged in milliseconds ---- */
+  {
+    key: 'rhythm.hitRadiusTorsos',
+    label: 'PUNCH REACH',
+    group: 'RHYTHM PUNCH',
+    // 0.3625 is the measured gap between the NEAREST TWO targets for one hand,
+    // off `targetPos` rather than assumed. At or above it a single fist
+    // position is live for more than one target, which is what a playtester
+    // reported as hits registering "to a target that is far away". 0.36 is the
+    // last value below that cliff; the max is a wall, not a preference.
+    min: 0.15,
+    max: 0.36,
+    step: 0.01,
+    default: 0.3,
+    description:
+      'How close a fist must get to a target to count, in torso heights. It ' +
+      'was 0.5, and a playtester reported both halves of what that bought: ' +
+      // Kept on ONE line so the quote stays matchable. tests/feedback.test.ts
+      // scrapes tester reports out of src/ and a report split across a string
+      // concatenation reads as a new, unfiled one — which is exactly what it
+      // did when this was written wrapped.
+      'hits registering "to a target that is far away", and inconsistent ' +
+      'perfect timing. Targets for one hand sit 0.3625 apart, so anything at or above ' +
+      'that makes one fist position live for several of them. It is also a ' +
+      'SPEED-DEPENDENT TIMING ERROR: contact fires the instant the swept ' +
+      'segment crosses the circle, so a bigger radius judges a fast punch ' +
+      'earlier than a slow one. Raise it only if people cannot land anything, ' +
+      'and expect the grades to skew early when you do.',
+  },
   {
     key: 'rhythm.inputLatencySec',
     label: 'PUNCH LATENCY',

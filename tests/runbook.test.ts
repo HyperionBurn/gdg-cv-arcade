@@ -334,3 +334,100 @@ describe('the rest of the risk table is the code', () => {
     );
   });
 });
+
+
+/**
+ * AN INFERRED SLIDER IS A RANGE NOBODY CHOSE.
+ *
+ * `tunables.get(key, fallback)` registers a spec on the fly when the key is
+ * unknown, and `inferSpec` says so in its own description: "The range here is
+ * inferred, not designed — declare it in meta/tunables.ts to get a sane range
+ * and a real description of what breaks."
+ *
+ * Two keys were living on one, and both are gates:
+ *
+ *   posematch.passThresholdEnd   inferred 0 - 3.28 on a similarity score that
+ *                                cannot exceed 1. Most of that slider made
+ *                                every wall unpassable.
+ *   rhythm.hitRadiusTorsos       inferred 0 - 1.2, where 0.3625 is the
+ *                                measured gap between the nearest two targets
+ *                                for one hand. Past that a single fist
+ *                                position is live for several of them, which
+ *                                is the playtest report that produced the
+ *                                constant in the first place.
+ *
+ * A marshal dragging a slider trusts its ends. An inferred range is four times
+ * the current value in whichever direction happens to be positive, and it has
+ * no description of what breaks.
+ */
+describe('no slider is running on an invented range', () => {
+  /**
+   * READ FROM SOURCE, not from the registry. `tunables.list()` in a test only
+   * contains the DECLARED specs — an inferred one appears when a game calls
+   * `get` with an unknown key at runtime, which no test does. My first version
+   * checked `.inferred` on the live registry and passed vacuously.
+   */
+  test('every tunables.get call site has a declared spec', async () => {
+    const { readdir, readFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+
+    const walk = async (dir: string): Promise<string[]> => {
+      const out: string[] = [];
+      for (const e of await readdir(dir, { withFileTypes: true })) {
+        const p = join(dir, e.name);
+        if (e.isDirectory()) out.push(...(await walk(p)));
+        else if (e.name.endsWith('.ts')) out.push(p);
+      }
+      return out;
+    };
+
+    const declared = new Set(tunables.list().map((t) => t.key));
+    const undeclared = new Set<string>();
+    for (const f of await walk('src')) {
+      if (f.endsWith('tunables.ts')) continue;
+      const src = await readFile(f, 'utf8');
+      for (const m of src.matchAll(/tunables\.get\(\s*'([\w.]+)'/g)) {
+        if (!declared.has(m[1]!)) undeclared.add(`${m[1]} (${f})`);
+      }
+    }
+
+    assert.deepEqual(
+      [...undeclared],
+      [],
+      `these keys are read at runtime with no declared spec, so inferSpec ` +
+        `makes a range up \u2014 four times the current value, with no description ` +
+        `of what breaks: ${[...undeclared].join(', ')}`
+    );
+  });
+
+  /**
+   * And the two gates specifically: a similarity score is 0..1, so a slider
+   * that goes past 1 is a slider with a dead half.
+   */
+  test('the pose gates cannot be dragged past a reachable score', () => {
+    for (const key of ['posematch.passThreshold', 'posematch.passThresholdEnd']) {
+      const spec = tunables.list().find((t) => t.key === key);
+      assert.ok(spec, `${key} is not a slider`);
+      assert.ok(
+        spec.max <= 1,
+        `${key} goes up to ${spec.max}; a pose similarity cannot exceed 1, so ` +
+          `everything above it makes the wall unpassable`
+      );
+    }
+  });
+
+  /**
+   * And the punch reach stays under the measured target spacing. This is the
+   * one constant in Rhythm a tester's complaint produced directly.
+   */
+  test('punch reach cannot be dragged into swallowing its neighbours', () => {
+    const spec = tunables.list().find((t) => t.key === 'rhythm.hitRadiusTorsos');
+    assert.ok(spec, 'PUNCH REACH is not a slider, so the playtest cannot retune it');
+    assert.ok(
+      spec.max < 0.3625,
+      `PUNCH REACH goes up to ${spec.max}. Targets for one hand are 0.3625 ` +
+        `apart, so at or above that a single fist position is live for more ` +
+        `than one of them — the "target that is far away" report, restored.`
+    );
+  });
+});
