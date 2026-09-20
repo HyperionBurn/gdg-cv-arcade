@@ -291,6 +291,42 @@ describe('the attract reel', () => {
     assert.ok(highlights.stats().bytes <= MAX_BYTES);
   });
 
+  /**
+   * THE TEST ABOVE MEASURES THE DEFAULT CONFIG. THIS ONE MEASURES THE CEILINGS.
+   *
+   * They are not the same claim, and only one of them survives somebody
+   * wiring `configure()` to a slider. `MAX_BYTES` was chosen at 24 MB while it
+   * was the only budget in the file — "well below the 28 MB configuration that
+   * fell off the cliff". The reel then added `REEL_MAX_BYTES`, enforced
+   * separately, and the cliff does not care which allocation a byte belongs
+   * to. 24 + 4 came to 28 MB: the bad configuration exactly, to within 0.1 MB,
+   * reachable the moment anything grows the buffer on purpose.
+   *
+   * Not reachable today — `configure()` is called once, by the cost guard,
+   * only ever downwards — which is precisely why it would have been found by a
+   * marshal and not by a test.
+   */
+  test('the two ceilings are one budget, and it is the budget above', () => {
+    const BUDGET = 24 * 1024 * 1024;
+    assert.ok(
+      MAX_BYTES + REEL_MAX_BYTES <= BUDGET,
+      `the atlas ceiling (${(MAX_BYTES / 1048576).toFixed(0)} MB) and the reel ` +
+        `ceiling (${(REEL_MAX_BYTES / 1048576).toFixed(0)} MB) add up to ` +
+        `${((MAX_BYTES + REEL_MAX_BYTES) / 1048576).toFixed(0)} MB. The cliff is a ` +
+        `property of the TOTAL canvas backing store, and the test above only ` +
+        `checks the default configuration, so it cannot see this`
+    );
+
+    // And the default still fits under the lowered atlas ceiling, or the cost
+    // guard starts shrinking a buffer nobody asked it to touch.
+    assert.ok(
+      highlights.stats().bytes <= MAX_BYTES,
+      'the shipped default no longer fits its own ceiling, so configure() will ' +
+        'shrink the cell on the first call and the replay loses resolution for ' +
+        'no reason'
+    );
+  });
+
   test('turning the reel off gives the memory back', () => {
     fill();
     highlights.capture({ gameId: 'poses', score: 9 });

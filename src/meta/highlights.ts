@@ -52,6 +52,11 @@
  * copy. `MAX_BYTES` clamps `configure()`, so an operator changing the buffer on
  * a weaker laptop can never accidentally grow it past the ceiling.
  *
+ * The attract reel is a THIRD canvas, budgeted separately by `REEL_MAX_BYTES`.
+ * The cliff below is a property of the total backing store and does not care
+ * which allocation a byte belongs to, so the two ceilings have to be read as
+ * one number: 20 + 4 = 24 MB, which is what `tests/reel.test.ts` asserts.
+ *
  * ---------------------------------------------------------------------------
  * WHY 256×144 AND NOT 320×180 — a measured cliff, not a preference
  *
@@ -69,6 +74,21 @@
  * This is why the capture cost is also measured AT RUNTIME (`GRAB_BUDGET_MS`
  * below) and sheds itself: the cliff is a property of the GPU and the driver,
  * and the laptop at the stall is not this one.
+ *
+ * ---------------------------------------------------------------------------
+ * IF YOU RE-MEASURE THIS ON THE BOOTH LAPTOP, two things cost me an hour:
+ *
+ *  1. TIMING A BARE `drawImage` MEASURES NOTHING. It records command
+ *     submission, not execution. Every configuration — including the 28 MB one
+ *     in the table above — came back at 0.00 ms mean. Each sample has to end
+ *     with something that drains the pipeline, e.g. a 1×1 `getImageData` on
+ *     the atlas just written.
+ *  2. RUN THE 28 MB CONFIGURATION AS A POSITIVE CONTROL, in the same session.
+ *     If it does not separate from the 18.9 MB one, the harness cannot see the
+ *     cliff and the run says nothing about any other configuration. That is
+ *     what happened in the Claude browser pane, twice: with a drain in place
+ *     the readback itself cost ~33 ms and swamped the difference. The numbers
+ *     in the table above stand; they have not been reproduced anywhere else.
  * ---------------------------------------------------------------------------
  */
 
@@ -102,8 +122,21 @@ export const DEFAULT_CONFIG: HighlightConfig = {
 /**
  * Hard ceiling across BOTH atlases. Set just above the measured-good 18.9 MB
  * and well below the 28 MB configuration that fell off the cliff.
+ *
+ * WAS 24 MB, WHICH WAS RIGHT WHILE THIS WAS THE ONLY BUDGET IN THE FILE.
+ * The attract reel added a SECOND ceiling, `REEL_MAX_BYTES`, enforced
+ * independently — and the cliff does not care which allocation a byte belongs
+ * to, it cares about the total canvas backing store. 24 + 4 = 28 MB, which is
+ * not "well below the 28 MB configuration that fell off the cliff"; it is that
+ * configuration, to within 0.1 MB.
+ *
+ * Nothing reaches it today: `configure()` is called from exactly one place,
+ * the cost guard, and only ever to make the buffer SMALLER. This is a trap for
+ * whoever wires it to a slider, which the note on line 52 already anticipates.
+ * 20 + 4 restores the 24 MB total that was chosen in the first place, and the
+ * default configuration is 18.0 MiB, so nothing shrinks.
  */
-export const MAX_BYTES = 24 * 1024 * 1024;
+export const MAX_BYTES = 20 * 1024 * 1024;
 
 /**
  * If the mean grab cost over a window exceeds this, the buffer sheds itself:
