@@ -24,6 +24,8 @@ import {
   MotionEnergy,
   LaneDetector,
   TPoseDetector,
+  VerticalGestures,
+  DEFAULT_JUMP_TUNABLES,
 } from '../src/core/gestures.ts';
 import { POSE, POSE_LANDMARK_COUNT } from '../src/core/types.ts';
 import type { Landmark } from '../src/core/types.ts';
@@ -261,5 +263,157 @@ describe('TPoseDetector', () => {
       0,
       'at a square aspect this arm span is below the gate'
     );
+  });
+});
+
+/**
+ * JUMP AND DUCK — the inputs that decide whether somebody clears an obstacle,
+ * and the only detector in this file that had no tests at all.
+ *
+ * `LaneDetector`, `TPoseDetector`, `RepCounter` and `MotionEnergy` are all
+ * covered above. `VerticalGestures` drives the Runner's jump and Rhythm's
+ * duck and was covered by nothing, which matters twice over: FEEDBACK's
+ * Runner row is specifically about hit rate on JUMP obstacles, and the duck
+ * only exists because a census found that no harness had ever crouched.
+ *
+ * The first test is the one that would actually break at a stall. Everything
+ * here is divided by `scale.unit`, and a threshold that is not is a threshold
+ * that works for whoever the developer is and fails for children and tall
+ * adults — the exact failure this codebase calls out as its own worst habit.
+ */
+describe('VerticalGestures', () => {
+  const hips = (hipY: number, unit: number): TrackedPlayer => {
+    const p = player((lm) => {
+      lm[POSE.LEFT_HIP] = { x: 0.56, y: hipY, z: 0, visibility: 1 };
+      lm[POSE.RIGHT_HIP] = { x: 0.44, y: hipY, z: 0, visibility: 1 };
+    });
+    p.scale.unit = unit;
+    return p;
+  };
+
+  const STAND = 0.6;
+
+  /** Let the baseline learn a standing height before asking for a gesture. */
+  const settle = (v: VerticalGestures, unit: number, frames = 90): number => {
+    let t = 0;
+    for (let f = 0; f < frames; f++) {
+      t = f * 33;
+      v.update(hips(STAND, unit), t);
+    }
+    return t;
+  };
+
+  /**
+   * Screen y grows downward, so a crouch moves the hips DOWN (larger y) by
+   * `depth` torso units. Held for a few frames because the gate is hysteretic.
+   */
+  const gesture = (v: VerticalGestures, unit: number, depth: number, t0: number): boolean => {
+    let fired = false;
+    for (let f = 0; f < 6; f++) {
+      v.update(hips(STAND + depth * unit, unit), t0 + (f + 1) * 33);
+      if (v.crouched) fired = true;
+    }
+    return fired;
+  };
+
+  /**
+   * THE ONE THAT MATTERS. A child and a tall adult are the same crouch in
+   * torso units and wildly different in pixels. If this ever fails, the duck
+   * works for one body and not the other, and at a stall that reads as the
+   * game being broken for the shorter player.
+   */
+  test('the same crouch in torso units registers at any body size', () => {
+    const tun = DEFAULT_JUMP_TUNABLES;
+    const deep = tun.crouchEnter * 1.5;
+    for (const unit of [0.08, 0.2, 0.45]) {
+      const v = new VerticalGestures();
+      const t0 = settle(v, unit);
+      assert.equal(gesture(v, unit, deep, t0), true, `no crouch at unit ${unit}`);
+    }
+  });
+
+  test('and a shallow dip registers at no body size', () => {
+    const shallow = DEFAULT_JUMP_TUNABLES.crouchEnter * 0.5;
+    for (const unit of [0.08, 0.2, 0.45]) {
+      const v = new VerticalGestures();
+      const t0 = settle(v, unit);
+      assert.equal(gesture(v, unit, shallow, t0), false, `false crouch at unit ${unit}`);
+    }
+  });
+
+  /**
+   * `crouched` is the EDGE and `isCrouching` is the STATE. Runner's slide is a
+   * hold and Rhythm's duck is a hit, so they read different ones; conflating
+   * them gives either a slide that ends instantly or one duck scored per frame.
+   */
+  test('the edge fires once, the state lasts', () => {
+    const v = new VerticalGestures();
+    const unit = 0.2;
+    let t = settle(v, unit);
+
+    const depth = DEFAULT_JUMP_TUNABLES.crouchEnter * 1.5;
+    let edges = 0;
+    for (let f = 0; f < 20; f++) {
+      t += 33;
+      v.update(hips(STAND + depth * unit, unit), t);
+      if (v.crouched) edges++;
+    }
+    assert.equal(edges, 1, 'a held crouch must not score every frame');
+    assert.equal(v.isCrouching, true, 'the state must last as long as the body is down');
+  });
+
+  /**
+   * Hysteresis: once down, coming back up PAST the enter threshold is not
+   * enough to stand again. Without this a body resting near the line chatters,
+   * which on the Runner is a slide that flickers on and off under the bar.
+   */
+  test('a body hovering between the two thresholds stays down', () => {
+    const tun = DEFAULT_JUMP_TUNABLES;
+    assert.ok(tun.crouchExit < tun.crouchEnter, 'the gate is not hysteretic at all');
+
+    const v = new VerticalGestures();
+    const unit = 0.2;
+    let t = settle(v, unit);
+
+    for (let f = 0; f < 6; f++) {
+      t += 33;
+      v.update(hips(STAND + tun.crouchEnter * 1.5 * unit, unit), t);
+    }
+    assert.equal(v.isCrouching, true);
+
+    const between = (tun.crouchEnter + tun.crouchExit) / 2;
+    for (let f = 0; f < 6; f++) {
+      t += 33;
+      v.update(hips(STAND + between * unit, unit), t);
+    }
+    assert.equal(v.isCrouching, true, 'it let go between the thresholds');
+  });
+
+  /**
+   * A body with no measurable torso is a body the pose model is guessing at.
+   * Dividing by it yields Infinity, and an Infinity through a hysteresis gate
+   * is a permanent crouch that no amount of standing up clears.
+   */
+  test('a zero torso is ignored rather than divided by', () => {
+    const v = new VerticalGestures();
+    const t = settle(v, 0.2);
+    v.update(hips(STAND + 0.5, 0), t + 33);
+    assert.equal(v.crouched, false);
+    assert.equal(v.isCrouching, false);
+  });
+
+  /** Up and down are opposite signs of one measurement; both at once is a bug. */
+  test('a jump is not also a crouch', () => {
+    const v = new VerticalGestures();
+    const unit = 0.2;
+    let t = settle(v, unit);
+
+    const up = DEFAULT_JUMP_TUNABLES.jumpEnter * 1.5;
+    for (let f = 0; f < 6; f++) {
+      t += 33;
+      v.update(hips(STAND - up * unit, unit), t);
+    }
+    assert.equal(v.isAirborne, true, 'hips well above baseline is a jump');
+    assert.equal(v.isCrouching, false, 'and must not also read as a crouch');
   });
 });
