@@ -19,6 +19,7 @@
 import { leaderboard } from '../meta/leaderboard';
 import { tunables } from '../meta/tunables';
 import { tournament } from '../meta/tournament';
+import { roundLog } from '../meta/roundlog';
 import { highlights } from '../meta/highlights';
 import { camera } from '../core/camera';
 import { vision } from '../core/vision';
@@ -210,6 +211,14 @@ function rows(fc: FrameContext): Row[] {
   }
   if (leaderboard.saveFailed) {
     out.push({ label: 'scores', value: 'NOT SAVING — DO NOT RELOAD', bad: true });
+  }
+  // The fourth store, added the day the round log was. It is the least costly
+  // one to lose — nobody's turn depends on it — but it is what the playtest
+  // takes home, and a silent loss there wastes the session it was built for.
+  // `DO NOT RELOAD` is deliberately absent: the right move for this one is to
+  // export what is still in memory, not to freeze the stall.
+  if (roundLog.saveFailed) {
+    out.push({ label: 'rounds', value: 'NOT SAVING — EXPORT NOW', bad: true });
   }
 
   // 7. The highlight buffer, which until now reported NOTHING anywhere.

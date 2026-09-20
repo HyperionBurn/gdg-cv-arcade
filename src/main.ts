@@ -20,6 +20,7 @@ import { drawDebugOverlay, toggleDebug, watchForDebug, logDebug } from './shell/
 import { probeStorage } from './meta/storage';
 import { leaderboard } from './meta/leaderboard';
 import { tunables } from './meta/tunables';
+import { roundLog } from './meta/roundlog';
 import { ghosts } from './meta/ghosts';
 import { tournament } from './meta/tournament';
 import { RigCheckScreen } from './shell/rigcheck';
@@ -559,6 +560,7 @@ if (import.meta.env.DEV) {
     leaderboard,
     tunables,
     ghosts,
+    roundLog,
     // `operatorConsole()` has said "for `window.__arcade` and tests" since it
     // was written, and until now neither used it. Driving the console meant
     // synthesising a KeyboardEvent with `code: 'Backquote'` — which tests the

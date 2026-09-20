@@ -291,17 +291,52 @@ describe('a silent save failure is not silent', () => {
    * leaderboard to notice.
    */
   /**
-   * Three stores persist, and all three had the same defect in a different
+   * The stores that persist, all of which had the same defect at a different
    * stage: the leaderboard set a flag nothing read, tunables had no flag at
    * all, and the tournament's `lsSet` returned a boolean that `save()` threw
-   * away. Named individually so adding a fourth store is a deliberate choice
-   * rather than something this suite quietly stops covering.
+   * away.
+   *
+   * THE LIST USED TO BE ONLY THIS, and its comment said naming them
+   * individually made adding a fourth store "a deliberate choice rather than
+   * something this suite quietly stops covering". It did not do that. A fourth
+   * store — the round log — was added on 20 September, and nothing here
+   * failed; it was simply not covered, and the `d` overlay never reported it
+   * while the operator console did. Exactly the split this suite exists to
+   * prevent, arriving through the list rather than through the code.
+   *
+   * So the set is DERIVED from the source below and checked against this list.
+   * The deliberate-choice property is real now: add a store and this fails
+   * until somebody names it here and wires it to both readouts.
    */
   const STORES = [
     { flag: 'tunables.saveFailed', owner: 'src/meta/tunables.ts' },
     { flag: 'tournament.saveFailed', owner: 'src/meta/tournament.ts' },
     { flag: 'leaderboard.saveFailed', owner: 'src/meta/leaderboard.ts' },
+    { flag: 'roundLog.saveFailed', owner: 'src/meta/roundlog.ts' },
   ];
+
+  test('every store that CAN fail to save is on the list above', async () => {
+    const { readdir, readFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+
+    const found: string[] = [];
+    for (const f of await readdir('src/meta')) {
+      if (!f.endsWith('.ts')) continue;
+      const src = await readFile(join('src/meta', f), 'utf8');
+      if (!/^\s*saveFailed\s*=/m.test(src)) continue;
+      // The exported singleton is what the readouts actually name.
+      const m = /export const (\w+) = new \w+\(/.exec(src);
+      assert.ok(m, `src/meta/${f} has a saveFailed flag but no exported singleton to read it from`);
+      found.push(`${m[1]}.saveFailed`);
+    }
+
+    assert.deepEqual(
+      found.sort(),
+      STORES.map((s) => s.flag).sort(),
+      'a persisted store is missing from STORES, so nothing below checks that ' +
+        'its failure reaches a marshal. Add it here AND to both readouts'
+    );
+  });
 
   for (const { flag, owner } of STORES) {
     // The qualified name, not a bare `saveFailed` — otherwise this passes on a

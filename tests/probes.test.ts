@@ -238,13 +238,38 @@ describe('the dev handle reaches the real singletons', () => {
     assert.ok(at > 0, 'the dev handle is gone');
     const block = src.slice(at, src.indexOf('\n  };', at));
 
-    for (const name of [
-      'router', 'camera', 'vision', 'audio', 'simulator',
-      'highlights', 'tournament', 'leaderboard', 'tunables', 'ghosts',
-    ]) {
+    // DERIVED, not listed. The first version named ten singletons and promptly
+    // missed `roundLog` — same category, added the same day. That is the third
+    // guard today to fail by enumerating what was in front of me. Every
+    // `export const x = new Y()` in the app is module-level state by
+    // construction, so that is the rule, and a new one is covered on the day
+    // it is written.
+    const { readdir } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+
+    const singletons: string[] = [];
+    for (const dir of ['src/core', 'src/meta', 'src/shell', 'src/engine']) {
+      for (const f of await readdir(dir)) {
+        if (!f.endsWith('.ts')) continue;
+        const body = await readFile(join(dir, f), 'utf8');
+        for (const m of body.matchAll(/^export const (\w+) = new \w+\(/gm)) {
+          singletons.push(m[1]!);
+        }
+      }
+    }
+    assert.ok(
+      singletons.length >= 10,
+      `found only ${singletons.length} singletons (${singletons.join(', ')}); ` +
+        `this scan has stopped reading the app`
+    );
+
+    for (const name of singletons) {
+      // A regex literal via `RegExp`, with the escapes doubled because this is
+      // a STRING. Written `'[^\w.]'` it becomes `[^w.]`, which still matched
+      // every name here by luck and is not the pattern it reads as.
       assert.match(
         block,
-        new RegExp('(^|[^\w.])' + name + '\s*,'),
+        new RegExp('(^|[^\\w.])' + name + '\\s*,'),
         `\`${name}\` holds module-level state and is not on \`__arcade\`, so the ` +
           `only way to inspect it from a console is a dynamic import — which ` +
           `under Vite can hand back a different instance entirely`
