@@ -42,6 +42,7 @@ import assert from 'node:assert/strict';
 import { PoseTracker } from '../src/core/tracker.ts';
 import { RepCounter, DEFAULT_REP_TUNABLES, type RepTunables } from '../src/core/gestures.ts';
 import { POSE, POSE_LANDMARK_COUNT } from '../src/core/types.ts';
+import { armIsLost, ARM_LOST_SEC } from '../src/games/sixtyseven.ts';
 import type { Landmark, RawPose } from '../src/core/types.ts';
 
 const ASPECT = 16 / 9;
@@ -605,5 +606,71 @@ describe('the rep gate these tests drive is the gate the game ships', () => {
         'is measured against wherever their wrist happened to be on frame one'
     );
     assert.ok(GATE.centreRate < 0.2, 'the centre chases the stroke it is measuring');
+  });
+});
+
+/**
+ * THE ARM THAT WENT AWAY, AND THE SENTENCE THAT EXPLAINS IT.
+ *
+ * `<FACE THE CAMERA>` had never been drawn in any automated run of this app.
+ * A census of every string the roster draws turned up 19 banners that never
+ * appear, and most were failure screens nobody wants to reach — but this one
+ * is different. It is not rare. A player turns to talk to the friend they are
+ * racing, a shoulder crosses a wrist, and the reps stop counting for a reason
+ * nothing on screen explains. It never fired in testing because the simulator
+ * always shows both arms and has no way to be asked not to.
+ *
+ * So the trigger is tested directly instead. These are the four cases that
+ * decide whether a player at a stall gets told what to do.
+ */
+describe('an arm that stops being seen', () => {
+  const MS = ARM_LOST_SEC * 1000;
+
+  test('an arm that was never seen is not lost', () => {
+    // The start of a round, or a player who stepped in late. Warning somebody
+    // about an arm the round has never had is noise at the one moment they
+    // are working out what to do.
+    assert.equal(armIsLost(0, 10_000), false);
+    assert.equal(armIsLost(undefined, 10_000), false);
+  });
+
+  test('an arm seen this frame is not lost', () => {
+    assert.equal(armIsLost(10_000, 10_000), false);
+  });
+
+  test('a blur between frames is not a warning', () => {
+    // The whole reason there is a delay at all: tracking drops a wrist for a
+    // frame or two constantly, and a banner that flickers on every one of
+    // them teaches players to ignore it.
+    assert.equal(armIsLost(10_000, 10_000 + MS / 2), false);
+  });
+
+  test('an arm gone longer than the window is lost', () => {
+    assert.equal(armIsLost(10_000, 10_000 + MS + 1), true);
+  });
+
+  /**
+   * On the boundary it is NOT lost. Strictly greater, so the threshold reads
+   * the same as the comment above the constant: 0.8s may pass unseen.
+   */
+  test('the boundary belongs to the arm', () => {
+    assert.equal(armIsLost(10_000, 10_000 + MS), false);
+  });
+
+  /**
+   * 0.8s is short enough that a player who has turned too far finds out
+   * within one pump. A pump at the counted rate is well under a second, so
+   * the warning cannot take longer than the motion it is about.
+   */
+  test('the window is shorter than a single pump', () => {
+    const secondsPerPump = 1 / 4.5; // 4.5Hz, the rate the rep counter is tuned at
+    assert.ok(
+      ARM_LOST_SEC > secondsPerPump,
+      'shorter than one pump would warn mid-motion, on every rep',
+    );
+    assert.ok(
+      ARM_LOST_SEC < 4 * secondsPerPump,
+      'longer than a few pumps and the player has already stopped trying',
+    );
   });
 });

@@ -242,6 +242,23 @@ Two things the re-run taught that the first sweep did not:
   harness exists to tell apart. It cost about ten probes. `runTurn` now
   preflights the canvas and says so in words.
 
+Two of the nineteen were worth chasing past the label, and both paid:
+
+- **`<FACE THE CAMERA>` is not rare, it is undrivable.** It fires when one ARM
+  goes unseen, not when a player leaves, and the simulator always shows both
+  arms with no way to ask it otherwise. At a stall it is among the most common
+  things that happens — a player turns to talk to the friend they are racing,
+  a shoulder crosses a wrist, and the reps stop counting for a reason nothing
+  on screen explains. The trigger is now `armIsLost` in sixtyseven.ts, pure and
+  tested on all four cases, including the one that matters most: an arm that
+  was NEVER seen is not lost, because warning somebody about an arm the round
+  never had is noise at the moment they are working out what to do.
+- **A player walking off mid-round was never tested at all.** Measured on the
+  20th, 2P 67 Speed, player 2 dropped mid-round: their score freezes (19),
+  player 1 carries on (75), the round terminates normally to initials, and
+  **zero console errors**. The seat is NOT re-assigned mid-round, which is
+  right — re-seating would hand a walk-off's score to whoever stepped in.
+
 Also worth knowing: the brackets are not always what draws. `drawRankLine`
 writes `<FIRST ON THE BOARD>`, and what appears on screen at that moment is
 the instant replay stamp drawing `FIRST ON THE BOARD` unbracketed, 450 times

@@ -148,7 +148,29 @@ const REP_GATE = {
  * Long enough that an ordinary blur between frames is not a warning, short
  * enough that a player who has turned too far finds out within one pump.
  */
-const ARM_LOST_SEC = 0.8;
+export const ARM_LOST_SEC = 0.8;
+
+/**
+ * Has an arm been unseen long enough to say so on the HUD?
+ *
+ * Exported because this is the trigger for `<FACE THE CAMERA>`, and a census
+ * of everything the app draws found that banner had NEVER been drawn in any
+ * automated run. That is not because it is rare — it is because the simulator
+ * always shows both arms, and there is no way to ask it not to. At a stall it
+ * is one of the most frequent things that happens: a player turns to talk to
+ * the friend they are racing, one shoulder occludes a wrist, and the reps stop
+ * counting for a reason nothing on screen explains.
+ *
+ * NEVER SEEN IS NOT LOST. `seenAt` of 0 means this arm has not been picked up
+ * yet — at the very start of a round, or for a player who stepped in late —
+ * and warning somebody about an arm the round has never had is noise at the
+ * exact moment they are working out what to do. Only an arm that WAS there and
+ * then went away is worth a sentence.
+ */
+export function armIsLost(seenAtMs: number | undefined, nowMs: number): boolean {
+  if (seenAtMs === undefined) return false;
+  return seenAtMs > 0 && nowMs - seenAtMs > ARM_LOST_SEC * 1000;
+}
 
 /** Visibility below which a landmark does not count. Matches core/gestures.ts. */
 const MIN_VISIBILITY = 0.4;
@@ -292,8 +314,7 @@ export class SixtySevenGame extends GameBase {
   private armLost(slot: number, side: 'left' | 'right', now: number): boolean {
     const seen = this.armSeenAt[slot];
     if (!seen) return false;
-    const at = seen[side];
-    return at > 0 && now - at > ARM_LOST_SEC * 1000;
+    return armIsLost(seen[side], now);
   }
 
   /**
