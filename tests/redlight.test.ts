@@ -231,3 +231,78 @@ describe('the elimination threshold lands where its comment says', () => {
     }
   });
 });
+
+
+/**
+ * THE STOPPING BUDGET IS QUOTED FOUR TIMES AND THREE OF THEM HAD DRIFTED.
+ *
+ * `graceSec + breachSec` is how long a player has to stop after the light
+ * turns. redlight.ts stated it in four places and they disagreed with each
+ * other: 0.85s, 1.05s, 1.2s — and the file HEADER, describing the one number
+ * it says is "not tuning", called the grace 400ms when the constant is 750.
+ *
+ * Every one of them was correct when it was written. `graceSec` went 0.55 ->
+ * 0.75 from the playtest's "red light freezes too fast", and `breachSec` went
+ * 0.30 -> 0.45 independently; each change updated its own comment and none
+ * updated the others.
+ *
+ * So the budget is computed here and the file is made to agree with it.
+ */
+describe('the stopping budget is what the file says it is', () => {
+  const { graceSec, breachSec, energyTau } = DEFAULT_REDLIGHT_TUNABLES;
+  const budget = graceSec + breachSec;
+
+  const source = async (): Promise<string> => {
+    const { readFile } = await import('node:fs/promises');
+    return readFile('src/games/redlight.ts', 'utf8');
+  };
+
+  test('every "graceSec + breachSec = Ns" in the file is the real sum', async () => {
+    const src = await source();
+    const quoted = [...src.matchAll(/graceSec \+ breachSec[^.\n]*?=\s*([\d.]+)s/g)].map((m) =>
+      Number(m[1])
+    );
+    assert.ok(quoted.length > 0, 'the file stopped stating the stopping budget');
+
+    const wrong = quoted.filter((q) => Math.abs(q - budget) > 0.005);
+    assert.deepEqual(
+      wrong,
+      [],
+      `the file quotes ${wrong.join(', ')}s for a budget that is ` +
+        `${budget.toFixed(2)}s (graceSec ${graceSec} + breachSec ${breachSec})`
+    );
+  });
+
+  /**
+   * The header is the first thing anybody reads about this game, and it names
+   * the grace as the one thing that is not tuning.
+   */
+  test('and the header quotes the real grace period', async () => {
+    const src = await source();
+    const m = /`graceSec` \((\d+)ms\) of red/.exec(src);
+    assert.ok(m, 'the header stopped naming the grace period');
+    assert.equal(
+      Number(m[1]),
+      Math.round(graceSec * 1000),
+      `the header says ${m[1]}ms; graceSec is ${graceSec * 1000}ms. It calls ` +
+        `this the one number that is not tuning.`
+    );
+  });
+
+  /**
+   * And the settling subtraction: judging at exactly `graceSec` would spend
+   * part of the grace on the smoother still reporting the flail.
+   */
+  test('and the effective grace after settling is the one quoted', async () => {
+    const src = await source();
+    const m = /turn a (\d+)ms grace into a (\d+)ms one/.exec(src);
+    assert.ok(m, 'the settling note stopped quoting the grace it costs');
+    assert.equal(Number(m[1]), Math.round(graceSec * 1000), 'the stated grace is not graceSec');
+    assert.equal(
+      Number(m[2]),
+      Math.round((graceSec - energyTau * 3) * 1000),
+      `judging at graceSec leaves ${((graceSec - energyTau * 3) * 1000).toFixed(0)}ms, ` +
+        `not the ${m[2]}ms quoted`
+    );
+  });
+});

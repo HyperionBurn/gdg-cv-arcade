@@ -22,7 +22,7 @@
  *    filter. Judging movement the instant the light turns red eliminates
  *    everybody for momentum they could not have stopped, and the game goes
  *    from funny to infuriating in one round. Nothing is judged for the first
- *    `graceSec` (400ms) of red. Everything else here is tuning; this is not.
+ *    `graceSec` (750ms) of red. Everything else here is tuning; this is not.
  *
  * Eliminated players are never removed. Their lane goes flat `COLORS.muted` and
  * their progress freezes exactly where they were caught, and that frozen
@@ -340,7 +340,11 @@ export const DEFAULT_REDLIGHT_TUNABLES: RedLightTunables = {
   //
   // This is a FEEL number and human report is the right evidence for it —
   // there is no reaction time in the simulator to measure against. The budget
-  // to stop is graceSec + breachSec, so this moves it from 0.85s to 1.05s.
+  // to stop is graceSec + breachSec, so this moves it from 1.00s to 1.20s.
+  // (That sentence read 0.85s to 1.05s until 2026-09-20, which was true when
+  // breachSec was 0.30; it went to 0.45 and this was not updated. Unquoted on
+  // purpose — the feedback ledger's completeness scrape reads quoted text near
+  // the word playtest as a tester report, and it is a correction note.)
   //
   // A simple visual reaction is ~250ms before you add "notice the doll turned",
   // "decide", and "arrest a moving body". First-timers in a loud hall, watching
@@ -355,7 +359,7 @@ export const DEFAULT_REDLIGHT_TUNABLES: RedLightTunables = {
   // eliminated motionless players.
   //
   // The cost is that the total budget to stop becomes graceSec + breachSec =
-  // 0.85s. That is MORE forgiving than before, not less, and the grace is
+  // 1.2s. That is MORE forgiving than before, not less, and the grace is
   // already the number the whole game turns on.
   // 0.3 -> 0.45.
   //
@@ -717,9 +721,15 @@ export class RedLightGame extends GameBase {
    * `graceSec` is the PLAYER's allowance to stop. The detector's own settling
    * time is added on top, rather than charged to the same account: an energy
    * estimate smoothed over `energyTau` is still reporting the flail for about
-   * three time constants after the flail ended, so judging at exactly 400ms
-   * would quietly turn a 400ms grace into a 100ms one and make the single most
-   * important mechanic in the game a lie.
+   * three time constants after the flail ended, so judging at exactly
+   * `graceSec` would quietly turn a 750ms grace into a 450ms one and make the
+   * single most important mechanic in the game a lie.
+   *
+   * Stated as a subtraction rather than a pair of numbers on purpose: this
+   * said "judging at exactly 400ms would turn a 400ms grace into a 100ms one",
+   * which was the arithmetic for a `graceSec` of 0.4. It is 0.75 now, and the
+   * 3 x `energyTau` it loses is 0.3 either way — the SHAPE was right and only
+   * the numbers went stale.
    *
    * Measuring instantaneously instead was the other option, and it is worse:
    * the per-frame landmark delta for a motionless player swings between 0.2
