@@ -2287,15 +2287,24 @@ export abstract class GameBase implements Screen {
     const t = this.timeLeft / this.roundTotal;
     const barH = vh(v, m.barH);
     const urgent = this.timeLeft <= 5;
+    // SAFE, NOT A BARE 3. theme.ts: "TV overscan safe area, in vh, on every
+    // edge — consumer TVs still crop 3-5% of the signal." These were inset 3,
+    // which is half a vh INSIDE the boundary the rest of the app respects.
+    //
+    // MEASURED at 1024x768 by recording every string's extent against the safe
+    // box: the clock sat at x = 23 against a boundary of 27, and screen shake
+    // (up to height x 0.035 = 27px) took it to 10. On a panel that crops, the
+    // first digit of the round timer is the thing that goes.
+    const inset = vh(v, SAFE);
     progressBar(
-      ctx, vh(v, 3), vh(v, m.barY), v.width - vh(v, 6), barH,
+      ctx, inset, vh(v, m.barY), v.width - inset * 2, barH,
       t, urgent ? COLORS.red : this.config.color, urgent ? 22 : 12
     );
 
     drawText(
       ctx,
       this.timeLeft.toFixed(1),
-      m.inlineRow ? vh(v, 3) : v.width / 2,
+      m.inlineRow ? inset : v.width / 2,
       vh(v, m.clockY),
       {
         size: vh(v, m.clockSize),
@@ -2374,7 +2383,9 @@ export abstract class GameBase implements Screen {
     const m = this.hudMetrics();
     const chase = (size: number): number => vh(v, size * m.chaseScale);
     // Flush to the slot's right edge in a row layout, centred otherwise.
-    const chaseX = m.inlineRow ? rect.x + rect.width - vh(v, 3) : rect.centerX;
+    // Also SAFE: in a one-slot layout `rect.width` is the whole screen, so a
+    // 3vh inset put the chase line's right edge 4px past the overscan boundary.
+    const chaseX = m.inlineRow ? rect.x + rect.width - vh(v, SAFE) : rect.centerX;
     const chaseAlign = m.inlineRow ? ('right' as const) : ('center' as const);
     const score = this.scoreFor(slot);
 

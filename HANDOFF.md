@@ -20,13 +20,13 @@ The authority for everything else is:
 
 ## State
 
-Green as of the last commit: **544 tests, 115 suites, 0 failures**, typecheck
+Green as of the last commit: **553 tests, 119 suites, 0 failures**, typecheck
 clean, production build verified to make **zero external requests**.
 
 ```bash
 npm run setup      # fetch models + fonts — REQUIRED before first run
 npm run dev        # http://localhost:5173
-npm test           # 544 tests, ~10s
+npm test           # 553 tests, ~10s
 npm run typecheck
 npm run kiosk      # production build, served on :4173 — use this on the day
 ```
@@ -160,6 +160,31 @@ Two things make this work that are worth repeating:
 - **Then check the trigger, not just the guard.** Every one of these had
   passing tests. They tested the mechanism and never asked whether the
   condition could occur.
+
+---
+
+## And measure it at 4:3
+
+The second most productive sweep, and it only happened because the pane was
+1536×1152 by accident. Every one of these is fine at 16:9 and wrong at 4:3,
+and the stall's TV is unknown until setup:
+
+| At 4:3 | Found |
+|---|---|
+| Menu blurbs | **1.42vh**, below the 1.6vh the file itself calls "unreadable from 3m". Fixed by allowing a third wrapped line, then capping at the title size when that overshot. |
+| Attract reel pill | 1.55vh — the `micro` size theme.ts reserves for "operator, diagnostic and decorative only". Now fitted from `TYPE.label`. |
+| `<BLADES OUT!>` | Drawn at **x = -45** on a 1536-wide stage. The horizontal clamp was reserving `estimateHalfWidth`, which is 14-31% too narrow on every popup string in the app. |
+
+The method is the same each time: patch `fillText`, record the size and the
+left/right extent of every string against the viewport and the overscan safe
+area, and read the worst.
+
+**Two traps in doing it.** `#stage` reports **300×150** until the render loop
+has run once, and the loop is throttled while the pane is hidden — so drive
+`__arcade.tick(3)` first and refuse to measure while the stage looks like that,
+or every derived figure is out by the ratio. And `tr.a` includes the device
+pixel ratio, so work in stage pixels throughout rather than mixing them with
+viewport units.
 
 ---
 

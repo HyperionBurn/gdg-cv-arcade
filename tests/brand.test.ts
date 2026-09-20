@@ -735,3 +735,65 @@ describe('fitted text is measured the way it is drawn', () => {
     assert.match(src, /maxWidth\?: number;/, 'drawText lost its maxWidth option');
   });
 });
+
+
+/**
+ * THE OVERSCAN SAFE AREA WAS A CONSTANT NOTHING OBEYED.
+ *
+ * theme.ts: "TV overscan safe area, in vh, on every edge. Consumer TVs still
+ * crop 3-5% of the signal and the stall will not get to choose the panel."
+ * `SAFE` is 3.5 — and the HUD's own edge furniture was inset a bare 3.
+ *
+ * MEASURED at 1024x768 by recording every drawn string's extent against the
+ * safe box: the round clock sat at x = 23 against a boundary of 27, and screen
+ * shake — up to height x 0.035, which is 27px — carried it to 10. On a panel
+ * that crops, the first digit of the round timer is what goes.
+ *
+ * Nothing anywhere checked `SAFE` was used. This is a source guard rather than
+ * a rendered measurement because the values are vh literals in a draw call, and
+ * a literal is exactly what went wrong.
+ */
+describe('the HUD respects the overscan safe area', () => {
+  const hud = async (): Promise<string> => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/games/base.ts', 'utf8');
+    return src
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\/\/.*$/, ''))
+      .join('\n');
+  };
+
+  test('the clock and the progress bar are inset by SAFE, not a literal', async () => {
+    const code = await hud();
+    // ANCHOR ON THE CLOCK, not on `progressBar(` — there are two calls and
+    // indexOf finds the OTHER one, 1080 lines earlier. That is the third time
+    // today a guard of mine read a different piece of code than I meant.
+    const at = code.indexOf('this.timeLeft.toFixed(1)');
+    assert.ok(at > 0, 'the HUD no longer draws a round clock');
+    const span = code.slice(Math.max(0, at - 500), at + 200);
+    assert.match(
+      span,
+      /const inset = vh\(v, SAFE\)/,
+      'the HUD clock and bar are back on a hardcoded inset. SAFE is 3.5 and ' +
+        'they were 3 — half a vh inside the boundary, before shake moves them'
+    );
+    assert.doesNotMatch(
+      span,
+      /progressBar\(\s*ctx,\s*vh\(v,\s*3\)/,
+      'the progress bar starts inside the safe area again'
+    );
+  });
+
+  test('and so does the chase line, which is flush to a slot edge', async () => {
+    const code = await hud();
+    const at = code.indexOf('const chaseX =');
+    assert.ok(at > 0, 'the chase line no longer computes an x');
+    assert.match(
+      code.slice(at, at + 160),
+      /vh\(v, SAFE\)/,
+      'in a one-slot layout rect.width is the whole screen, so a 3vh inset ' +
+        "puts the chase line's right edge past the overscan boundary"
+    );
+  });
+});
