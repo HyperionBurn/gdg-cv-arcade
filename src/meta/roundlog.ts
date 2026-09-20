@@ -111,8 +111,85 @@ function validRow(x: unknown): RoundRecord | null {
   };
 }
 
+/**
+ * INITIALS ENTRY TIMES LIVE HERE TOO, AND THAT NEEDS A WORD.
+ *
+ * FEEDBACK.md owes the next playtest one number for the initials screen:
+ * how long real people actually take to spell three letters, so the 16s
+ * `HARD_DEADLINE_SEC` backstop can shrink if nobody needs it. That was left
+ * unrecorded because initials is a SCREEN, not a round, and never passes
+ * through the round hook.
+ *
+ * True, but it is not a reason to make somebody hold a stopwatch at a stall
+ * they are also running. The times are not rounds, so they are not rows: a
+ * `RoundRecord` has a game and a score and this has neither, and widening the
+ * row to fit would make every round carry two dead fields.
+ *
+ * They live in the same store because of the pack-up instruction. FEEDBACK.md
+ * says "take the export before you pack up", once, and a second store means a
+ * second thing to remember at the one moment of the day when everybody is
+ * tired and the laptop is about to be closed.
+ *
+ * 200 is far more than a distribution needs and about 1.5 KB.
+ */
+const INITIALS_MAX = 200;
+
+/** Longer than this is somebody walking away, not somebody typing. */
+const INITIALS_CEILING_SEC = 120;
+
+/**
+ * TWO SHAPES, BECAUSE THE OLD ONE IS ALREADY ON DISK.
+ *
+ * This key held a BARE ARRAY of rounds before initials entry times joined it,
+ * and any laptop that has run a session already has that array sitting in it
+ * — including the one going to the stall. Reading only the new shape would
+ * silently drop a day of rounds, which is the single failure this store
+ * exists to prevent, so the old shape is still accepted and simply carries no
+ * entry times.
+ *
+ * Exported because it is the decision, and a migration that only runs inside
+ * a singleton's constructor cannot be tested without reconstructing the
+ * singleton. Anything unreadable comes back empty rather than throwing: this
+ * runs during boot on a kiosk.
+ */
+export function parseStored(raw: string): { rows: RoundRecord[]; initials: number[] } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { rows: [], initials: [] };
+  }
+
+  const legacy = Array.isArray(parsed);
+  // Annotated rather than inferred: `legacy` is a boolean, so it does not
+  // narrow `parsed` the way an inline `Array.isArray` would, and the inferred
+  // type collapses to `{}`.
+  const rowsIn: unknown[] | null = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray((parsed as { rounds?: unknown })?.rounds)
+      ? (parsed as { rounds: unknown[] }).rounds
+      : null;
+  if (!rowsIn) return { rows: [], initials: [] };
+
+  // Per row, so one corrupt entry costs one round rather than the day.
+  const rows = rowsIn.map(validRow).filter((r): r is RoundRecord => r !== null).slice(-MAX_ROWS);
+
+  const secsIn = legacy ? [] : ((parsed as { initials?: unknown }).initials ?? []);
+  const initials = Array.isArray(secsIn)
+    ? secsIn
+        .filter(
+          (n): n is number =>
+            typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= INITIALS_CEILING_SEC,
+        )
+        .slice(-INITIALS_MAX)
+    : [];
+
+  return { rows, initials };
+}
+
 class RoundLog {
   private rows: RoundRecord[] = [];
+  private entrySecs: number[] = [];
 
   /**
    * True once a write has failed, like the other three stores.
@@ -131,10 +208,9 @@ class RoundLog {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return;
-      const parsed: unknown = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return;
-      // Per row, so one corrupt entry costs one round rather than the day.
-      this.rows = parsed.map(validRow).filter((r): r is RoundRecord => r !== null).slice(-MAX_ROWS);
+      const { rows, initials } = parseStored(raw);
+      this.rows = rows;
+      this.entrySecs = initials;
     } catch {
       // Corrupt or unavailable storage must not take the kiosk down.
       this.rows = [];
@@ -143,7 +219,7 @@ class RoundLog {
 
   private save(): void {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.rows));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ rounds: this.rows, initials: this.entrySecs }));
       this.saveFailed = false;
     } catch {
       /* private mode / quota — keep running in memory */
@@ -173,7 +249,50 @@ class RoundLog {
 
   clear(): void {
     this.rows = [];
+    this.entrySecs = [];
     this.save();
+  }
+
+  /**
+   * One completed initials entry, in seconds. Never throws, for the same
+   * reason `add` does not: this fires as a player leaves the screen.
+   *
+   * Only CALLED entries count, not abandoned ones. A player who walked away
+   * and hit the deadline did not take 16s to type, and averaging those in
+   * would argue for keeping a backstop that the walk-aways themselves caused.
+   */
+  logInitials(seconds: number): void {
+    if (typeof seconds !== 'number' || !Number.isFinite(seconds)) return;
+    if (seconds < 0 || seconds > INITIALS_CEILING_SEC) return;
+    this.entrySecs.push(Math.round(seconds * 10) / 10);
+    if (this.entrySecs.length > INITIALS_MAX) {
+      this.entrySecs.splice(0, this.entrySecs.length - INITIALS_MAX);
+    }
+    this.save();
+  }
+
+  /**
+   * The shape of those times, which is the actual FEEDBACK.md question:
+   * can `HARD_DEADLINE_SEC` come down from 16?
+   *
+   * `p90` is the number to read, not `median`. The backstop exists for the
+   * SLOW player, so the only question it answers is how long the slowest
+   * tenth take. A median of 6s next to a p90 of 15s means 16 is doing its job.
+   */
+  initialsStats(): { count: number; median: number; p90: number; max: number } | null {
+    if (this.entrySecs.length === 0) return null;
+    const sorted = [...this.entrySecs].sort((a, b) => a - b);
+    // The `?? 0` never fires: the empty case returned above. It is here
+    // because `noUncheckedIndexedAccess` is on, which is the setting that
+    // caught a real off-by-one in the chase line earlier.
+    const at = (q: number): number =>
+      sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))] ?? 0;
+    return {
+      count: sorted.length,
+      median: at(0.5),
+      p90: at(0.9),
+      max: sorted[sorted.length - 1] ?? 0,
+    };
   }
 
   /**
@@ -189,7 +308,11 @@ class RoundLog {
   }
 
   exportJSON(): string {
-    return JSON.stringify({ exported: Date.now(), rounds: this.rows }, null, 2);
+    return JSON.stringify(
+      { exported: Date.now(), rounds: this.rows, initialsSeconds: this.entrySecs },
+      null,
+      2,
+    );
   }
 }
 

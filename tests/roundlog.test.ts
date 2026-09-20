@@ -18,7 +18,7 @@
 import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { roundLog } from '../src/meta/roundlog.ts';
+import { roundLog, parseStored } from '../src/meta/roundlog.ts';
 import type { RoundRecord } from '../src/meta/roundlog.ts';
 
 const row = (over: Partial<RoundRecord> = {}): RoundRecord => ({
@@ -146,7 +146,7 @@ describe('the round log', () => {
       if (!/roundLog\./.test(src)) continue;
       // Writing and counting are fine anywhere. Reading the ROWS back is what
       // would make this an input to something.
-      if (/roundLog\.(all|exportJSON)\(/.test(src)) readers.push(rel);
+      if (/roundLog\.(all|exportJSON|initialsStats)\(/.test(src)) readers.push(rel);
     }
 
     assert.deepEqual(
@@ -155,5 +155,119 @@ describe('the round log', () => {
       'something outside the operator console reads the round log back. It is ' +
         'safe precisely because it is write-only to the app — see this note'
     );
+  });
+});
+
+/**
+ * INITIALS ENTRY TIMES, which share this store rather than starting a new one.
+ *
+ * FEEDBACK.md's initials row asks one question — can the 16s
+ * `HARD_DEADLINE_SEC` backstop shrink — and said the number was "not recorded"
+ * because initials is a screen and never passes through the round hook. That
+ * is a fact about the hook, not about whether the number can be had, and
+ * "somebody at the stall can watch for it" is not a plan for a person who is
+ * also running the queue.
+ */
+describe('initials entry times', () => {
+  beforeEach(() => {
+    roundLog.clear();
+  });
+
+  test('reports the shape of real entry times', () => {
+    for (const t of [3, 4, 5, 6, 7, 8, 9, 10, 11, 15]) roundLog.logInitials(t);
+    const stats = roundLog.initialsStats();
+    assert.equal(stats?.count, 10);
+    assert.equal(stats?.median, 8);
+    assert.equal(stats?.p90, 15);
+    assert.equal(stats?.max, 15);
+  });
+
+  /**
+   * p90 is the one the backstop turns on, and it is the reason a mean would
+   * be the wrong summary: nine fast entries and one slow one is exactly the
+   * distribution that a mean says is fine and a queue does not.
+   */
+  test('one slow entry moves p90 and barely moves the median', () => {
+    for (const t of [4, 4, 5, 5, 5, 6, 6, 6, 7]) roundLog.logInitials(t);
+    const fast = roundLog.initialsStats();
+    roundLog.logInitials(15.4);
+    const slow = roundLog.initialsStats();
+
+    // p90 lands ON the slow entry: one straggler in ten is exactly what the
+    // backstop is sized for, and it shows up here at full value.
+    assert.equal(slow?.p90, 15.4);
+    // The median stays inside the fast cluster. It shifts by a second because
+    // `at()` takes the upper of the two middles on an even count — worth
+    // knowing before reading these numbers, and far less than p90's 8.4s jump.
+    assert.ok((slow?.median ?? 0) <= 6, 'the median stays with the fast majority');
+    assert.ok(
+      (slow?.p90 ?? 0) - (fast?.p90 ?? 0) > (slow?.median ?? 0) - (fast?.median ?? 0),
+      'p90 must move further than the median, or it is not measuring stragglers',
+    );
+  });
+
+  test('nothing to report is null, not a zero', () => {
+    // A zeroed row reads as "entries take 0s", which would argue for deleting
+    // the backstop on the strength of no data at all.
+    assert.equal(roundLog.initialsStats(), null);
+  });
+
+  test('refuses times that are not times', () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, -1, 121]) {
+      roundLog.logInitials(bad as number);
+    }
+    assert.equal(roundLog.initialsStats(), null);
+  });
+
+  test('the export carries them next to the rounds', () => {
+    roundLog.add(row());
+    roundLog.logInitials(6.2);
+    const parsed = JSON.parse(roundLog.exportJSON()) as {
+      rounds: unknown[];
+      initialsSeconds: number[];
+    };
+    assert.equal(parsed.rounds.length, 1);
+    assert.deepEqual(parsed.initialsSeconds, [6.2]);
+  });
+});
+
+/**
+ * THE MIGRATION, WHICH PROTECTS DATA THAT IS ALREADY ON THE STALL LAPTOP.
+ *
+ * This key held a bare array of rounds until entry times joined it. Reading
+ * only the new shape would drop every round recorded before the change, in
+ * silence, which is the exact failure the store was written to prevent.
+ */
+describe('reading what is already stored', () => {
+  test('a bare array from the old shape still loads its rounds', () => {
+    const legacy = JSON.stringify([row(), row({ game: 'rhythm' })]);
+    const { rows, initials } = parseStored(legacy);
+    assert.equal(rows.length, 2);
+    assert.equal(rows[1]?.game, 'rhythm');
+    assert.deepEqual(initials, [], 'the old shape carried no entry times');
+  });
+
+  test('the new shape loads both halves', () => {
+    const stored = JSON.stringify({ rounds: [row()], initials: [4.1, 9.3] });
+    const { rows, initials } = parseStored(stored);
+    assert.equal(rows.length, 1);
+    assert.deepEqual(initials, [4.1, 9.3]);
+  });
+
+  test('a corrupt store costs the log, not the boot', () => {
+    for (const raw of ['', 'not json', '{"rounds":7}', 'null']) {
+      const out = parseStored(raw);
+      assert.deepEqual(out, { rows: [], initials: [] }, raw);
+    }
+  });
+
+  test('a junk entry time is dropped without taking the rounds with it', () => {
+    const stored = JSON.stringify({
+      rounds: [row()],
+      initials: [5, 'nine', null, 1e9, -3, 8],
+    });
+    const { rows, initials } = parseStored(stored);
+    assert.equal(rows.length, 1, 'the rounds must survive a bad entry time');
+    assert.deepEqual(initials, [5, 8]);
   });
 });

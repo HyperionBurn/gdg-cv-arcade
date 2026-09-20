@@ -164,7 +164,7 @@ Rows above are closed. These are open, and each names the number to watch:
 |---|---|---|---|
 | Pose Match | Pass rate on the first wall. The gate is expected to want LOWER on real bodies than on the simulator. | **MATCH THRESHOLD** | **Recorded.** `firstWallCleared`, `firstWallGate`, `wallsFaced`, `wallsCleared` |
 | Runner | First-timer hit rate on `low` (jump) obstacles specifically. Under ~60%, weight them to near zero and ship lanes + slides. | `TrackGenerator.pickKind` | **Recorded.** `lowFaced` / `lowHit`, and the same by `high` and `block` |
-| Initials | Real entry times. The 16 s backstop can shrink if nobody needs it. | `HARD_DEADLINE_SEC` | Not recorded — initials is a screen, not a round, so it does not pass through the hook |
+| Initials | Real entry times. The 16 s backstop can shrink if nobody needs it. **Read p90, not the median.** | `HARD_DEADLINE_SEC` | **Recorded.** `initialsSeconds` in the same export; median/p90/slowest on the console's DATA tab |
 | Red Light | Whether five racers in one frame hold their lanes for a full round. | **MOVE THRESHOLD** | Not recorded — it is an identity question, and lane holding has no counter yet |
 
 **Take the export before you pack up.** Operator console → **DATA** →
@@ -172,12 +172,24 @@ Rows above are closed. These are open, and each names the number to watch:
 above; `meta/roundlog.ts` says what is in it and why. The other three exports
 carry what a round ENDED on and cannot answer any of these.
 
-Two of the four are instrumented because two of them are countable from
-inside a round. The other two are not deferred out of laziness: initials
-entry does not go through the round hook at all, and "did five people keep
-their own lanes" is a question about tracker identity rather than a tally.
-Both still need somebody watching — which is fine, because both are things a
-person standing at the stall can actually see.
+Three of the four are instrumented. Initials was the third, and it was
+listed here as unrecordable because entry is a SCREEN and never passes
+through the round hook — true about the hook, and not a reason to ask
+somebody who is also running a queue to hold a stopwatch. The screen already
+tracks `elapsed` for its own backstop, so it now reports it: only on a
+deliberate finish, never on a timeout or a skip. Counting those would report
+that entries take about sixteen seconds, which is the backstop's own
+duration measured by the players who never typed anything, arguing to keep
+the backstop that produced the number.
+
+Read **p90**, not the median. The backstop exists for the slowest players and
+nobody else, so the only question it answers is how long the slowest tenth
+take. A median of 6s beside a p90 of 15s means 16 is doing its job.
+
+The one still open is Red Light, and it is genuinely not a tally: "did five
+people keep their own lanes" is a question about tracker identity. That one
+needs somebody watching, which is fine — it is a thing a person standing at
+the stall can actually see.
 
 Instrumenting the Runner row paid for itself before the playtest: the first
 numbers it produced were a 100% hit rate on every obstacle kind, which turned

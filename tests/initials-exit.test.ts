@@ -78,3 +78,82 @@ describe('the initials screen can be left without typing a name', () => {
     );
   });
 });
+
+/**
+ * AND WHAT THAT EXIT MUST NOT DO: count as an entry time.
+ *
+ * The screen now records how long a name took to spell, so FEEDBACK.md's
+ * initials row can finally be answered with a number instead of an
+ * impression. The measurement is only worth having if it measures TYPING.
+ * Fold in the 16s deadline and the skips and it reports that entries take
+ * about sixteen seconds — which is the backstop's own duration, measured by
+ * the players who never typed anything, arguing to keep the backstop that
+ * produced the number.
+ */
+describe('only a real entry counts as an entry time', () => {
+  const source = async (): Promise<string> => {
+    const { readFile } = await import('node:fs/promises');
+    return readFile('src/shell/initials.ts', 'utf8');
+  };
+
+  /**
+   * DERIVED FROM THE SIGNATURE, not from a list kept here. A fifth reason
+   * added to the union would otherwise pass this test while nothing checked
+   * whether it should record — which is how the last six enumerated guards in
+   * this repo went stale.
+   */
+  test('every exit states which kind of exit it is', async () => {
+    const src = await source();
+    const signature = /private finish\(reason: ([^)]+)\):/.exec(src);
+    assert.ok(signature, 'finish() must take a named reason');
+
+    const reasons = [...(signature[1] ?? '').matchAll(/'([a-z]+)'/g)].map((m) => m[1]);
+    assert.ok(reasons.length >= 2, 'the union should hold every exit kind');
+
+    const calls = [...src.matchAll(/this\.finish\(([^)]*)\)/g)].map((m) => m[1]?.trim() ?? '');
+    assert.ok(calls.length >= 4, 'every exit path should be covered');
+    for (const arg of calls) {
+      assert.ok(
+        reasons.some((r) => arg === `'${r}'`),
+        `this.finish(${arg}) does not name a reason from the signature`,
+      );
+    }
+  });
+
+  test('the entry time is written only under the completed branch', async () => {
+    const src = await source();
+    const guard = src.indexOf("if (reason === 'completed') {");
+    assert.ok(guard > 0, 'the completed branch must exist by that name');
+
+    const calls = [...src.matchAll(/roundLog\.logInitials\(/g)];
+    assert.equal(calls.length, 1, 'exactly one place should record an entry time');
+    assert.ok(
+      (calls[0]?.index ?? 0) > guard,
+      'logInitials is called outside the completed branch, so timeouts and ' +
+        'skips would be counted as typing times',
+    );
+  });
+
+  /**
+   * The screen is the only writer. If a game starts logging entry times the
+   * distribution stops being about this screen at all.
+   */
+  test('nothing else in the app records an entry time', async () => {
+    const { readdir, readFile } = await import('node:fs/promises');
+    const walk = async (dir: string): Promise<string[]> => {
+      const out: string[] = [];
+      for (const e of await readdir(dir, { withFileTypes: true })) {
+        const full = `${dir}/${e.name}`;
+        if (e.isDirectory()) out.push(...(await walk(full)));
+        else if (e.name.endsWith('.ts')) out.push(full);
+      }
+      return out;
+    };
+
+    const writers: string[] = [];
+    for (const file of await walk('src')) {
+      if (/\.logInitials\(/.test(await readFile(file, 'utf8'))) writers.push(file);
+    }
+    assert.deepEqual(writers, ['src/shell/initials.ts']);
+  });
+});

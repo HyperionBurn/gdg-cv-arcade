@@ -1343,6 +1343,26 @@ export class OperatorOverlay {
       )
     );
 
+    // INITIALS ENTRY TIMES, next to the rounds because they ship in the same
+    // export. FEEDBACK.md asks one question of this screen — can the 16s
+    // backstop shrink — and p90 is the number that answers it, because the
+    // backstop exists for the slowest players and nobody else.
+    const entry = roundLog.initialsStats();
+    pane.appendChild(
+      el(
+        'p',
+        'op-hint',
+        entry === null
+          ? 'Initials entry: no completed entries yet. Timeouts and skips are ' +
+            'not counted, so this stays empty until somebody spells a name.'
+          : `Initials entry (${entry.count}): median ${entry.median}s — ` +
+            `p90 ${entry.p90}s — slowest ${entry.max}s. ` +
+            (entry.p90 <= 10
+              ? 'p90 is under 10s, so the 16s backstop has room to come down.'
+              : 'p90 is near the 16s backstop; leave it where it is.')
+      )
+    );
+
     pane.appendChild(
       el(
         'p',

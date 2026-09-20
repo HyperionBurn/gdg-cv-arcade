@@ -49,6 +49,7 @@ import { ParticleSystem, BURST } from '../engine/particles';
 import { Projection } from '../engine/projection';
 import { drawPose, SKELETON_STYLES } from '../engine/skeleton';
 import { FACTIONS, leaderboard, type GameId, type RankResult } from '../meta/leaderboard';
+import { roundLog } from '../meta/roundlog';
 import { MENU_TILES } from './menu';
 import {
   COLORS,
@@ -342,7 +343,7 @@ export class InitialsScreen implements Screen {
 
     if (this.phase !== 'done') {
       this.awayTime = this.player ? 0 : this.awayTime + fc.dt;
-      if (this.elapsed >= HARD_DEADLINE_SEC || this.awayTime >= ABANDONED_SEC) this.finish();
+      if (this.elapsed >= HARD_DEADLINE_SEC || this.awayTime >= ABANDONED_SEC) this.finish('timeout');
     }
 
     this.layout(fc);
@@ -379,7 +380,10 @@ export class InitialsScreen implements Screen {
           this.factionHold -= fc.dt;
           if (this.factionHold <= 0) {
             this.factionHold = -1;
-            this.finish();
+            // A repeat player whose faction was pre-filled and auto-confirmed.
+            // They typed their name at their own pace; this is a normal finish,
+            // not the backstop firing, so it counts.
+            this.finish('completed');
           }
         }
       }
@@ -612,7 +616,7 @@ export class InitialsScreen implements Screen {
         //
         // Submits exactly as the 16s deadline would have: same padded entry,
         // same score, same everything except sixteen seconds.
-        if (this.letters.length === 0) this.finish();
+        if (this.letters.length === 0) this.finish('skipped');
         else this.settleLetters();
         return;
       }
@@ -639,7 +643,7 @@ export class InitialsScreen implements Screen {
       leaderboard.setLastFaction(this.faction);
       BURST.celebrate(this.particles, x, y, [COLORS.yellow, COLORS.text], 0.7);
       this.juice.impact(0.6, COLORS.yellow);
-      if (this.awaitingFaction || this.letters.length >= MAX_INITIALS) this.finish();
+      if (this.awaitingFaction || this.letters.length >= MAX_INITIALS) this.finish('completed');
       else {
         this.phase = 'letters';
         this.cursor.reset();
@@ -673,9 +677,27 @@ export class InitialsScreen implements Screen {
    * and an OK hover can all race here, and submitting twice would double-count
    * a score into the faction totals.
    */
-  private finish(): void {
+  private finish(reason: 'completed' | 'timeout' | 'skipped'): void {
     if (this.submitted) return;
     this.submitted = true;
+
+    // HOW LONG THIS ACTUALLY TOOK, for the one number FEEDBACK.md still owes
+    // the initials row: can `HARD_DEADLINE_SEC` come down from 16?
+    //
+    // Only deliberate finishes count. A deadline or an abandon did not take
+    // 16s to TYPE, and folding those in would argue for keeping a backstop
+    // that the walk-aways themselves produced. A skip is a decision, not an
+    // entry, so it is not a typing time either.
+    //
+    // Wrapped like `logRound` in games/base.ts: a diagnostic that can break
+    // the one screen with no other exit is worse than no diagnostic at all.
+    if (reason === 'completed') {
+      try {
+        roundLog.logInitials(this.elapsed);
+      } catch (err) {
+        console.error('[initials] entry-time log failed', err);
+      }
+    }
 
     // No local default. `cleanInitials` in meta/leaderboard.ts is the single
     // definition of what an initials string is allowed to be, and an empty
