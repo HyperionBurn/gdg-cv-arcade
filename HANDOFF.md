@@ -690,6 +690,11 @@ decide the winner from the same rounded numbers the screen shows.
    deliberate and will say `SIMULATOR — no camera by design` rather than
    reporting a fault.
 2. **Red `NOT SAVING` chip** → **do not reload.** Go to the operator console's
-   DATA tab and press every EXPORT button, bracket first.
+   DATA tab and press every EXPORT button, bracket first — scores and tuning
+   can be reconstructed by asking people, who beat whom cannot.
+   **Except `rounds`.** That row says EXPORT NOW rather than DO NOT RELOAD on
+   purpose: it is the playtest log, nobody's turn depends on it, and freezing
+   a working stall to protect research data is the wrong trade. Take
+   EXPORT ROUNDS JSON and keep serving the queue.
 3. **Anything else** → press `d`. The first bad row is the cause; everything
    under it is a consequence.

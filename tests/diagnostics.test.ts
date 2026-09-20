@@ -443,3 +443,78 @@ describe('a silent save failure is not silent', () => {
     );
   });
 });
+
+/**
+ * AND THE MARSHAL'S CARD HAS TO NAME THEM TOO.
+ *
+ * The suite above derives every store that can fail to save and checks that
+ * each one reaches BOTH readouts — the `d` overlay and the operator console.
+ * It says nothing about README's failure table, which is the surface a
+ * marshal actually reads, standing in front of a queue, deciding whether to
+ * reload.
+ *
+ * That gap had already opened. The round log was added on 20 September, wired
+ * to both readouts, covered by the tests above — and the README's NOT SAVING
+ * row still described three stores. Worse than an omission: the row says "do
+ * not reload" without qualification, while `debug.ts` deliberately gives the
+ * round log `EXPORT NOW` instead, because nobody's turn depends on it and
+ * freezing the stall to protect research data is the wrong trade. A marshal
+ * following the card would have made exactly the choice the code argues
+ * against.
+ *
+ * So the labels are derived from `debug.ts` — the words actually rendered —
+ * and each one has to appear in the README.
+ */
+describe('every store that can fail is described where a marshal will read it', () => {
+  const labels = async (): Promise<string[]> => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/shell/debug.ts', 'utf8');
+    // The rendered rows, not the flags: `{ label: 'rounds', value: 'NOT SAVING…' }`
+    return [...src.matchAll(/label: '([a-z]+)', value: 'NOT SAVING/g)].map((m) => m[1] ?? '');
+  };
+
+  test('the overlay renders a row for more than one store', async () => {
+    const found = await labels();
+    assert.ok(found.length >= 3, `only ${found.length} NOT SAVING rows found; the scan broke`);
+  });
+
+  test('README names every one of them', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const readme = await readFile('README.md', 'utf8');
+    const row = readme.split(/\r?\n/).find((l) => l.includes('Red **NOT SAVING**'));
+    assert.ok(row, "README's failure table no longer has a NOT SAVING row");
+
+    const missing = (await labels()).filter(
+      (l) => !new RegExp(l, 'i').test(row),
+    );
+    assert.deepEqual(
+      missing,
+      [],
+      'these stores show a NOT SAVING row on the `d` overlay and are not ' +
+        'described in README’s failure table, so a marshal sees a red row the ' +
+        'card does not explain',
+    );
+  });
+
+  /**
+   * The round log's advice genuinely differs, and the card has to carry that
+   * difference or it is worse than silent — it would send somebody to freeze
+   * a working stall over the one store that does not need it.
+   */
+  test('and carries the round log’s different instruction', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const readme = await readFile('README.md', 'utf8');
+    const debug = await readFile('src/shell/debug.ts', 'utf8');
+
+    assert.match(
+      debug,
+      /label: 'rounds', value: 'NOT SAVING — EXPORT NOW'/,
+      'the round log row changed its wording; the README says EXPORT NOW',
+    );
+    assert.match(
+      readme,
+      /EXPORT NOW/,
+      'README does not carry the one store whose answer is not "do not reload"',
+    );
+  });
+});
