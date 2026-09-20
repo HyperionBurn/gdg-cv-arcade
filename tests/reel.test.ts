@@ -22,6 +22,7 @@
 import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { FruitNinjaGame } from '../src/games/fruitninja.ts';
 import {
   highlights,
   DEFAULT_CONFIG,
@@ -474,5 +475,141 @@ describe('the shed is visible from outside', () => {
     fill(3e6);
     assert.equal(highlights.capture({ gameId: 'poses', score: 11 }), true);
     assert.equal(highlights.reelSize(), 1, 'the revived reel does not accept new highlights');
+  });
+});
+
+
+/**
+ * "ON A TOP-5 SCORE OR A BIG COMBO" — AND ONLY THE FIRST HALF EXISTED.
+ *
+ * `captureIfWorthy` fires once, at the end of a round, if the score placed.
+ * `isWorthReplaying`'s own comment says "a screen can also call `capture()`
+ * directly for a combo or a knockout", and no screen ever did.
+ *
+ * It matters more now that captures feed the attract reel. Top-5 is common on
+ * the morning of day one, when every board is empty, and rare by the afternoon
+ * once they fill — so a reel driven by scores alone goes stale exactly as the
+ * hall gets busy.
+ *
+ * Both guards here protect the feature that already worked. `capture()` SWAPS
+ * atlases, so the rolling buffer restarts empty: a combo captured in the last
+ * seconds of a round would leave less than the 1.5s of footage `capture()`
+ * insists on, and the end-of-round replay — the one a player stands and
+ * watches — would silently not happen.
+ */
+interface MomentProbe {
+  timeLeft: number;
+  roundTotal: number;
+  captureMoment(label: string, score: number): boolean;
+  capturedThisRound: boolean;
+}
+
+function playing(): MomentProbe {
+  const g = new FruitNinjaGame() as unknown as MomentProbe;
+  g.roundTotal = 60;
+  g.timeLeft = 60;
+  return g;
+}
+
+describe('a big combo is a highlight too', () => {
+  beforeEach(() => {
+    reset();
+    fill();
+  });
+
+  test('a moment mid-round reaches the reel', () => {
+    const g = playing();
+    g.timeLeft = 40;
+    assert.equal(g.captureMoment('5-FRUIT SLICE', 420), true);
+    assert.equal(highlights.reelSize(), 1);
+    assert.equal(highlights.reelStats().showing, 'fruitninja');
+  });
+
+  /**
+   * THE ONE THAT PROTECTS THE FEATURE THAT ALREADY WORKED. A capture near the
+   * end leaves the buffer empty, and the end-of-round replay needs 1.5s of
+   * footage — so a player who just set a record would watch nothing.
+   */
+  test('but never close enough to the end to cost the replay its footage', () => {
+    const g = playing();
+    g.timeLeft = 2;
+    assert.equal(
+      g.captureMoment('5-FRUIT SLICE', 420),
+      false,
+      'a combo in the last seconds stole the end-of-round replay'
+    );
+    assert.equal(highlights.reelSize(), 0);
+  });
+
+  /**
+   * Fruit Ninja can throw three big chains in four seconds and each capture
+   * discards the last. The reel wants four DIFFERENT moments across a day, not
+   * four frames of the same swipe.
+   */
+  test('and not four times in one swipe', () => {
+    const g = playing();
+    g.timeLeft = 50;
+    assert.equal(g.captureMoment('4-FRUIT SLICE', 100), true);
+
+    // REFILL FIRST. Without this the buffer is empty after the swap and
+    // `capture()` refuses on its own, so the test passes whether the spacing
+    // guard exists or not — which is exactly what it did until mutating the
+    // guard away left it green.
+    fill(9e6);
+    g.timeLeft = 48; // two seconds later
+    assert.equal(
+      g.captureMoment('5-FRUIT SLICE', 200),
+      false,
+      'a second chain two seconds later discarded the first clip'
+    );
+
+    fill(9.5e6);
+    g.timeLeft = 40; // ten seconds after the first
+    assert.equal(g.captureMoment('6-FRUIT SLICE', 300), true, 'the spacing never re-opens');
+  });
+
+  /**
+   * `capturedThisRound` gates the RESULTS replay. A mid-round clip is not what
+   * somebody who just finished wants to watch, and if their score placed the
+   * end-of-round capture overwrites it anyway.
+   */
+  test('a moment does not become the results replay', () => {
+    const g = playing();
+    g.timeLeft = 40;
+    g.capturedThisRound = false;
+    g.captureMoment('5-FRUIT SLICE', 420);
+    assert.equal(
+      g.capturedThisRound,
+      false,
+      'a mid-round combo would now replay over the player’s own results'
+    );
+  });
+
+  test('and the spacing resets for the next player', () => {
+    const g = playing();
+    g.timeLeft = 50;
+    assert.equal(g.captureMoment('4-FRUIT SLICE', 100), true);
+
+    // A fresh round: `enter('playing')` clears the timer, which is what stops
+    // one player's chain silencing the next player's.
+    (g as unknown as { lastMomentAt: number }).lastMomentAt = -Infinity;
+    fill(1e7);
+    g.timeLeft = 50;
+    assert.equal(g.captureMoment('4-FRUIT SLICE', 100), true);
+  });
+});
+
+/** The game that actually calls it. */
+describe('Fruit Ninja asks for a clip on a big chain', () => {
+  test('it calls captureMoment, past a quad', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/games/fruitninja.ts', 'utf8');
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\/\/.*$/, ''))
+      .join('\n');
+    assert.match(code, /this\.captureMoment\s*\(/, 'nothing in Fruit Ninja asks for a clip');
+    assert.match(code, /chain\s*>=\s*4/, 'the chain threshold for a clip is gone');
   });
 });

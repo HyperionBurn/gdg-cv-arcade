@@ -535,6 +535,18 @@ function poseModelChoice(): 'lite' | 'full' | 'heavy' {
   return n <= 0 ? 'lite' : n >= 2 ? 'heavy' : 'full';
 }
 
+/**
+ * How close to the end of a round a moment capture is refused.
+ *
+ * `capture()` swaps atlases, so the rolling buffer restarts empty and needs
+ * 1.5s of footage before it will capture again. 4s is that plus room for a
+ * frame-rate dip, and it protects the END-OF-ROUND replay, which is the one a
+ * player actually stands and watches. See `captureMoment`.
+ */
+const MOMENT_TAIL_SEC = 4;
+/** Minimum gap between mid-round captures. Four chains in four seconds is one moment. */
+const MOMENT_GAP_SEC = 6;
+
 const RESULTS_ABANDONED_SEC = 2.6;
 const RESULTS_EMPTY_GRACE_SEC = 0.9;
 
@@ -641,6 +653,8 @@ export abstract class GameBase implements Screen {
   private panelStart = -1;
   /** Did THIS round produce the clip currently held? See tickResults. */
   private capturedThisRound = false;
+  /** Round-relative seconds of the last mid-round moment capture. */
+  private lastMomentAt = -Infinity;
   private frameBudgetStrikes = 0;
   /**
    * The best previous solo run, replayed alongside the live player.
@@ -784,6 +798,7 @@ export abstract class GameBase implements Screen {
     }
     if (state === 'playing') {
       this.capturedThisRound = false;
+      this.lastMomentAt = -Infinity;
       this.leadSlot = -1;
       this.leadAt = -Infinity;
       // roundScale lets a marshal shorten every round when the queue backs up.
@@ -2486,6 +2501,53 @@ export abstract class GameBase implements Screen {
    */
   protected chaseLineOwnsBoardRank(slot: number): boolean {
     return this.chaseMode(slot) === 'board';
+  }
+
+  /**
+   * THE OTHER HALF OF PLAN.md §4, WHICH WAS NEVER BUILT.
+   *
+   * "On a top-5 score OR A BIG COMBO, export a clip." Only the first half
+   * existed: `captureIfWorthy` fires once, at the end of a round, if the score
+   * placed. `isWorthReplaying`'s own comment says "a screen can also call
+   * `capture()` directly for a combo or a knockout", and no screen ever did.
+   *
+   * It matters more now than it did, because the attract reel is fed by
+   * captures. Top-5 is common on the morning of day one, when every board is
+   * empty, and RARE by the afternoon once they fill — so a reel driven by
+   * scores alone goes stale exactly as the hall gets busy. A big combo happens
+   * at any time regardless of the board, which is what keeps it fresh all day.
+   *
+   * TWO GUARDS, BOTH OF WHICH PROTECT THE THING THAT ALREADY WORKS.
+   *
+   * `capture()` is destructive: it SWAPS the rolling and saved atlases, so the
+   * rolling buffer restarts at zero frames. A combo capture in the last
+   * seconds of a round would therefore leave under the 1.5s of footage
+   * `capture()` insists on, and the end-of-round replay — the one a player
+   * stands and watches — would silently not happen. So moments are refused
+   * inside `MOMENT_TAIL_SEC` of the end, which is comfortably more than the
+   * buffer needs to refill at 8 fps.
+   *
+   * And they are spaced, because Fruit Ninja can throw three big chains in
+   * four seconds and each one would discard the last. The reel wants four
+   * DIFFERENT moments across a day, not four frames of the same swipe.
+   *
+   * Deliberately does NOT set `capturedThisRound`: that flag gates the results
+   * replay, and a mid-round clip is not what somebody who just finished wants
+   * to watch. If their score placed, the end-of-round capture overwrites this
+   * one anyway.
+   */
+  protected captureMoment(label: string, score: number): boolean {
+    if (this.timeLeft < MOMENT_TAIL_SEC) return false;
+    const at = this.roundTotal - this.timeLeft;
+    if (at - this.lastMomentAt < MOMENT_GAP_SEC) return false;
+    const ok = highlights.capture({
+      gameId: this.config.gameId,
+      score,
+      label,
+      color: this.config.color,
+    });
+    if (ok) this.lastMomentAt = at;
+    return ok;
   }
 
   /** Small helper subclasses use for "beat this" markers. */

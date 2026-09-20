@@ -964,6 +964,19 @@ export class FruitNinjaGame extends GameBase {
       // Past a triple it stops being a slice and becomes an event: confetti in
       // all four brand colours, the app's own "that was special" gesture.
       if (chain >= 3) this.celebrateAt(cx, cy);
+
+      // AND PAST A QUAD IT IS WORTH KEEPING. PLAN.md §4 asks for a clip "on a
+      // top-5 score OR A BIG COMBO" and only the score half was ever built.
+      //
+      // A quad is the right line rather than a triple: MEASURED over the
+      // chain distribution this game actually produces, triples are common
+      // enough to be the ordinary good swipe, and the reel wants four
+      // DIFFERENT moments across a day. `captureMoment` spaces them and
+      // refuses near the end of a round so it can never cost the end-of-round
+      // replay its footage — see the note on it in games/base.ts.
+      if (chain >= 4) {
+        this.captureMoment(`${chain}-FRUIT SLICE`, this.points[slot] ?? 0);
+      }
     }
     if (combo >= 3) {
       this.popups.spawn(`x${combo}`, blade.x, blade.y - vh(v, 3), COLORS.ink, vh(v, 3.6));
