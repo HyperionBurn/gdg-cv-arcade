@@ -918,3 +918,103 @@ describe('nothing a player reads is drawn at diagnostic size', () => {
     assert.ok(TYPE.micro < MIN_LEGIBLE, 'micro has risen above the 3m floor; this ban is moot');
   });
 });
+
+/**
+ * THE PAPER CONVERSION LEFT FIVE SHIMS BEHIND, AND TWO OF THEM DO NOTHING.
+ *
+ * `engine/draw.ts` carries five `@deprecated` exports from before the brand
+ * went flat — `vignette` and `scanlines` are EMPTY FUNCTIONS, `glowCircle` has
+ * had its glow removed but kept the parameter, and `panel` and `pill` forward
+ * to their sticker replacements. Each was kept on purpose, in the author's
+ * words, so nothing would break mid-conversion.
+ *
+ * The conversion is finished: nothing in `src/` calls any of them. What is
+ * left is a trap in the shared drawing module. Somebody reaching for
+ * `scanlines(ctx, v)` gets silence — not a lint error, not a wrong-looking
+ * screen, just an effect that never appears — and `glowCircle`'s `_glow`
+ * argument will be accepted and ignored.
+ *
+ * So they stay (deleting a shim mid-conversion is how the conversion breaks)
+ * and a new CALL SITE is what fails. If you want one of these effects back,
+ * the argument to have is about the brand, not about a function that quietly
+ * does nothing.
+ */
+describe('the deprecated drawing shims stay uncalled', () => {
+  const DEPRECATED = ['vignette', 'scanlines', 'glowCircle', 'panel', 'pill'];
+
+  test('every one of them is still marked deprecated and still unused', async () => {
+    const { readdir, readFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+
+    const walk = async (dir: string): Promise<string[]> => {
+      const out: string[] = [];
+      for (const e of await readdir(dir, { withFileTypes: true })) {
+        const full = join(dir, e.name);
+        if (e.isDirectory()) out.push(...(await walk(full)));
+        else if (full.endsWith('.ts')) out.push(full);
+      }
+      return out;
+    };
+
+    const draw = await readFile('src/engine/draw.ts', 'utf8');
+    for (const fn of DEPRECATED) {
+      const at = draw.indexOf(`export function ${fn}(`);
+      assert.ok(at > 0, `${fn} is gone from draw.ts; drop it from this list too`);
+      // The deprecation note must still be attached, or the next reader has no
+      // idea the thing is a shim.
+      assert.match(
+        draw.slice(Math.max(0, at - 400), at),
+        /@deprecated/,
+        `${fn} lost its @deprecated note, so it now reads as a normal helper`
+      );
+    }
+
+    const callers: string[] = [];
+    for (const path of await walk('src')) {
+      const rel = path.split(/[\/]/).join('/');
+      const code = (await readFile(path, 'utf8'))
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .split(/\r?\n/)
+        .map((l) => l.replace(/\/\/.*$/, ''))
+        .join('\n');
+
+      // A static regex literal with the names alternated, rather than one
+      // built per name from a template — `new RegExp(`...\w...`)` needs the
+      // backslash doubled, and the survivor is a DIFFERENT valid pattern or an
+      // outright syntax error. This file has been bitten by that twice.
+      //
+      // The leading class excludes `.` so `stickerPill(` and `labelPill(` are
+      // not read as calls to `pill(`.
+      const CALL = /(^|[^\w.])(vignette|scanlines|glowCircle|panel|pill)\s*\(/g;
+      for (const m of code.matchAll(CALL)) {
+        const before = code.slice(Math.max(0, (m.index ?? 0) - 24), m.index ?? 0);
+        if (/export function\s*$/.test(before)) continue;
+        callers.push(`${rel}: ${m[2]}()`);
+      }
+    }
+
+    assert.deepEqual(
+      callers,
+      [],
+      'these are deprecated shims from the paper conversion. Two of them are ' +
+        'EMPTY, so the effect simply never appears and nothing says why:\n  ' +
+        callers.join('\n  ')
+    );
+  });
+
+  /** And the two empty ones are genuinely empty, so the message above is true. */
+  test('and the no-ops really are no-ops', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const draw = await readFile('src/engine/draw.ts', 'utf8');
+    for (const fn of ['vignette', 'scanlines']) {
+      const at = draw.indexOf(`export function ${fn}(`);
+      const body = draw.slice(at, draw.indexOf('\n}', at));
+      assert.doesNotMatch(
+        body,
+        /ctx\.|createLinearGradient|fillRect/,
+        `${fn} draws something again. If that is deliberate it is a brand ` +
+          `decision, and BRAND.md is where it gets made`
+      );
+    }
+  });
+});
