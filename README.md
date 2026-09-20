@@ -391,8 +391,16 @@ depends on:
 Red Light has a closed-loop driver: mashing input there is not competent play,
 it is instant elimination, so the probe reads the light and freezes on red.
 
-Baseline (all six passing): 67 0.33ms · Balloon Pop 0.59ms · Runner 0.93ms ·
-Red Light 0.98ms · Pose Match 0.49ms · Fruit Ninja 3.52ms per frame.
+Baseline, all SEVEN passing, one session on 2026-09-20: 67 0.40ms ·
+Fruit Ninja 0.25ms · Balloon Pop 0.53ms · Red Light 2.71ms ·
+Pose Match 2.37ms · Rhythm Punch 1.41ms · Runner 0.43ms per frame.
+
+**Read the headroom, not the number.** These are wall-clock on a shared
+laptop inside a browser pane and they move a long way between runs — Fruit
+Ninja read 3.52ms in an earlier baseline and 0.25ms in this one. What the
+check actually asserts is the 16.7ms frame budget, and the worst of these
+is under a fifth of it. Re-take them on the booth laptop, where the blit is
+fill-rate bound and scales with the panel rather than with this pane.
 
 ## Status
 
@@ -400,7 +408,7 @@ Red Light 0.98ms · Pose Match 0.49ms · Fruit Ninja 3.52ms per frame.
 |---|---|
 | Core pipeline | done — camera, worker, tracker, filter, gestures, blades |
 | Engine | done — juice, particles, procedural audio, projection |
-| Shell | done — attract, menu, hover cursor, initials, rig check |
+| Shell | done — attract, menu, mode, hover cursor, initials, rig check, operator console, `d` overlay |
 | Leaderboard + factions | done, wired end to end |
 | **67 Speed Duel** | playable 1P/2P |
 | **Fruit Ninja** | playable 1P/2P, real polygon slicing |
@@ -410,7 +418,7 @@ Red Light 0.98ms · Pose Match 0.49ms · Fruit Ninja 3.52ms per frame.
 | **Runner** | playable, 3D, **conditional — see go/no-go below** |
 | **Rhythm Punch** | playable 1P/2P, generated beat maps |
 | Ghosts, highlight clips, operator console | done |
-| Tournament bracket | **built but unreachable — see Known gaps** |
+| Tournament bracket | done — wired 2026-09-19, verified end to end from the BRACKET tab |
 | Photobooth | deferred |
 
 ### Verified in the simulator

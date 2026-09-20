@@ -40,6 +40,24 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
+    watch: {
+      // DO NOT WATCH THE PROBE BUILD, OR IT KILLS THE DEV SERVER.
+      //
+      // `npm run build:probe` writes `dist-probe/` inside the project root,
+      // and that includes the ~55MB pose model. Vite's watcher tries to open
+      // it while the copy is still in flight, Windows returns EBUSY, chokidar
+      // re-emits it as an unhandled error, and the DEV SERVER EXITS — code 1,
+      // mid-session, for a build that has nothing to do with it.
+      //
+      // Seen for real on the 20th: the dev server died the moment the first
+      // probe build ran and stayed dead, which then looked like the app
+      // failing to load rather than a watcher fault.
+      //
+      // `dist` needs no entry because it is the configured `build.outDir` and
+      // Vite already ignores that; `dist-probe` only becomes an outDir when
+      // `--outDir` is passed, so the dev server has never heard of it.
+      ignored: ['**/dist-probe/**'],
+    },
   },
   worker: {
     // ES, matching the module worker in src/core/vision.ts, which in turn is

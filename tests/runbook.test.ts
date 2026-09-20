@@ -781,3 +781,79 @@ describe('README’s layout map matches the source tree', () => {
     );
   });
 });
+
+/**
+ * THE STATUS TABLE MUST NOT POINT AT A SECTION THAT CONTRADICTS IT.
+ *
+ * README's Status table is the summary a reader trusts first, and it had said
+ * the tournament bracket was "built but unreachable — see Known gaps" for a
+ * day after Known gaps had been amended to say the opposite: wired on
+ * 2026-09-19 and verified end to end through the operator console.
+ *
+ * So a reader was told a working feature was dead, and the pointer meant to
+ * justify that claim was the thing disproving it. Resolved entries in Known
+ * gaps are struck through with `~~`, which makes this checkable: a Status row
+ * may only send somebody to Known gaps for something still open.
+ */
+describe('README’s status table agrees with the section it cites', () => {
+  const readmeText = async (): Promise<string> => {
+    const { readFile } = await import('node:fs/promises');
+    return (await readFile('README.md', 'utf8')).replace(/\r\n/g, '\n');
+  };
+
+  const section = (md: string, heading: string): string => {
+    const at = md.indexOf(heading);
+    assert.ok(at >= 0, `README no longer has ${heading}`);
+    const rest = md.slice(at + heading.length);
+    const end = rest.search(/\n#{2,3} /);
+    return end >= 0 ? rest.slice(0, end) : rest;
+  };
+
+  test('nothing in Status cites Known gaps for an entry already resolved', async () => {
+    const md = await readmeText();
+    const status = section(md, '## Status');
+    const gaps = section(md, '### Known gaps');
+
+    // Entries are `- ~~**Subject.**~~ **Resolved …**` once they are done.
+    const resolved = [...gaps.matchAll(/- ~~\*\*(.+?)\*\*~~/g)].map((m) => m[1] ?? '');
+    assert.ok(resolved.length >= 1, 'no resolved Known gaps entries found; the scan broke');
+
+    const citing = status
+      .split('\n')
+      .filter((l) => l.startsWith('|') && /Known gaps/i.test(l));
+
+    for (const row of citing) {
+      const subject = (row.split('|')[1] ?? '').trim().replace(/\*/g, '').toLowerCase();
+      const words = subject.split(/\s+/).filter((w) => w.length > 4);
+      const clash = resolved.find((r) => words.some((w) => r.toLowerCase().includes(w)));
+      assert.ok(
+        !clash,
+        `Status sends the reader to Known gaps about "${subject}", and that ` +
+          `entry is struck through as resolved ("${clash}"). The pointer ` +
+          'disproves the claim it is supporting.',
+      );
+    }
+  });
+
+  /**
+   * The same failure in its simplest form. Nothing in Status should call a
+   * feature unreachable while the section below says it was wired and
+   * verified — that is a reader being told a working feature is dead.
+   */
+  test('and does not call a wired feature unreachable', async () => {
+    const md = await readmeText();
+    const status = section(md, '## Status');
+    const gaps = section(md, '### Known gaps');
+
+    for (const line of status.split('\n')) {
+      if (!/unreachable/i.test(line)) continue;
+      const subject = (line.split('|')[1] ?? '').trim().replace(/\*/g, '');
+      const stillOpen = new RegExp(`- \*\*[^~]*${subject.split(/\s+/)[0]}`, 'i').test(gaps);
+      assert.ok(
+        stillOpen,
+        `Status calls "${subject}" unreachable and Known gaps does not list it ` +
+          'as an open gap, so one of the two is out of date',
+      );
+    }
+  });
+});
