@@ -238,3 +238,72 @@ describe('Runner lanes — "the min distance is like 40-50cm (I measured it lol)
     }
   });
 });
+
+/**
+ * AND THE GATE THESE TESTS DRIVE HAS TO BE THE GATE THE GAME SHIPS.
+ *
+ * `GATE` at the top of this file is a COPY, written out by hand and labelled
+ * "the gate `games/runner.ts` installs". Everything above proves that those
+ * four numbers behave — that 20cm registers, that a body rocking on the spot
+ * does not — and none of it would have noticed the game shipping different
+ * ones. `games/runner.ts` cannot be imported here; it pulls in Three.js and a
+ * canvas.
+ *
+ * FOUND BY MUTATION, sweeping every fix in FEEDBACK.md: changing
+ * `LANE_ENTER` in the game failed exactly one test in the whole suite — the
+ * one that checks the ledger's anchor text still exists. A tester measured
+ * this with a tape measure, and the only thing holding the number was a
+ * sentence in a document.
+ *
+ * Row 9 of FEEDBACK.md. Six rows were in this state; see the others.
+ */
+describe('the gate these tests drive is the gate the game ships', () => {
+  test('runner.ts installs exactly the GATE these tests use', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/games/runner.ts', 'utf8');
+
+    // Line scan plus a regex LITERAL, rather than a pattern built from a
+    // template string. `new RegExp(`...\d...`)` needs the backslash doubled or
+    // the template eats it, and the survivor — `d+` in place of `\d+` — still
+    // reads like a number matcher and quietly matches nothing.
+    const num = (name: string): number => {
+      const line = src.split(/\r?\n/).find((l) => l.trim().startsWith(`const ${name} = `));
+      assert.ok(line, `runner.ts no longer declares ${name}`);
+      const m = /=\s*(-?\d+(?:\.\d+)?)\s*;/.exec(line);
+      assert.ok(m, `${name} is no longer a plain number`);
+      return Number(m[1]);
+    };
+
+    assert.deepEqual(
+      {
+        enter: num('LANE_ENTER'),
+        exit: num('LANE_EXIT'),
+        holdAt: num('LANE_HOLD_AT'),
+        holdSec: num('LANE_HOLD_SEC'),
+      },
+      { enter: GATE.enter, exit: GATE.exit, holdAt: GATE.holdAt, holdSec: GATE.holdSec },
+      'the game ships a different lane gate from the one every test above ' +
+        'drives, so those results say nothing about what a player gets'
+    );
+  });
+
+  /**
+   * The margins the comment on those constants commits to, so a future re-tune
+   * has to argue with the measurements rather than just move a number.
+   */
+  test('and that gate still clears the measured noise floors', () => {
+    // A body rocking +-8cm on the spot reads 0.291 under hostile input.
+    assert.ok(
+      GATE.enter > 0.291,
+      `enter ${GATE.enter} is at or under the worst sway reading (0.291): a ` +
+        `player shifting their weight would change lane`
+    );
+    // A still body's own noise tops out at 0.078, hostile, over 120s.
+    assert.ok(GATE.exit > 0.078, `exit ${GATE.exit} is inside the still-body noise floor`);
+    assert.ok(
+      GATE.holdAt > 0.078 && GATE.holdAt < GATE.exit,
+      `holdAt ${GATE.holdAt} must sit above standing noise and below exit, or the ` +
+        `reference is still chasing the player through the movement it measures`
+    );
+  });
+});
