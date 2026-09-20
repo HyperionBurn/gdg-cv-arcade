@@ -15,7 +15,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { bombPenalty } from '../src/games/fruitninja.ts';
+import { bombPenalty, reachBandFor, FULL_STRETCH_TORSOS } from '../src/games/fruitninja.ts';
 
 const BUDGET = 12; // BOMB_TIME_BUDGET_SEC
 const PENALTY = 8; // BOMB_TIME_PENALTY
@@ -119,5 +119,86 @@ describe('the readout matches what was actually taken', () => {
         `reported ${r.spend}s but the clock moved ${actual}s`
       );
     }
+  });
+});
+
+/**
+ * "I LEGIT COULDN'T REACH MOST" OF THE FRUIT — row 20 of FEEDBACK.md.
+ *
+ * The fix was to throw fruit through a band measured from the player's own
+ * body rather than at a fraction of the slot rect. `REACH_HALF_TORSOS` is the
+ * half-width of that band, and it had NO behavioural test at all: found by
+ * mutation, changing it failed nothing in the suite except the check that the
+ * ledger still quotes it.
+ *
+ * Writing the test found the report coming back. The band shifted rather than
+ * shrank at a slot edge, which preserves its WIDTH — 2 x 1.45 torso — so a
+ * body near the edge got the whole 2.9 torso spread on one side of itself.
+ * Measured before the fix, by body position across a 1920x1080 screen:
+ *
+ *   0.10 -> 2.51 torso   0.20 -> 1.91   0.30..0.70 -> 1.45   0.80 -> 1.91   0.90 -> 2.51
+ *
+ * against a full stretch of 1.57. Centred players were fine, which is why the
+ * distribution table in the source — measured on a centred body — reads 0%
+ * beyond a full stretch and missed it.
+ */
+describe('fruit is thrown where the player can actually reach it', () => {
+  const W = 1920;
+  const H = 1080;
+  const UNIT = 0.3 * H;
+  const RADIUS = 0.06 * H;
+  const SLOT = { x: 0, width: W };
+
+  /** Farthest the band asks a body at `cx` to reach, in torso units. */
+  const worstReach = (cx: number): number => {
+    const b = reachBandFor({ cx, unit: UNIT, rect: SLOT, radius: RADIUS });
+    return Math.max(Math.abs(b.max - cx), Math.abs(cx - b.min)) / UNIT;
+  };
+
+  test('nowhere on the screen asks for more than a full stretch', () => {
+    const bad: string[] = [];
+    for (let f = 0.02; f <= 0.98; f += 0.02) {
+      const reach = worstReach(f * W);
+      if (reach > FULL_STRETCH_TORSOS + 1e-9) {
+        bad.push(`${(f * 100).toFixed(0)}% across: ${reach.toFixed(2)} torso`);
+      }
+    }
+    assert.deepEqual(
+      bad,
+      [],
+      'the band asks for more than a full stretch at these body positions, ' +
+        'which is the complaint this band exists to answer:\n  ' + bad.join('\n  ')
+    );
+  });
+
+  test('a centred player still gets the full spread', () => {
+    const b = reachBandFor({ cx: W / 2, unit: UNIT, rect: SLOT, radius: RADIUS });
+    assert.ok(
+      (b.max - b.min) / UNIT > 2.5,
+      `a centred player's band is only ${((b.max - b.min) / UNIT).toFixed(2)} torso wide; ` +
+        `the reach limit has been tightened into a shrunken game`
+    );
+  });
+
+  /**
+   * The cost of the fix, stated rather than hidden: an edge player trades
+   * spread for reachability. Half a band they can reach beats a full one they
+   * cannot, but it must not collapse to a single point either.
+   */
+  test('and a player at the very edge still gets a band, not a spot', () => {
+    for (const f of [0.03, 0.97]) {
+      const b = reachBandFor({ cx: f * W, unit: UNIT, rect: SLOT, radius: RADIUS });
+      assert.ok(
+        (b.max - b.min) / UNIT > 1.0,
+        `at ${(f * 100).toFixed(0)}% across the band is ${((b.max - b.min) / UNIT).toFixed(2)} ` +
+          `torso wide — every fruit arrives in the same place`
+      );
+    }
+  });
+
+  test('no body anchored yet falls back to the slot, not to nothing', () => {
+    const b = reachBandFor({ cx: null, unit: 0, rect: SLOT, radius: RADIUS });
+    assert.ok(b.max > b.min, 'the pre-anchor band is empty, so no fruit can spawn');
+    assert.ok(b.min > 0 && b.max < W, 'the pre-anchor band runs off the slot');
   });
 });

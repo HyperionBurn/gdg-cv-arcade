@@ -338,6 +338,61 @@ const BOMB_STUN_MS = 1200;
  */
 const REACH_HALF_TORSOS = 1.45;
 
+/**
+ * The comment above quotes a full stretch at 1.57 torso and a comfortable
+ * reach at 1.25. Exported so a test can hold the band to them.
+ */
+export const FULL_STRETCH_TORSOS = 1.57;
+
+/**
+ * The horizontal band this slot's fruit is thrown through, in screen pixels.
+ *
+ * Pure, and exported, for the same reason `bombPenalty` is: this is the thing
+ * a playtester complained about and it cannot be exercised through the game
+ * class, which needs a canvas.
+ *
+ * IT USED TO SHIFT AT THE SLOT EDGE RATHER THAN SHRINK, so that a player
+ * standing off to one side still got a full spread — all of it, the old note
+ * reasoned, on the side they can reach. The first half of that worked. The
+ * second did not: shifting preserves the
+ * band's WIDTH, which is 2 x 1.45 = 2.9 torso, so a body pressed against the
+ * edge got a band running 2.9 torso to one side of it. MEASURED, 1920x1080,
+ * torso 324px, by body position across the screen:
+ *
+ *   0.10  ->  2.51 torso        0.30..0.70  ->  1.45 torso
+ *   0.20  ->  1.91 torso        0.80  ->  1.91      0.90  ->  2.51
+ *
+ * Against a full stretch of 1.57. So the one case this band exists to fix —
+ * "I legit couldn't reach most" of the fruit, row 20 of FEEDBACK.md — came
+ * back for anybody not standing near the middle, and the measured table above
+ * did not catch it because it was measured on a centred body.
+ *
+ * Intersecting instead of shifting costs an off-centre player some SPREAD and
+ * never costs them a fruit. That is the right way round: half a band they can
+ * reach beats a full one they cannot, which is the entire content of the
+ * report.
+ */
+export function reachBandFor(opts: {
+  cx: number | null;
+  unit: number;
+  rect: { x: number; width: number };
+  radius: number;
+}): { min: number; max: number } {
+  const { cx, unit, rect, radius } = opts;
+  const lo = rect.x + radius;
+  const hi = rect.x + rect.width - radius;
+
+  if (cx === null || unit <= 0) {
+    return { min: rect.x + rect.width * 0.18, max: rect.x + rect.width * 0.82 };
+  }
+
+  const half = unit * REACH_HALF_TORSOS;
+  // Inside the player's reach AND inside the slot. Both are hard limits.
+  const min = Math.max(lo, cx - half);
+  const max = Math.min(hi, cx + half);
+  return { min: Math.min(min, max), max: Math.max(min, max) };
+}
+
 export class FruitNinjaGame extends GameBase {
   private blades = new BladeTracker();
   private bodies: Body[] = [];
@@ -613,30 +668,12 @@ export class FruitNinjaGame extends GameBase {
    * See REACH_HALF_TORSOS.
    */
   private reachBand(slot: number, rect: SlotRect, radius: number): { min: number; max: number } {
-    const lo = rect.x + radius;
-    const hi = rect.x + rect.width - radius;
-
-    const cx = this.bodyX[slot] ?? null;
-    const unit = this.bodyUnit[slot] ?? 0;
-    if (cx === null || unit <= 0) {
-      return { min: rect.x + rect.width * 0.18, max: rect.x + rect.width * 0.82 };
-    }
-
-    const half = unit * REACH_HALF_TORSOS;
-    // Shift rather than shrink at the edge of a slot, so a player standing off
-    // to one side still gets a full spread — all of it on the side they can
-    // reach.
-    let min = cx - half;
-    let max = cx + half;
-    if (min < lo) {
-      max = Math.min(hi, max + (lo - min));
-      min = lo;
-    }
-    if (max > hi) {
-      min = Math.max(lo, min - (max - hi));
-      max = hi;
-    }
-    return { min: Math.min(min, max), max: Math.max(min, max) };
+    return reachBandFor({
+      cx: this.bodyX[slot] ?? null,
+      unit: this.bodyUnit[slot] ?? 0,
+      rect,
+      radius,
+    });
   }
 
   private spawn(fc: FrameContext): void {
