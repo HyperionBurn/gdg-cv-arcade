@@ -44,14 +44,26 @@ describe('the runbook matches the code', () => {
     const md = await readme();
     const labels = new Set(tunables.list().map((t) => t.label));
 
-    // `slider: **NAME**` and `sliders: **A**, **B**`
+    // `slider: **NAME**` and `sliders: **A**, **B**`, EITHER CASE.
+    //
+    // This was case-sensitive and silently skipped one row: the risk table
+    // writes "Slider: **MOVE THRESHOLD**" with a capital S, and that is the
+    // Red Light move threshold — the row whose own risk column says too low
+    // means everyone is out in two seconds, unrecoverable at a stall. The
+    // highest-stakes control in the table was the one this did not check.
     const named = new Set<string>();
-    for (const m of md.matchAll(/sliders?:\s*\*\*([^*]+)\*\*(?:,\s*\*\*([^*]+)\*\*)?/g)) {
+    for (const m of md.matchAll(/sliders?:\s*\*\*([^*]+)\*\*(?:,\s*\*\*([^*]+)\*\*)?/gi)) {
       if (m[1]) named.add(m[1].trim());
       if (m[2]) named.add(m[2].trim());
     }
 
-    assert.ok(named.size > 0, 'the README stopped naming any sliders at all');
+    // A floor, because "found nothing" and "found everything" look identical
+    // in a passing scan. Eight is what the README names today.
+    assert.ok(
+      named.size >= 8,
+      `only ${named.size} sliders were found in the README (${[...named].sort().join(', ')}). ` +
+        `Either the runbook stopped naming them or this scan stopped reading them`
+    );
 
     const missing = [...named].filter((n) => !labels.has(n));
     assert.deepEqual(
@@ -94,17 +106,44 @@ describe('the runbook matches the code', () => {
    * a playtest day, and it is only true while each one has a slider.
    */
   test('every risky constant is still reachable without a rebuild', async () => {
-    const keys = tunables.list().map((t) => t.key);
-    for (const k of [
-      'hover.reachX',
-      'redlight.moveEnter',
-      'posematch.passThreshold',
-      'rhythm.inputLatencySec',
-      'runner.laneStepTime',
-      'runner.recoveryTime',
-    ]) {
-      assert.ok(keys.includes(k), `${k} is on the playtest list but is not a slider`);
+    const md = await readme();
+
+    // DERIVED FROM THE TABLE, bounded by its own heading. The list used to be
+    // six keys typed out here, which covers the rows somebody thought of when
+    // they wrote it — a row added to the README tomorrow would claim "every
+    // one is also a slider" with nothing checking the new one.
+    const start = md.indexOf('### The numbers that have never seen a real body');
+    assert.ok(start >= 0, 'the risk table is gone from the README');
+    const next = md.indexOf('\n### ', start + 10);
+    const table = md.slice(start, next > start ? next : undefined);
+
+    const rows = table.split('\n').filter((l) => l.startsWith('| `') || l.startsWith('| **'));
+    assert.ok(rows.length >= 6, `the risk table has ${rows.length} rows; expected at least 6`);
+
+    const labels = new Set(tunables.list().map((t) => t.label));
+    const missing: string[] = [];
+    for (const row of rows) {
+      const named = [...row.matchAll(/sliders?:\s*\*\*([^*]+)\*\*(?:,\s*\*\*([^*]+)\*\*)?/gi)]
+        .flatMap((m) => [m[1], m[2]])
+        .filter((x): x is string => !!x)
+        .map((x) => x.trim());
+
+      const constant = /^\|\s*`?([^`|]+)`?/.exec(row)?.[1]?.trim() ?? row.slice(0, 40);
+      if (named.length === 0) {
+        missing.push(`${constant}: names no slider, so the table's own claim is unchecked`);
+        continue;
+      }
+      for (const n of named) {
+        if (!labels.has(n)) missing.push(`${constant}: slider "${n}" does not exist`);
+      }
     }
+
+    assert.deepEqual(
+      missing,
+      [],
+      'the risk table says every one of these is a slider and needs no rebuild ' +
+        'to change, which is the whole point of the list:\n  ' + missing.join('\n  ')
+    );
   });
 });
 
