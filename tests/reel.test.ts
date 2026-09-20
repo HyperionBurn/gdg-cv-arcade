@@ -315,15 +315,80 @@ describe('the attract reel', () => {
    * results screen is worth more than a loop in a corner, and this is the only
    * shed step that costs nothing a player can see.
    */
+  /**
+   * ONE HITCH MUST NOT COST THE FEATURE.
+   *
+   * Found by running a real turn sweep rather than by reading the code: a
+   * single 121.6 ms blit carried a 16-grab window's mean to 5.99 ms against a
+   * 4 ms budget, and the buffer shed three times in fourteen seconds — reel
+   * gone, cell halved, replays off — and stayed off, because a shed is only
+   * undone by an operator. A GC pause is not a GPU cliff.
+   */
+  test('a single bad window is a hitch, not a cliff', () => {
+    fill();
+    highlights.capture({ gameId: 'poses', score: 9 });
+
+    costPerBlitMs = 6;
+    fill(4e6, 24); // grace (8) + one full window (16), all over budget
+    costPerBlitMs = 0;
+    fill(5e6, 16); // and one clean window, which clears the strike
+    fill(6e6, 16);
+
+    assert.equal(
+      highlights.stats().shedLevel,
+      0,
+      'an isolated slow window shed the buffer; strikes are not consecutive'
+    );
+    assert.equal(highlights.reelSize(), 1, 'the reel was dropped over one hitch');
+  });
+
+  /**
+   * AND A FAST-FORWARD IS NOT EVIDENCE EITHER.
+   *
+   * `__arcade.tick()` drives a synthetic clock, so grabs that are 125 ms apart
+   * at the stall land microseconds apart with the GPU never idle. Measured on
+   * the same machine, same canvas: 0.07 ms mean at the real cadence, 4.20 ms
+   * mean under a turn sweep. A full `__arcade.turn()` — the documented way to
+   * check the app still works — therefore ended with replays disabled and the
+   * reel gone, and the `d` overlay would have said the feature was broken.
+   *
+   * Capture must keep running under it: the turn sweep is how we know a real
+   * round enrols into the reel at all.
+   */
+  test('a fast-forwarded clock still captures but is never judged', () => {
+    highlights.setSynthetic(true);
+    costPerBlitMs = 6;
+    fill(7e6, 64); // four full windows' worth, every one far over budget
+    costPerBlitMs = 0;
+
+    assert.equal(highlights.stats().shedLevel, 0, 'a synthetic run shed the buffer');
+    assert.ok(highlights.stats().grabs > 0, 'capture stopped under the fast-forward');
+    assert.equal(
+      highlights.capture({ gameId: 'poses', score: 9 }),
+      true,
+      'a round played under the harness could not produce a highlight'
+    );
+    assert.equal(highlights.reelSize(), 1, 'and it did not reach the reel');
+
+    // Handing the real clock back re-arms the guard rather than judging it on
+    // the window the fast-forward just filled.
+    highlights.setSynthetic(false);
+    costPerBlitMs = 6;
+    fill(8e6, 48);
+    costPerBlitMs = 0;
+    assert.ok(highlights.stats().shedLevel >= 1, 'the guard never came back');
+  });
+
   test('it is the first thing dropped when the buffer starts costing too much', () => {
     fill();
     highlights.capture({ gameId: 'poses', score: 9 });
     assert.equal(highlights.reelSize(), 1);
     assert.equal(highlights.stats().shedLevel, 0);
 
-    // GRAB_BUDGET_MS is 4, over a 16-grab window after an 8-grab grace.
+    // GRAB_BUDGET_MS is 4, over a 16-grab window after an 8-grab grace, and
+    // GUARD_STRIKES requires TWO consecutive bad windows: 8 + 16 + 16 = 40.
     costPerBlitMs = 6;
-    fill(1e6, 30);
+    fill(1e6, 48);
     costPerBlitMs = 0;
 
     const s = highlights.stats();
@@ -399,7 +464,7 @@ describe('the shed is visible from outside', () => {
     fill();
     highlights.capture({ gameId: 'poses', score: 9 });
     costPerBlitMs = 6;
-    fill(2e6, 30);
+    fill(2e6, 48);
     costPerBlitMs = 0;
     assert.equal(highlights.reelEnabled, false, 'the guard did not take the reel');
 

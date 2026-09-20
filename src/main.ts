@@ -574,9 +574,20 @@ if (import.meta.env.DEV) {
     tick(frames = 1, dt = 1 / 60) {
       const stepMs = dt * 1000;
       simClock = Math.max(simClock, performance.now());
-      for (let i = 0; i < frames; i++) {
-        simClock += stepMs;
-        step(simClock, dt);
+      // The highlight buffer's cost guard measures wall-clock time around each
+      // grab and sheds when the mean goes over budget. Under this loop the
+      // grabs land microseconds apart with the GPU never idle, which measured
+      // 4.20 ms mean against 0.07 ms at the real cadence — so a full turn sweep
+      // used to end with replays disabled and the reel dropped. Capture keeps
+      // running; only the cost sampling pauses. See `setSynthetic`.
+      highlights.setSynthetic(true);
+      try {
+        for (let i = 0; i < frames; i++) {
+          simClock += stepMs;
+          step(simClock, dt);
+        }
+      } finally {
+        highlights.setSynthetic(false);
       }
       // Hand the real clock back. Leaving `lastTime` in the synthetic future
       // makes the next rAF frame compute a negative dt, which inverts every

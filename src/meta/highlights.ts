@@ -117,6 +117,26 @@ const GRAB_BUDGET_MS = 4;
 const GUARD_WINDOW = 16;
 /** Grabs ignored after a (re)allocation, while textures warm up. */
 const GUARD_GRACE = 8;
+/**
+ * Consecutive over-budget windows before anything is shed.
+ *
+ * ONE HITCH USED TO COST THE WHOLE FEATURE. The guard averages a 16-grab
+ * window, so a single outlier carries it on its own: observed live during a
+ * full-turn sweep, one 121.6 ms blit added 7.6 ms to the window mean against a
+ * 4 ms budget, and the buffer shed three times in fourteen seconds — reel
+ * dropped, cell halved, replays off — and stayed off, because a shed is only
+ * undone by an operator. A GC pause or a compositor stall is not a GPU cliff.
+ *
+ * A MEDIAN WOULD NOT FIX THIS AND WOULD BREAK THE DETECTION. Read the cliff
+ * table at the top of this file: the failing configuration measured p50 0.7 ms
+ * and p99 448 ms. On the real cliff the median stays perfectly healthy and
+ * only the tail explodes, which is exactly what the mean is there to catch.
+ *
+ * So keep the mean and require it to REPEAT. An isolated hitch does not recur;
+ * a cliff is over budget in every window, so this costs it one extra window
+ * (~2 s at 8 fps) before the first shed.
+ */
+const GUARD_STRIKES = 2;
 
 /** A score in the top N of its board is worth replaying. PLAN.md §4: top-5. */
 export const REPLAY_RANK = 5;
@@ -319,6 +339,8 @@ class Highlights {
 
   private _quality = 1;
   private _enabled = true;
+  /** See `setSynthetic`. Suspends COST SAMPLING only, never capture. */
+  private _synthetic = false;
 
   constructor() {
     // Grid up front so `stats()` reports the real ceiling before the first
@@ -338,6 +360,8 @@ class Highlights {
   private grace = GUARD_GRACE;
   private shedLevel = 0;
   private shedMeanMs = 0;
+  /** Consecutive over-budget windows. See GUARD_STRIKES. */
+  private strikes = 0;
 
   /* -- playback -- */
   private playStart = 0;
@@ -422,6 +446,7 @@ class Highlights {
     this.playing = false;
     this.window.length = 0;
     this.grace = GUARD_GRACE;
+    this.strikes = 0;
   }
 
   private ensure(): boolean {
@@ -444,6 +469,40 @@ class Highlights {
     return this._enabled && !this.allocFailed;
   }
 
+  /**
+   * "THE CLOCK YOU ARE ABOUT TO SEE IS NOT REAL TIME."
+   *
+   * `__arcade.tick()` fast-forwards a synthetic clock, so grabs that would be
+   * 125 ms apart at the stall land a couple of milliseconds apart with the GPU
+   * never idle in between. MEASURED on this machine:
+   *
+   *   grabs 30 ms apart      mean 0.07 ms   p50 0.10   max 0.30
+   *   grabs from a turn sweep mean 4.20 ms   p50    —   max 164.6
+   *
+   * Same code, same canvas, same machine: 57x under budget at the real cadence
+   * and over it under a fast-forward. So a full `__arcade.turn()` regression
+   * sweep — the documented way to check the app still works — ended with
+   * replays silently disabled and the reel gone, and anyone who then looked at
+   * the `d` overlay would have concluded the feature was broken.
+   *
+   * The guard exists to answer "what does capture cost during normal play".
+   * A workload nobody will ever run is not evidence about that, so the harness
+   * says so rather than the guard trying to infer it from a clock it has been
+   * handed. Capture still HAPPENS under `synthetic` — the turn sweep is how we
+   * know a real round enrols into the reel — only the cost sampling pauses.
+   */
+  setSynthetic(on: boolean): void {
+    this._synthetic = on;
+    if (!on) {
+      // Discard the partial window taken under the fast-forward, and re-arm
+      // the warm-up grace so the first real window is not judged on textures
+      // the synthetic run just churned.
+      this.window.length = 0;
+      this.strikes = 0;
+      this.grace = GUARD_GRACE;
+    }
+  }
+
   /** Operator console. Re-enabling also clears a shed the cost guard applied. */
   setEnabled(on: boolean): void {
     this._enabled = on;
@@ -455,6 +514,7 @@ class Highlights {
     this.shedMeanMs = 0;
     this.window.length = 0;
     this.grace = GUARD_GRACE;
+    this.strikes = 0;
     // AND REVIVE THE REEL. Re-enabling is an explicit operator action meaning
     // "try again"; clearing the shed level but leaving the reel permanently
     // dead would make the console's own switch a half-measure, and the reel is
@@ -540,6 +600,9 @@ class Highlights {
    * and the failure mode here is a single 400 ms blit, not a gentle slide.
    */
   private guard(cost: number): void {
+    // See `setSynthetic`: a fast-forwarded clock is not evidence about what
+    // capture costs at 8 fps with the GPU idle in between.
+    if (this._synthetic) return;
     if (this.grace > 0) {
       this.grace--;
       return;
@@ -549,7 +612,15 @@ class Highlights {
 
     const mean = this.window.reduce((a, b) => a + b, 0) / this.window.length;
     this.window.length = 0;
-    if (mean <= GRAB_BUDGET_MS) return;
+    if (mean <= GRAB_BUDGET_MS) {
+      // A good window clears the count. Strikes have to be CONSECUTIVE, or a
+      // long session accumulates unrelated hitches into a shed.
+      this.strikes = 0;
+      return;
+    }
+    this.strikes++;
+    if (this.strikes < GUARD_STRIKES) return;
+    this.strikes = 0;
 
     this.shedLevel++;
     this.shedMeanMs = mean;
