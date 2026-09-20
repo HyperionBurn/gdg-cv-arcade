@@ -119,3 +119,80 @@ describe('menu row shape', () => {
     );
   });
 });
+
+
+/**
+ * THE INSTRUCTION WAS SMALLER THAN THE SIZE THE CODE CALLS UNREADABLE.
+ *
+ * `menu.ts` holds the blurb at 2.4vh and wraps it rather than shrinking it,
+ * under a comment saying it "was being drawn at 1.6vh — 17px on a 1080p TV,
+ * unreadable from 3m and therefore not doing its job at all", and anticipating
+ * that "on a 4:3 panel — where the tiles are 30% narrower — shrink-to-fit
+ * would put it there again".
+ *
+ * It did. MEASURED on the menu, one line per tile, by instrumenting the real
+ * render path:
+ *
+ *   16:9   2.40vh   as designed, two lines
+ *   4:3    1.42vh   BELOW the figure the comment calls unreadable
+ *
+ * The wrap was capped at two lines, so a long blurb in a narrow tile still
+ * overflowed and the shrink-to-fit fallback fired anyway. A third line lets
+ * each line be shorter, so the width-driven fit does not have to shrink:
+ * 4:3 goes to 2.24vh and 16:9 is untouched, because at 16:9 nothing needs the
+ * third line.
+ *
+ * The cap is the other half. Allowing three lines overshot — the title is
+ * fitted to the same narrow tile and lands at 2.24vh, so the blurb came out
+ * BIGGER than the name of the game, and a stranger scanning seven tiles picks
+ * by name.
+ */
+describe('the menu blurb stays readable and stays subordinate', () => {
+  const menuSrc = async (): Promise<string> => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/shell/menu.ts', 'utf8');
+    return src
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\/\/.*$/, ''))
+      .join('\n');
+  };
+
+  test('it may wrap to three lines, not two', async () => {
+    const code = await menuSrc();
+    const m = /wrapText\(ctx, t\.blurb,[^)]*?,\s*(\d+)\s*,\s*TRACK\.body\)/.exec(code);
+    assert.ok(m, 'the blurb no longer wraps through wrapText');
+    assert.equal(
+      m[1],
+      '3',
+      `the blurb wraps to ${m[1]} lines. At two, a long blurb in a 4:3 tile ` +
+        `overflows and the shrink-to-fit fallback takes it to 1.42vh — below ` +
+        `the 1.6vh this file calls unreadable from 3m.`
+    );
+  });
+
+  test('and never renders larger than the game it describes', async () => {
+    const code = await menuSrc();
+    assert.match(
+      code,
+      /if \(blurbSize > titleSize\)[\s\S]{0,120}?blurbSize = titleSize/,
+      'the blurb can be bigger than the tile title again, which inverts the ' +
+        'one hierarchy a stranger scanning seven tiles depends on'
+    );
+  });
+
+  /**
+   * Every blurb shares one fitted size, so the LONGEST one sets it for all
+   * seven. A blurb that grows past the current longest shrinks every other
+   * game's instruction to pay for itself.
+   */
+  test('no blurb is longer than the longest one measured against', async () => {
+    const longest = MENU_TILES.reduce((m, t) => Math.max(m, t.blurb.length), 0);
+    assert.ok(
+      longest <= 34,
+      `the longest blurb is now ${longest} characters. The tiles share one ` +
+        `fitted size, so this shrinks every other game's instruction too — ` +
+        `the sizes above were measured against 34.`
+    );
+  });
+});

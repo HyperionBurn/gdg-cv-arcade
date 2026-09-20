@@ -331,7 +331,7 @@ function wrapAll(
 ): Map<string, string[]> {
   const out = new Map<string, string[]>();
   for (const t of MENU_TILES) {
-    out.set(t.id, wrapText(ctx, t.blurb, inner, size, WEIGHT.medium, FONTS.body, 2, TRACK.body));
+    out.set(t.id, wrapText(ctx, t.blurb, inner, size, WEIGHT.medium, FONTS.body, 3, TRACK.body));
   }
   return out;
 }
@@ -819,6 +819,23 @@ export class MenuScreen implements Screen {
       blurbSize *= inner / widest;
       blurbLines = wrapAll(ctx, blurbSize, inner);
     }
+
+    // NEVER LARGER THAN THE NAME OF THE GAME.
+    //
+    // Allowing a third wrapped line rescued the 4:3 case — MEASURED, the blurb
+    // went from 1.42vh to 2.4vh, where the note above calls 1.6vh "unreadable
+    // from 3m" — but it overshot: the title is fitted to the same narrow tile
+    // and lands at 2.24vh, so the instruction came out BIGGER than the thing it
+    // describes. A stranger scanning seven tiles picks by name.
+    //
+    // Equal is fine and is where this lands: the title is BLACK weight in the
+    // display face, the blurb is MEDIUM in the body face, so they are still
+    // plainly a heading and its line. It is only being larger that reads wrong.
+    if (blurbSize > titleSize) {
+      blurbSize = titleSize;
+      blurbLines = wrapAll(ctx, blurbSize, inner);
+    }
+
     let blurbRows = 1;
     for (const lines of blurbLines.values()) blurbRows = Math.max(blurbRows, lines.length);
     const lineH = blurbSize * 1.2;
