@@ -1250,6 +1250,13 @@ export class RunnerGame extends GameBase {
 
   protected override onRenderHud(fc: FrameContext, slot: number, rect: SlotRect): void {
     const score = this.scoreFor(slot);
+    // NOT WHEN THE HUD IS ALREADY SAYING IT — see chaseLineOwnsBoardRank. The
+    // note below records moving this sticker out from under the chase line
+    // because it was "covering the live thing to beat with a second copy of
+    // roughly the same information". That treated the collision; this treats
+    // the duplication. With a ghost loaded the chase line is racing the
+    // player's own best, which is a different race, and the sticker returns.
+    if (this.chaseLineOwnsBoardRank(slot)) return;
     const preview = leaderboard.previewRank('runner', score);
     if (preview.pointsToNext !== null && preview.nextRank !== null && score > 0) {
       this.drawTargetMarker(

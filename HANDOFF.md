@@ -110,12 +110,17 @@ down.
 Things I looked at and chose not to change. If you disagree, the reasoning is
 here so you can overrule it properly.
 
-- **Two chase readouts on one screen.** Pose Match and Runner each draw an
-  in-playfield "N TO #4" marker while the HUD simultaneously shows a ghost race
-  ("N AHEAD OF BEST"). Both are true and they are different races, but it is
-  clutter, and `base.ts` already has a documented rule about which one wins.
-  Changing it is a design call with real trade-offs, so it is a judgement call
-  I left to you rather than churn five days out.
+- ~~**Two chase readouts on one screen.**~~ **Resolved 2026-09-20**, and the
+  real defect was sharper than "clutter". With a ghost loaded the two readouts
+  are different races and both earn their space. With NO ghost the HUD chase
+  line falls through to the board and renders the **identical string** the
+  sticker is already showing — `12 TO #4`, twice, a few vh apart. That is most
+  of the stall's day: a ghost only exists once somebody has set a top run in
+  that game, and it is retired mid-round the moment the gap is out of reach.
+
+  The precedence now lives in one place (`chaseMode` in `base.ts`) and the
+  subclasses ASK it (`chaseLineOwnsBoardRank`) instead of re-deriving it. The
+  sticker draws only when the HUD is busy saying something else.
 - **Popup overlap during the pop — much smaller, not gone.** Measured worst
   case is now **14.1%** of the smaller word, down from 38.9%. The separation
   logic in `PopupLayer.spawn` still reserves the SETTLED width; what changed is

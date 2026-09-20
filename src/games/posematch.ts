@@ -1055,7 +1055,12 @@ export class PoseMatchGame extends GameBase {
   protected onRenderHud(fc: FrameContext, slot: number, rect: SlotRect): void {
     // PLAN.md §4: "the thing to beat is visible DURING play, not only at the
     // end." Drawn high, above where the wall gets big.
-    if (this.playerCount === 1) {
+    //
+    // NOT WHEN THE HUD IS ALREADY SAYING IT. With no ghost loaded the chase
+    // line renders exactly this string, so the screen carried '12 TO #4'
+    // twice, a few vh apart. With a ghost it says '3 AHEAD OF BEST', which is
+    // a different race, and then both are worth having.
+    if (this.playerCount === 1 && !this.chaseLineOwnsBoardRank(slot)) {
       const preview = leaderboard.previewRank('posematch', this.scoreFor(slot));
       if (preview.pointsToNext !== null && preview.nextRank !== null) {
         this.drawTargetMarker(

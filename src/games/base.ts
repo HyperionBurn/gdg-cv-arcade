@@ -2341,120 +2341,151 @@ export abstract class GameBase implements Screen {
     const chaseAlign = m.inlineRow ? ('right' as const) : ('center' as const);
     const score = this.scoreFor(slot);
 
-    if (this.config.partyMode) return;
-
-    // In versus the opponent IS the target — a leaderboard line would just be
-    // noise next to the person standing beside you.
-    if (this.playerCount === 2) {
-      const other = this.scoreFor(slot === 0 ? 1 : 0);
-      const diff = score - other;
-      if (diff === 0) return;
-      drawText(ctx, diff > 0 ? `LEADING BY ${diff}` : `DOWN BY ${-diff}`, chaseX, vh(v, m.chaseY), {
-        size: chase(2.2),
-        align: chaseAlign,
-        knockout: true,
-        color: diff > 0 ? COLORS.green : COLORS.red,
-        font: FONTS.body,
-        weight: 700,
-        letterSpacing: '0.1em',
-      });
-      return;
-    }
-
-    // A ghost beats a leaderboard line: "3 AHEAD OF YOUR BEST" is a race you
-    // can see, where "12 TO #4" is an abstraction.
+    // THE LATCH, which is the one piece of state this render pass owns.
     //
-    // UNTIL IT DOESN'T. This branch ran unconditionally whenever a ghost had
-    // loaded, so a player having an off round against a strong personal best
-    // watched "106 BEHIND BEST" in red for a minute while an entirely reachable
-    // "1 TO #3" sat uncalled on the leaderboard beside it. A race you have
-    // visibly lost is the opposite of a chase line.
-    //
-    // Once the gap is out of reach the ghost line is retired for the rest of
-    // the round and the board takes over.
-    if (this.ghost && !this.ghostRaceLost) {
+    // Kept here rather than in `chaseMode` because `chaseMode` is consulted by
+    // subclasses deciding whether to draw their own marker, and a query that
+    // silently retires a race depending on who asked and in what order is a
+    // bug waiting for a reordered render call.
+    if (this.playerCount !== 2 && this.ghost && !this.ghostRaceLost) {
       const target = this.ghost.scoreAt(this.roundTotal - this.timeLeft);
       const diff = score - target;
-      const ahead = diff >= 0;
+      if (diff < 0 && -diff > Math.max(8, target * 0.45)) this.ghostRaceLost = true;
+    }
 
-      if (!ahead && -diff > Math.max(8, target * 0.45)) {
-        this.ghostRaceLost = true;
+    switch (this.chaseMode(slot)) {
+      case 'none':
+        return;
+
+      case 'versus': {
+        const diff = score - this.scoreFor(slot === 0 ? 1 : 0);
+        drawText(ctx, diff > 0 ? `LEADING BY ${diff}` : `DOWN BY ${-diff}`, chaseX, vh(v, m.chaseY), {
+          size: chase(2.2),
+          align: chaseAlign,
+          knockout: true,
+          color: diff > 0 ? COLORS.green : COLORS.red,
+          font: FONTS.body,
+          weight: 700,
+          letterSpacing: '0.1em',
+        });
+        return;
       }
-    }
 
-    if (this.ghost && !this.ghostRaceLost) {
-      const target = this.ghost.scoreAt(this.roundTotal - this.timeLeft);
-      const diff = score - target;
-      const ahead = diff >= 0;
-      drawText(
-        ctx,
-        ahead ? `${diff} AHEAD OF BEST` : `${-diff} BEHIND BEST`,
-        chaseX,
-        vh(v, m.chaseY),
-        {
+      case 'ghost': {
+        const target = this.ghost!.scoreAt(this.roundTotal - this.timeLeft);
+        const diff = score - target;
+        const ahead = diff >= 0;
+        drawText(ctx, ahead ? `${diff} AHEAD OF BEST` : `${-diff} BEHIND BEST`, chaseX, vh(v, m.chaseY), {
           size: chase(2.3),
           align: chaseAlign,
-        knockout: true,
+          knockout: true,
           color: ahead ? COLORS.green : COLORS.red,
           font: FONTS.body,
           weight: 700,
           letterSpacing: '0.1em',
-        }
-      );
-      return;
+        });
+        return;
+      }
+
+      case 'record': {
+        const pulse = 0.7 + idlePulse(fc.time, 8, 1) * 0.3;
+        drawText(ctx, '<RECORD PACE>', chaseX, vh(v, m.chaseY), {
+          size: chase(2.4),
+          align: chaseAlign,
+          knockout: true,
+          color: COLORS.ink,
+          shadow: vh(v, SHADOW.base),
+          shadowColor: COLORS.yellow,
+          alpha: pulse,
+          letterSpacing: '0.14em',
+        });
+        return;
+      }
+
+      case 'first':
+        // NOTHING TO CHASE YET. On a virgin board `previewRank` has no next
+        // rank to report, and this returned silently — leaving the reserved
+        // chase slot empty for exactly the first players of the day, who are
+        // the ones with least idea what the game wants from them. Name the
+        // prize instead.
+        drawText(ctx, '<SET THE FIRST SCORE>', chaseX, vh(v, m.chaseY), {
+          size: chase(2.2),
+          align: chaseAlign,
+          knockout: true,
+          color: COLORS.ink,
+          font: FONTS.body,
+          weight: 700,
+          letterSpacing: '0.1em',
+        });
+        return;
+
+      case 'board': {
+        const preview = leaderboard.previewRank(this.config.gameId, score);
+        // Closing in is the moment worth selling — brighten as the gap narrows.
+        const close = (preview.pointsToNext ?? 99) <= 5;
+        drawText(ctx, `${preview.pointsToNext} TO #${preview.nextRank}`, chaseX, vh(v, m.chaseY), {
+          size: chase(close ? 2.6 : 2.2),
+          align: chaseAlign,
+          knockout: true,
+          color: COLORS.ink,
+          font: FONTS.body,
+          weight: 700,
+          letterSpacing: '0.1em',
+        });
+        return;
+      }
     }
+  }
+
+  /**
+   * WHICH RACE THE CHASE LINE IS CURRENTLY REPORTING.
+   *
+   * Extracted so it can be asked as a QUESTION as well as acted on. Pose Match
+   * and Runner both draw their own in-playfield "beat this" sticker, and with
+   * no ghost loaded the HUD line and the sticker rendered the IDENTICAL string
+   * — '12 TO #4', twice, a few vh apart. Runner's own comment records moving
+   * the sticker down because it was "covering the live thing to beat with a
+   * second copy of roughly the same information", which treated the collision
+   * and not the duplication.
+   *
+   * A ghost line and a board line are genuinely two different races and both
+   * are worth showing; a board line and a board line are one race shown twice.
+   * So the subclasses ask this rather than re-deriving the precedence, because
+   * a precedence copied into three files is a precedence that will drift.
+   *
+   * PURE. See the note on the latch in `drawChaseLine`.
+   */
+  private chaseMode(slot: number): 'none' | 'versus' | 'ghost' | 'record' | 'first' | 'board' {
+    if (this.config.partyMode) return 'none';
+    const score = this.scoreFor(slot);
+
+    // In versus the opponent IS the target — a leaderboard line would just be
+    // noise next to the person standing beside you.
+    if (this.playerCount === 2) {
+      return score - this.scoreFor(slot === 0 ? 1 : 0) === 0 ? 'none' : 'versus';
+    }
+
+    // A ghost beats a leaderboard line: "3 AHEAD OF YOUR BEST" is a race you
+    // can see, where "12 TO #4" is an abstraction. Until the gap is out of
+    // reach — a race you have visibly lost is the opposite of a chase line —
+    // at which point the latch retires it and the board takes over.
+    if (this.ghost && !this.ghostRaceLost) return 'ghost';
 
     const preview = leaderboard.previewRank(this.config.gameId, score);
+    if (preview.isRecord && score > 0) return 'record';
+    if (preview.pointsToNext === null || preview.nextRank === null) return 'first';
+    return 'board';
+  }
 
-    if (preview.isRecord && score > 0) {
-      const pulse = 0.7 + idlePulse(fc.time, 8, 1) * 0.3;
-      drawText(ctx, '<RECORD PACE>', chaseX, vh(v, m.chaseY), {
-        size: chase(2.4),
-        align: chaseAlign,
-        knockout: true,
-        color: COLORS.ink,
-        shadow: vh(v, SHADOW.base),
-        shadowColor: COLORS.yellow,
-        alpha: pulse,
-        letterSpacing: '0.14em',
-      });
-      return;
-    }
-
-    // NOTHING TO CHASE YET. On a virgin board `previewRank` has no next rank to
-    // report, and this returned silently — leaving the reserved chase slot
-    // empty for exactly the first players of the day, who are the ones with
-    // least idea what the game wants from them. Name the prize instead.
-    if (preview.pointsToNext === null || preview.nextRank === null) {
-      drawText(ctx, '<SET THE FIRST SCORE>', chaseX, vh(v, m.chaseY), {
-        size: chase(2.2),
-        align: chaseAlign,
-        knockout: true,
-        color: COLORS.ink,
-        font: FONTS.body,
-        weight: 700,
-        letterSpacing: '0.1em',
-      });
-      return;
-    }
-
-    // Closing in is the moment worth selling — brighten as the gap narrows.
-    const close = preview.pointsToNext <= 5;
-    drawText(
-      ctx,
-      `${preview.pointsToNext} TO #${preview.nextRank}`,
-      chaseX,
-      vh(v, m.chaseY),
-      {
-        size: chase(close ? 2.6 : 2.2),
-        align: chaseAlign,
-        knockout: true,
-        color: COLORS.ink,
-        font: FONTS.body,
-        weight: 700,
-        letterSpacing: '0.1em',
-      }
-    );
+  /**
+   * True when the HUD chase line is already showing the leaderboard chase, so
+   * an in-playfield "beat this" marker would be a second copy of one string.
+   *
+   * PLAN.md §4 wants "the thing to beat visible DURING play", and that is what
+   * the marker is for — but only when the HUD is busy saying something else.
+   */
+  protected chaseLineOwnsBoardRank(slot: number): boolean {
+    return this.chaseMode(slot) === 'board';
   }
 
   /** Small helper subclasses use for "beat this" markers. */
