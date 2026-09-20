@@ -857,3 +857,75 @@ describe('README’s status table agrees with the section it cites', () => {
     }
   });
 });
+
+/**
+ * THE HANDOFF'S OWN NUMBERS HAVE TO BE TRUE TOO.
+ *
+ * HANDOFF.md opens with the suite size, and it said **687 tests, 157 suites**
+ * for most of a day during which the real figures passed 800 and 185. Nobody
+ * was misled by that in a way that cost anything, but it is the same drift
+ * this suite keeps catching in README — and a reader who spots one stale
+ * number stops trusting the ones they cannot check.
+ *
+ * A COUNT rots on every commit that adds a test, so the doc states a FLOOR and
+ * this checks the floor. Tests only ever grow, so it never fires spuriously;
+ * it fires when the doc claims a suite bigger than the one that exists.
+ */
+describe('HANDOFF does not overstate the suite', () => {
+  const stated = async (): Promise<{ tests: number; suites: number }> => {
+    const { readFile } = await import('node:fs/promises');
+    const md = (await readFile('HANDOFF.md', 'utf8')).replace(/\r\n/g, '\n');
+    const m = /over ([\d,]+) tests across ([\d,]+)\+? suites/i.exec(md);
+    assert.ok(m, 'HANDOFF no longer states a suite floor in the expected shape');
+    return { tests: Number((m[1] ?? '0').replace(/,/g, '')), suites: Number(m[2] ?? '0') };
+  };
+
+  const actual = async (): Promise<{ tests: number; suites: number }> => {
+    const { readdir, readFile } = await import('node:fs/promises');
+    let tests = 0;
+    let suites = 0;
+    for (const f of await readdir('tests')) {
+      if (!f.endsWith('.test.ts')) continue;
+      const src = await readFile(`tests/${f}`, 'utf8');
+      // Counting call sites, not running them: this file must not need the
+      // suite to have run to know how big it is.
+      tests += (src.match(/^\s*test\(/gm) ?? []).length;
+      suites += (src.match(/^\s*describe\(/gm) ?? []).length;
+    }
+    return { tests, suites };
+  };
+
+  test('the stated test floor is real', async () => {
+    const said = await stated();
+    const real = await actual();
+    assert.ok(
+      real.tests >= said.tests,
+      `HANDOFF claims over ${said.tests} tests and ${real.tests} exist. ` +
+        'Lower the floor or find the missing tests.',
+    );
+  });
+
+  test('and so is the suite floor', async () => {
+    const said = await stated();
+    const real = await actual();
+    assert.ok(
+      real.suites >= said.suites,
+      `HANDOFF claims ${said.suites}+ suites and ${real.suites} exist.`,
+    );
+  });
+
+  /**
+   * And the floor has to be worth stating. A floor of 1 would pass forever
+   * and tell a reader nothing, which is the failure mode of every guard that
+   * is technically true.
+   */
+  test('the floor is close enough to the truth to mean something', async () => {
+    const said = await stated();
+    const real = await actual();
+    assert.ok(
+      said.tests > real.tests * 0.8,
+      `the floor of ${said.tests} is far below the real ${real.tests}; raise it ` +
+        'or it stops being informative',
+    );
+  });
+});

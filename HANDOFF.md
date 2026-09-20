@@ -20,10 +20,23 @@ The authority for everything else is:
 
 ## State
 
-Green as of the last commit: **687 tests, 157 suites, 0 failures**, typecheck
-clean, production build verified to make **zero external requests** — re-checked
+Green as of the last commit: **over 770 tests across 180+ suites, 0
+failures**, typecheck clean, production build verified to make **zero external
+requests** — re-checked
 on the built bundle, not the dev server, along with all four Archivo weights
 reporting `loaded` and `window.__arcade` correctly absent.
+
+A FLOOR, not a count, and `npm test` reports MORE — 823 at the time of
+writing. The floor counts `test(` call sites, which is what a guard can check
+without running the suite; parameterised tests expand at runtime, so the
+runner's number is always the larger and the truer one.
+
+It is written as a minimum because the count here said **687** for most of a
+day during which the real figure passed 800, which is the same drift this
+file keeps catching in README. `runbook.test.ts` fails if the suite drops
+below the floor, and separately if the floor drifts more than 20% below the
+truth — a floor nobody maintains stops being informative, which is the
+failure mode of every guard that is merely true.
 
 Every row of `FEEDBACK.md` now fails a test when its fix is undone, which is a
 stronger claim than the anchor check makes and is re-runnable:
@@ -32,9 +45,11 @@ stronger claim than the anchor check makes and is re-runnable:
 ```bash
 npm run setup      # fetch models + fonts — REQUIRED before first run
 npm run dev        # http://localhost:5173
-npm test           # 687 tests, ~12s
+npm test           # the whole suite, ~12s
 npm run typecheck
 npm run kiosk      # production build, served on :4173 — use this on the day
+npm run build:probe   # the SAME pipeline with the dev handle kept, into dist-probe
+npm run preview:probe # serves it on :4174, so turn/smoke/census can sweep the real build
 ```
 
 `npm run setup` is not optional and not a convenience. The app ships the pose
