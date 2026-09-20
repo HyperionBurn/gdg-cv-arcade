@@ -822,18 +822,47 @@ describe('nothing a player reads is drawn at diagnostic size', () => {
   /** Calls that put words on the canvas. */
   const DRAWERS = /\b(drawText|stickerPill|labelPill|drawTabularNumber)\s*\(/g;
 
-  test('no game draws text at or below TYPE.micro', async () => {
-    const { readdir, readFile } = await import('node:fs/promises');
+  /**
+   * The shell screens are on the list for the same reason the games are.
+   *
+   * `operator.ts` and `rigcheck.ts` are deliberately NOT: those are read at
+   * arm's length by one marshal, which is precisely what micro is for. Every
+   * other screen here is read by a stranger across a hall — the menu most of
+   * all, because that is where somebody decides whether to join the queue.
+   *
+   * Extending it found two more: `RECORD` on a menu tile and the `YOURS` pill
+   * that tells a player which row of the board is theirs. The tile layout had
+   * already had this argument once, on the seat badge, where 2.0vh was
+   * rejected at 22px on a 1080p TV. These were 1.5vh, which is 16px.
+   */
+  const SURFACES = [
+    'src/games',
+    'src/shell/attract.ts',
+    'src/shell/menu.ts',
+    'src/shell/initials.ts',
+    'src/shell/mode.ts',
+  ];
+
+  test('no player-facing screen draws text at or below TYPE.micro', async () => {
+    const { readdir, readFile, stat } = await import('node:fs/promises');
     const { join } = await import('node:path');
 
-    const files = (await readdir('src/games')).filter((f) => f.endsWith('.ts'));
-    assert.ok(files.length >= 7, `only found ${files.length} game files`);
+    const files: string[] = [];
+    for (const s of SURFACES) {
+      if ((await stat(s)).isDirectory()) {
+        for (const f of await readdir(s)) if (f.endsWith('.ts')) files.push(join(s, f));
+      } else {
+        files.push(s);
+      }
+    }
+    assert.ok(files.length >= 11, `only found ${files.length} player-facing files`);
 
     const bad: string[] = [];
     let checked = 0;
 
-    for (const f of files) {
-      const raw = await readFile(join('src/games', f), 'utf8');
+    for (const path of files) {
+      const f = path.split(/[\\/]/).pop()!;
+      const raw = await readFile(path, 'utf8');
       // Comments stripped: this note quotes the token it bans.
       const src = raw
         .replace(/\/\*[\s\S]*?\*\//g, ' ')
@@ -841,24 +870,33 @@ describe('nothing a player reads is drawn at diagnostic size', () => {
         .map((l) => l.replace(/\/\/.*$/, ''))
         .join('\n');
 
-      for (const call of src.matchAll(DRAWERS)) {
-        // Only the options object of THIS call, so a particle burst's own
-        // `size:` cannot be mistaken for type. `vh(v, 0.7)` in a confetti
-        // config is what a looser scan finds first.
-        const span = src.slice(call.index ?? 0, (call.index ?? 0) + 500);
+      // Each call's span ends at the NEXT drawing call, not at a fixed
+      // character count. Two reasons, and the second was found by this scan
+      // reporting a size twice in menu.ts that appears there once:
+      //
+      //  - a particle burst's own `size:` must not be mistaken for type, which
+      //    is what a looser scan finds first (`vh(v, 0.7)` in a confetti config)
+      //  - a call that sets NO size would otherwise inherit the next call's,
+      //    which is the too-wide-window mistake this repo has now made twice
+      const starts = [...src.matchAll(DRAWERS)].map((m) => m.index ?? 0);
+
+      for (let i = 0; i < starts.length; i++) {
+        const from = starts[i]!;
+        const span = src.slice(from, Math.min(starts[i + 1] ?? src.length, from + 600));
+        const name = /\b(drawText|stickerPill|labelPill|drawTabularNumber)\s*\(/.exec(span)?.[1] ?? '?';
         const m = /size:\s*vh\(\s*v\s*,\s*(TYPE\.(\w+)|[0-9.]+)\s*\)/.exec(span);
         if (!m) continue;
         checked++;
 
         const token = m[2];
         if (token === 'micro') {
-          bad.push(`${f}: ${call[1]} at TYPE.micro`);
+          bad.push(`${f}: ${name} at TYPE.micro`);
           continue;
         }
         if (token) continue; // a named token above micro
         const size = Number(m[1]);
         if (Number.isFinite(size) && size <= TYPE.micro) {
-          bad.push(`${f}: ${call[1]} at ${size}vh, at or under TYPE.micro (${TYPE.micro})`);
+          bad.push(`${f}: ${name} at ${size}vh, at or under TYPE.micro (${TYPE.micro})`);
         }
       }
     }

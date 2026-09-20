@@ -987,8 +987,18 @@ export class MenuScreen implements Screen {
       return;
     }
 
+    // `TYPE.label`, not micro. The seat badge above went through this exact
+    // argument already — see the note on TILE.seats, where 2.0vh was rejected
+    // at 22px on a 1080p TV. This was 1.5vh, which is 16px, and it is the word
+    // that says what the number under it IS. A kicker attached to something
+    // bigger does not have to clear MIN_LEGIBLE alone, but micro is reserved
+    // for operator and diagnostic surfaces and this is the menu.
+    //
+    // It fits: the rule sits at 20vh and the value spans 25.9-29.3vh, so a
+    // 2.2vh label centred at 23.6 runs 22.5-24.7 with 2.5vh of air above and
+    // 1.2vh below.
     drawText(ctx, 'RECORD', cx, y + vh(v, TILE.recordLabel), {
-      size: vh(v, TYPE.micro),
+      size: vh(v, TYPE.label),
       color: COLORS.ink,
       font: FONTS.body,
       weight: WEIGHT.bold,

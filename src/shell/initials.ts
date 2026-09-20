@@ -1108,8 +1108,12 @@ export class InitialsScreen implements Screen {
       }
 
       if (isCurrent) {
+        // The word that tells a player which row on the board is theirs, so
+        // it is content rather than decoration and micro is the wrong token —
+        // that one is reserved for operator and diagnostic surfaces. 2.2vh
+        // inside a 3.6vh pill still leaves 0.7vh of air on each side.
         labelPill(ctx, v, cx, ty + target.h * 0.85, 'YOURS', vh(v, 3.6), {
-          size: vh(v, TYPE.micro),
+          size: vh(v, TYPE.label),
           fill: COLORS.yellow,
           color: COLORS.ink,
           shadow: 0,
