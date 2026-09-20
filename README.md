@@ -58,7 +58,8 @@ game logic, and it doubles as a demo mode if the camera dies at the stall.
 | `4` | Balloon Pop | 30s, 1–2P, the accessible one |
 | `5` | Red Light, Green Light | 45s, up to **5 players**, 10s lobby |
 | `6` | Pose Match | 60s, 1–2P |
-| `7` | Runner | 60s, 1P, the only 3D game |
+| `7` | Runner | 60s, 1–2P split screen, the only 3D game |
+| `8` | Rhythm Punch | 60s, 1–2P split screen |
 
 | Key | Action |
 |---|---|

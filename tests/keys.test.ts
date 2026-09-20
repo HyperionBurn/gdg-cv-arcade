@@ -219,3 +219,79 @@ describe('an unknown screen name does not leave a blank screen', () => {
     );
   });
 });
+
+/**
+ * AND THE OTHER KEY TABLE, WHICH NOTHING WAS WATCHING.
+ *
+ * The guards above cover the day-of card's `### Keys` table. README opens
+ * with a SECOND one — `## Screens` — that lists every key against a screen
+ * and a description, and it had drifted in both possible directions at once:
+ *
+ *   - `8` was missing entirely, so Rhythm Punch did not appear on the map of
+ *     the stall at all.
+ *   - Runner was described as `1P`, which stopped being true when it became a
+ *     two-seat game. A marshal reading that turns a pair away from a game
+ *     they can play together.
+ *
+ * The day-of table says `2`–`8` and was right the whole time, which is
+ * exactly why a second unguarded copy of the same facts is dangerous: the
+ * guarded one keeps being correct while the other rots beside it.
+ */
+describe('the Screens table agrees with the key map', () => {
+  const screensTable = async (): Promise<string> => {
+    const md = (await readme()).replace(/\r\n/g, '\n');
+    const start = md.indexOf('## Screens');
+    assert.ok(start >= 0, 'README no longer opens with a Screens table');
+    const rest = md.slice(start + 10);
+    const end = rest.search(/\n## /);
+    return end >= 0 ? rest.slice(0, end) : rest;
+  };
+
+  test('every key the app binds is listed', async () => {
+    const table = await screensTable();
+    const missing = Object.keys(SCREEN_KEYS).filter((k) => !table.includes(`\`${k}\``));
+    assert.deepEqual(
+      missing,
+      [],
+      'these number keys jump to a screen and the Screens table does not ' +
+        'mention them, so that screen is invisible on the map of the stall',
+    );
+  });
+
+  test('and lists nothing the app does not bind', async () => {
+    const table = await screensTable();
+    const listed = [...table.matchAll(/\|\s*`(\d)`\s*\|/g)].map((m) => m[1] ?? '');
+    assert.ok(listed.length >= 8, 'the Screens table stopped parsing');
+    const ghosts = listed.filter((k) => !(k in SCREEN_KEYS));
+    assert.deepEqual(ghosts, [], 'the Screens table offers keys that do nothing');
+  });
+
+  /**
+   * DERIVED FROM THE GAME CONFIG, not from a list here. A game that seats two
+   * must not be described as solo. This is the half that was wrong, and the
+   * half a marshal acts on when a pair walks up.
+   */
+  test('no two-seat game is described as solo', async () => {
+    const { readdir, readFile } = await import('node:fs/promises');
+    const table = await screensTable();
+
+    for (const f of await readdir('src/games')) {
+      if (!f.endsWith('.ts')) continue;
+      const src = await readFile(`src/games/${f}`, 'utf8');
+      if (!/supportsVersus: true/.test(src)) continue;
+
+      const id = f.replace(/\.ts$/, '');
+      const key = Object.keys(SCREEN_KEYS).find((k) => SCREEN_KEYS[k] === id);
+      if (!key) continue;
+
+      const row = table.split('\n').find((l) => l.includes(`\`${key}\``));
+      assert.ok(row, `${id} has no row in the Screens table`);
+      assert.doesNotMatch(
+        row,
+        /\b1P\b(?!\s*[–—-]\s*2P)/,
+        `${id} seats two players and its row still says 1P, so a marshal ` +
+          'turns a pair away from a game they can play together',
+      );
+    }
+  });
+});
