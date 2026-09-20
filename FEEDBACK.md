@@ -65,12 +65,32 @@ felt wrong, and two of them were "fixed" once in the wrong direction first.
 | 19 | The score was behind a balloon for most of every round | An opaque paper shelf with a hard ink rule, and the playfield culled underneath it — a shelf alone would leave balloons poppable while hidden. | `src/games/balloonpop.ts` · `hudShelf` |
 | 20 | "I legit couldn't reach most" of the fruit | Fruit is now placed relative to the player's own body centre within a measured reach band, not at a fraction of the slot rect. | `src/games/fruitninja.ts` · `const REACH_HALF_TORSOS = 1.45;` |
 | 21 | "they love combo chains." | The escalation got the budget: a word per chain length, growing type, growing flash, and confetti past a triple. Scoring deliberately untouched. | `src/games/fruitninja.ts` · `CHAIN_WORDS` |
-| 22 | Hits registering "to a target that is far away", and inconsistent perfect timing | Both halves were one number. A 0.5-torso hit radius swallowed neighbouring targets (they sit 0.3625 apart) and made the judged time speed-dependent. | `src/games/rhythm.ts` · `const HIT_RADIUS_TORSOS = 0.3;` |
+| 22 | Hits registering "to a target that is far away", and inconsistent perfect timing | Both halves were one number. A 0.5-torso hit radius swallowed neighbouring targets (they sit 0.3625 apart) and made the judged time speed-dependent. **Live-tunable since 2026-09-20** — it had no declared slider, so the playtest that produced it could not have retuned it without a rebuild. The slider stops at 0.36, below the 0.3625 cliff. | `src/games/rhythm.ts` · `const HIT_RADIUS_TORSOS = 0.3;` · `src/meta/tunables.ts` · `PUNCH REACH` |
 | 23 | "ensure passersby don't affect the game" | Bystander rejection by relative size, plus a reservation that a passer-by can never hold — the distinguishing property of a passer-by is not where they are, it is that they do not stop. | `src/core/tracker.ts` · `minRelativeSize` |
 | 24 | "seven dwell tiles slow down every turn in a queue." | Fair mode: `shell.menuSize` trims the menu to the first N available games, with a row shape that gets taller as well as wider. | `src/shell/menu.ts` · `shell.menuSize` |
 | 25 | On a fresh install every tile says "BE THE FIRST!" | The operator can type a real target score per game. No auto-seeding — scoring scales are not comparable across these seven games, so any default would be this repo guessing about a hall it has never seen. | `src/shell/operator.ts` · `op-entry-row` |
 | 26 | Asked for a way to leave initials entry without typing a name | `SKIP` while the entry is empty, `OK` once there is something to confirm, and never styled green — a green SKIP reads as the recommended choice. | `src/shell/initials.ts` · `'SKIP'` |
 | 27 | A marshal needs to drive the screen without walking into frame | Mouse and keyboard for the OPERATOR only. A click commits immediately; nobody in the queue touches the laptop, which is what PLAN.md §6 actually protects. | `src/shell/hover.ts` · `const pointer = {` |
+
+---
+
+## What the ledger has caught since it was written
+
+Three things, all on the same day it was created, which is the argument for it:
+
+1. **The menu still said `MOVE ON GREEN`.** Row 12's fix landed in
+   `redlight.ts` and the ledger's anchor pointed there, so it passed — while
+   the MENU, where a stranger reads what a game is before choosing it, still
+   carried the exact wording the playtest rejected. The ledger was checking the
+   file the fix landed in rather than the words on the screen. It now checks
+   both.
+2. **Row 22's constant was not reachable.** The hit radius came straight from a
+   tester and had no slider, so the playtest it exists for could not retune it.
+3. **Two of my own comments, twice.** Writing a correction note that quoted a
+   figure near the word "playtest" reads to the completeness scrape as a new
+   unfiled report — and so does a tester quote split across a string
+   concatenation. Both are the guard working: a report that cannot be matched
+   is a report that has gone missing.
 
 ---
 

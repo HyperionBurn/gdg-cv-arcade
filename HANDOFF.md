@@ -20,13 +20,13 @@ The authority for everything else is:
 
 ## State
 
-Green as of the last commit: **562 tests, 122 suites, 0 failures**, typecheck
+Green as of the last commit: **590 tests, 129 suites, 0 failures**, typecheck
 clean, production build verified to make **zero external requests**.
 
 ```bash
 npm run setup      # fetch models + fonts — REQUIRED before first run
 npm run dev        # http://localhost:5173
-npm test           # 562 tests, ~10s
+npm test           # 590 tests, ~10s
 npm run typecheck
 npm run kiosk      # production build, served on :4173 — use this on the day
 ```
@@ -185,6 +185,41 @@ has run once, and the loop is throttled while the pane is hidden — so drive
 or every derived figure is out by the ratio. And `tr.a` includes the device
 pixel ratio, so work in stage pixels throughout rather than mixing them with
 viewport units.
+
+---
+
+## Numbers that were true when they were written
+
+A whole class of bug turned up once I went looking for it, and it is not a
+coding mistake — every one of these sentences was CORRECT on the day somebody
+typed it. A constant moved later, its own comment was updated, and the other
+places that quoted it were not.
+
+| Where | Said | Is |
+|---|---|---|
+| README risk table | Pose gate has 0.07 headroom | **0.009** — 0.07 was the headroom at the OLD gate of 0.72 |
+| MATCH THRESHOLD slider description | the same 0.07 | the text a marshal reads while dragging that slider |
+| redlight.ts header | grace is 400ms | **750ms**, and it calls this the one number that is not tuning |
+| `graceSec` note | budget moves 0.85s → 1.05s | **1.00 → 1.20**, computed when breachSec was 0.30 |
+| breachSec note | budget is 0.85s | **1.2s** — the same file says 1.2 eleven lines later |
+| `judgeOpensAt` | 400ms grace becomes 100ms | **750 → 450** |
+| `quietMult` note | "2.4 -> 2.0 … lands at ~3.9" | the constant is **1.6**, and the pure-multiple model it describes was replaced |
+| affine note | "1.1 + 1.45x" | the slope is **quietMult = 1.6**, and the hostile figure ignored the ceiling |
+| two ceiling notes | `quietCeiling × moveEnter` = 1.615 | **2.53** — 1.615 is 1.9 × 0.85, an earlier pair |
+
+Red Light held six of the nine, which makes sense: it has the most coupled
+constants and they were tuned in several passes, each updating its own comment.
+
+**Three sweeps found them, and all three are cheap to re-run.** Compare every
+`old -> new` comment against its constant; compare every inline restatement
+(`NAME is 0.85`) against the declaration; and evaluate every stated arithmetic
+on named constants (`A * B = N`). The last one is clean across all 51 files
+now, and the guards added derive their figures instead of restating them.
+
+**The rule that came out of it:** a number derived from constants must be
+CURRENT, or say which constants produced it. And if every quote is dated,
+something still has to state today's value — otherwise moving the constant
+breaks nothing.
 
 ---
 
