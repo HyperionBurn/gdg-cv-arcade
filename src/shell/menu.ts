@@ -302,7 +302,7 @@ const DECOR: Array<{ kind: 'triangle' | 'circle' | 'blob' | 'halfCircle'; x: num
  * Unavailable games keep their place in `MENU_TILES` — the id order is the
  * leaderboard rail's cycle order — and are only moved for layout.
  */
-function tilesInDisplayOrder(): MenuTile[] {
+export function tilesInDisplayOrder(): MenuTile[] {
   const live: MenuTile[] = [];
   const soon: MenuTile[] = [];
   for (const t of MENU_TILES) (isTileAvailable(t) ? live : soon).push(t);

@@ -531,7 +531,7 @@ const VISION_STALE_MS = 1500;
  * jitter moves every threshold in every game simultaneously — which is exactly
  * what the playtest reported as "tracking is a bit wonky".
  */
-function poseModelChoice(): 'lite' | 'full' | 'heavy' {
+export function poseModelChoice(): 'lite' | 'full' | 'heavy' {
   const n = Math.round(tunables.get('vision.poseModel', 1));
   return n <= 0 ? 'lite' : n >= 2 ? 'heavy' : 'full';
 }
