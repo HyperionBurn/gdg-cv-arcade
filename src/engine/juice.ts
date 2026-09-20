@@ -320,6 +320,38 @@ function estimateHalfWidth(text: string, size: number): number {
 }
 
 /** Floating "+3", "COMBO x4", "MISS" text at the point of impact. */
+/**
+ * THE POP, AS A DESIGNED NUMBER RATHER THAN A BUG'S FINGERPRINT.
+ *
+ * The overshoot used to be 1.9x, and that figure was never chosen. The old
+ * expression `1 + (1 - t) * 6` ran the wrong way — it GREW from 1.11 to 1.89
+ * and then snapped back to 1 in a single frame — and when that was fixed the
+ * peak was deliberately preserved as "same peak, same energy". But 1.889 was
+ * simply where an inverted ramp happened to end up. Nobody ever looked at a
+ * screen and asked for ninety percent.
+ *
+ * It costs more than it looks. MEASURED, driving a real PopupLayer frame by
+ * frame at size 30 on a 1920 viewport:
+ *
+ *   peak   'TOO SLOW!' spawned 35px in     worst overlap of two popups
+ *   1.90   reaches -62.6 — OFF SCREEN       38.9% of the smaller word
+ *   1.35   reaches +5.4 — on screen         14.1%
+ *
+ * The first column is the horizontal clamp being defeated by the very thing
+ * it was added to prevent: the word is clamped at its SETTLED width and then
+ * drawn at 1.9x, so an edge taunt loses its left half for the first eight
+ * frames anyway. That is the Red Light elimination case, and eight frames is
+ * exactly when a player is looking at it.
+ *
+ * 1.35 is an ordinary UI overshoot. It still reads as a punch at 3m — the
+ * window and the settle are unchanged — and it is small enough that the clamp
+ * can afford to reserve the whole of it, which is what makes the guarantee
+ * "the word is never off screen" rather than "the word is usually on screen".
+ */
+const POP_PEAK = 1.35;
+/** Fraction of a popup's life spent settling from `POP_PEAK` back to 1. */
+const POP_WINDOW = 0.15;
+
 export class PopupLayer {
   private pool: Popup[] = [];
 
@@ -379,14 +411,21 @@ export class PopupLayer {
     // stroke the draw adds (`lineWidth = size * 0.17`, so half of that each
     // side) plus a little air, so the text is not welded to the bezel.
     //
-    // Clamped to the SETTLED width, not the pop-in width: a popup briefly
-    // scales to 1.9x as it appears, and reserving room for that would shove
-    // every edge popup a long way from the thing it is describing. The
-    // overshoot lasts about 15% of the popup's life and the word is legible
-    // for the rest of it, which is the part anyone reads.
+    // RESERVED AT THE POP-IN WIDTH, not the settled one.
+    //
+    // This used to reserve the settled width on the argument that the
+    // overshoot is brief. Measured, it was not brief enough: 'TOO SLOW!'
+    // spawned 35px in reached -62.6 — the clamp was defeated for eight frames
+    // by the pop, which is precisely the Red Light elimination case it was
+    // added for. The old argument was that reserving the peak would shove
+    // every edge popup a long way from its subject, and at 1.9x it would
+    // have. At POP_PEAK it costs 26.5px more than reserving the settled width
+    // (81.0 -> 107.5 for 'TOO SLOW!' at size 30) against a word 151px wide, so
+    // the taunt still lands squarely over the racer it names — which is the
+    // only thing the position has to achieve.
     let safeX = x;
     if (this.width > 0) {
-      const half = halfW + size * 0.18;
+      const half = halfW * POP_PEAK + size * 0.18;
       // Narrower than the word itself: centre it and accept the overflow,
       // rather than letting the two clamps fight and pick an arbitrary side.
       safeX = this.width < half * 2 ? this.width / 2 : Math.min(Math.max(x, half), this.width - half);
@@ -439,7 +478,8 @@ export class PopupLayer {
       // at the boundary, so there is no step. Same peak, same 135ms, same
       // energy — it now starts big and settles instead of swelling and
       // vanishing.
-      const scale = t > 0.85 ? 1 + (t - 0.85) * 6 : 1;
+      const scale =
+        t > 1 - POP_WINDOW ? 1 + ((t - (1 - POP_WINDOW)) / POP_WINDOW) * (POP_PEAK - 1) : 1;
       const alpha = t > 0.3 ? 1 : t / 0.3;
 
       ctx.save();

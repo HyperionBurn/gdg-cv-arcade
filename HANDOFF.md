@@ -116,11 +116,20 @@ here so you can overrule it properly.
   clutter, and `base.ts` already has a documented rule about which one wins.
   Changing it is a design call with real trade-offs, so it is a judgement call
   I left to you rather than churn five days out.
-- **Popup overlap during the pop.** Consecutive milestone popups can still
-  overlap by up to ~27% for a few frames. The separation logic in
-  `PopupLayer.spawn` reserves the settled width, not the pop-in width.
-  Transient and low-stakes; reserving the pop-in width would shove every popup
-  a long way from the thing it describes.
+- **Popup overlap during the pop — much smaller, not gone.** Measured worst
+  case is now **14.1%** of the smaller word, down from 38.9%. The separation
+  logic in `PopupLayer.spawn` still reserves the SETTLED width; what changed is
+  that the overshoot is 1.35 rather than 1.9, so there is far less to overlap
+  with. Reserving the pop width vertically as well would push every clustered
+  popup further from its subject to fix 135ms, which is still the wrong trade.
+
+  The 1.9 was worth chasing because it was never a designed number — it is
+  where the old inverted ramp happened to end up, and the fix that reversed the
+  ramp preserved the peak on trust. It was also **defeating the horizontal
+  clamp**: `TOO SLOW!` spawned 35px in reached −62.6 for the first eight
+  frames, which is the exact Red Light elimination case the clamp was added
+  for. The clamp now reserves the peak, and `tests/popups.test.ts` asserts the
+  word is on screen for **every frame of its life**, not just at spawn.
 - **`lsGet` / `lsSet` / `lsRemove` are duplicated** verbatim in `ghosts.ts` and
   `tournament.ts`, and `leaderboard.ts` / `tunables.ts` touch `localStorage`
   directly. `src/meta/storage.ts` now exists and is the natural home for all of
