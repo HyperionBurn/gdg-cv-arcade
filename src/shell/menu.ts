@@ -104,7 +104,18 @@ export const MENU_TILES: readonly MenuTile[] = [
   {
     id: 'redlight',
     title: 'RED LIGHT',
-    blurb: 'MOVE ON GREEN, FREEZE ON RED',
+    // NOT 'MOVE ON GREEN'. That is the exact wording the playtest identified
+    // as the bug — testers read it and started actually WALKING, which cannot
+    // work at a stall and rescales the torso unit every threshold in that game
+    // divides by. `redlight.ts` was fixed to say `<PUMP>` and
+    // "DON'T WALK — STAY PUT", and THIS was missed: the menu is where a
+    // stranger reads what the game is BEFORE they choose it, so the rejected
+    // instruction was still the first thing anybody saw.
+    //
+    // Kept to 29 characters, under the 34 of the longest blurb, because the
+    // tiles share one fitted type size — a longer line here shrinks every
+    // other game's instruction too.
+    blurb: 'PUMP YOUR ARMS, FREEZE ON RED',
     color: GAME_COLORS.redlight,
     enabled: true,
   },

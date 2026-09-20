@@ -245,3 +245,82 @@ describe('the tester-feedback ledger is honest', () => {
     );
   });
 });
+
+
+/**
+ * A REPORT CAN BE FIXED IN ONE PLACE AND LEFT STANDING IN ANOTHER.
+ *
+ * Row 12 is "moving my arms like I'm running without running", and the defect
+ * behind it was the INSTRUCTION: `MOVE ON GREEN` made testers walk, which
+ * cannot work at a stall and rescales the torso unit every threshold in Red
+ * Light divides by. `redlight.ts` was fixed — `<PUMP>`, and
+ * "DON'T WALK — STAY PUT" — and the ledger's anchor pointed at that file and
+ * passed.
+ *
+ * The MENU still said `MOVE ON GREEN, FREEZE ON RED`. That is where a stranger
+ * reads what a game is BEFORE choosing it, so the rejected wording was still
+ * the first thing anybody saw, and the ledger could not see it because it was
+ * checking the file the fix landed in rather than the words on the screen.
+ *
+ * Found by measuring type SIZE across a sweep and reading what came back
+ * smallest — the menu blurbs, at 1.42vh.
+ */
+describe('a rejected instruction does not survive somewhere else', () => {
+  test('nothing player-facing tells anybody to MOVE ON GREEN', async () => {
+    const { readdir, readFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+
+    const walk = async (dir: string): Promise<string[]> => {
+      const out: string[] = [];
+      for (const e of await readdir(dir, { withFileTypes: true })) {
+        const p = join(dir, e.name);
+        if (e.isDirectory()) out.push(...(await walk(p)));
+        else if (e.name.endsWith('.ts')) out.push(p);
+      }
+      return out;
+    };
+
+    const offenders: string[] = [];
+    for (const f of await walk('src')) {
+      const src = await readFile(f, 'utf8');
+      // CODE ONLY. redlight.ts quotes the phrase in a comment explaining why
+      // it is wrong, which is the opposite of the problem.
+      const code = src
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .split(/\r?\n/)
+        .map((l) => l.replace(/\/\/.*$/, ''))
+        .join('\n');
+      if (/MOVE ON GREEN/i.test(code)) offenders.push(f);
+    }
+
+    assert.deepEqual(
+      offenders,
+      [],
+      `the wording the playtest rejected is back on screen in: ${offenders.join(', ')}. ` +
+        `Testers read it and WALKED, which rescales the body every threshold in ` +
+        `Red Light is measured against.`
+    );
+  });
+
+  /** And the menu agrees with the game about what the player is asked to do. */
+  test('the menu names the same motion the game does', async () => {
+    const { readFile } = await import('node:fs/promises');
+    // Comments stripped first: the note explaining this fix sits between the
+    // id and the blurb and pushed the blurb outside the search window, so the
+    // test failed with "Red Light has no menu blurb any more" on code that
+    // was correct.
+    const menu = (await readFile('src/shell/menu.ts', 'utf8'))
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\/\/.*$/, ''))
+      .join('\n');
+    const m = /id: 'redlight'[\s\S]{0,400}?blurb: '([^']+)'/.exec(menu);
+    assert.ok(m, 'Red Light has no menu blurb any more');
+    assert.match(
+      m[1]!,
+      /PUMP/,
+      `the menu describes Red Light as "${m[1]}", which does not name the ` +
+        `motion that scores. The game says PUMP; the menu is read first.`
+    );
+  });
+});
