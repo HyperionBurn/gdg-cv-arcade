@@ -624,19 +624,30 @@ Found by review and left deliberately. Each needs a call, not a patch.
   review's call, if a cut is forced: trim the **Runner** first (already
   pre-authorised in PLAN.md), because Balloon Pop's zero-coordination floor is a
   niche nothing else on the roster covers.
-- **Every abandoned initials entry defaults to `AAA`.** A queue that mostly
-  walks away after seeing its score will fill the boards with indistinguishable
-  rows, which undercuts the rivalry the leaderboard exists to create.
+- ~~**Every abandoned initials entry defaults to `AAA`.**~~ **Called
+  2026-09-20.** It stores `---` now. That is not a new vocabulary: `padEnd(3,
+  '-')` already writes it, because the deadline firing on a half-typed `W`
+  stores `W--`, so the glyph already means "nothing was given here" everywhere
+  else on the board.
 
-  **This got more likely on 2026-09-19, not less.** SKIP now makes leaving
-  without a name one dwell instead of a 16-second wait, which is the right call
-  for throughput and was asked for directly in the playtest feedback — but the
-  cheaper an exit is, the more people take it. The options, none of which is
-  obviously right and none of which I have taken unilaterally: store nothing
-  for a skip (clean boards, but a real score vanishes); keep `AAA` (honest
-  about what happened, ugly in a column); or seed the field with the last
-  initials so confirming is cheaper than skipping. It is a product call about
-  what the leaderboard is FOR.
+  Of the three options listed here, "store nothing" loses a real target from a
+  board that has few of them on day-one morning, and "seed the last initials"
+  puts one stranger's name on another stranger's score. `---` keeps the score
+  as a target and refuses to pretend it belongs to somebody.
+
+  **The option NOT taken, and why:** stop showing the initials screen at all
+  for a score that cannot place. It would cut queue time and almost all of
+  these rows — but a skip bypasses the FACTION picker too, so gating the
+  screen on rank trades every non-placing player's faction contribution for
+  queue speed, and PLAN.md §4 calls factions the highest-leverage feature in
+  the doc. **Decide that one with the Sept 22 stranger playtest's numbers**:
+  count how many players skip, and how many of those would not have placed.
+
+  Fixing it surfaced a second bug that was already there. `personalBest` and
+  `factionFor` both identify a player by their initials string, so a shared
+  marker makes every anonymous player the same person — the second skipper of
+  the afternoon was being told their personal best was the first skipper's
+  score. Both now exclude the marker.
 
 ### Runner go/no-go — Sept 21
 
