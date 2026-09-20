@@ -532,6 +532,26 @@ export class OperatorOverlay {
 
     strip.appendChild(this.chip('SCREEN', router.activeId.toUpperCase() || '—'));
 
+    // IDENTITY, LIVE, for the round on screen.
+    //
+    // `idLost` above zero means somebody became a new person mid-round: score
+    // reset, lane colour changed. FEEDBACK's Red Light row asks exactly this
+    // question and the export answers it afterwards; this answers it while
+    // the person it happened to is still standing in front of you.
+    const game = router.active as unknown as {
+      identityStats?: () => { reserved: number; reclaimed: number; expired: number };
+    } | null;
+    if (typeof game?.identityStats === 'function') {
+      const id = game.identityStats();
+      strip.appendChild(
+        this.chip(
+          'IDENTITY',
+          id.reserved === 0 ? 'HELD' : `${id.reclaimed}/${id.reserved} BACK, ${id.expired} LOST`,
+          id.expired > 0 ? 'bad' : id.reserved > 0 ? 'warn' : 'good'
+        )
+      );
+    }
+
     if (vs.ready) {
       const fps = vs.inferenceFps;
       strip.appendChild(

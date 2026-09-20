@@ -968,6 +968,23 @@ export abstract class GameBase implements Screen {
    * here is written once, at the end of a round, and read by a human from a
    * JSON export — nothing in the app reads it back.
    */
+  /**
+   * Reservations made, honoured and lost, for the operator console.
+   *
+   * The same three numbers `logRound` writes to every round row, exposed LIVE
+   * because the export answers the question afterwards and the rehearsal
+   * needs it while somebody is still standing there. An identity loss shows
+   * on screen as a score resetting and half the screen changing colour, and
+   * nobody watching will know whether they just saw tracking fail or a player
+   * walk off — unless a counter ticked at the same moment.
+   *
+   * Read-only, and the tracker resets it per turn, so it is scoped to the
+   * round on screen rather than to the session.
+   */
+  identityStats(): { reserved: number; reclaimed: number; expired: number } {
+    return this.tracker.identityStats();
+  }
+
   protected roundDetail(): Record<string, number> | undefined {
     return undefined;
   }

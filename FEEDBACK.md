@@ -208,6 +208,13 @@ keys at all when nothing did:
 - `idLost` — the reservation timed out. Somebody became a new person
   mid-round: score reset, lane colour changed. **This is the number to read.**
 
+**And it is live, not only in the export.** The operator console carries an
+**IDENTITY** chip during the round: `HELD` while nobody is missing, amber
+`n/m BACK` while somebody is gone and their lane is being held, red
+`k LOST` once a reservation times out. An identity loss looks like a score
+resetting and half the screen changing colour, and without the chip nobody
+watching can tell that from a player walking off.
+
 READ IT WITH THE ROUND, NOT ALONE. A player who walks off deliberately also
 produces an `idLost`, and so does the last racer eliminated in Red Light
 wandering out of frame. It is "how many people stopped being themselves",

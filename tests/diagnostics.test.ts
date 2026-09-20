@@ -518,3 +518,66 @@ describe('every store that can fail is described where a marshal will read it', 
     );
   });
 });
+
+/**
+ * IDENTITY, WHILE THE PERSON IT HAPPENED TO IS STILL STANDING THERE.
+ *
+ * The round log records `idReserved` / `idReclaimed` / `idLost` on every row,
+ * which answers FEEDBACK's Red Light question — did five racers hold their
+ * own lanes — after the event, from an export.
+ *
+ * That is the wrong moment for half of it. An identity loss shows on screen
+ * as a score resetting and half the screen changing colour, and a marshal
+ * watching will not know whether they just saw tracking fail or a player walk
+ * off. The live chip makes those distinguishable at the time.
+ *
+ * Verified in the browser on the 20th: HELD with nobody missing, then
+ * `0/2 BACK, 0 LOST` the moment a player left, then `0/3 BACK, 2 LOST` once
+ * the reservations timed out.
+ */
+describe('identity loss reaches a human during the round, not only in the export', () => {
+  const read = async (f: string): Promise<string> => {
+    const { readFile } = await import('node:fs/promises');
+    return readFile(f, 'utf8');
+  };
+
+  test('the game exposes the tracker’s identity counts', async () => {
+    const base = await read('src/games/base.ts');
+    assert.match(
+      base,
+      /identityStats\(\)\s*:\s*\{[^}]*reserved[^}]*reclaimed[^}]*expired/,
+      'GameBase no longer exposes identityStats, so nothing outside the round ' +
+        'log can see an identity being lost',
+    );
+  });
+
+  test('and the operator console reads it', async () => {
+    const op = await read('src/shell/operator.ts');
+    assert.match(
+      op,
+      /identityStats\s*===\s*'function'|typeof game\?\.identityStats/,
+      'the operator console stopped asking the active screen for identity ' +
+        'counts, so the live chip is gone',
+    );
+    assert.match(op, /'IDENTITY'/, 'the IDENTITY chip lost its label');
+  });
+
+  /**
+   * The chip has to say WHICH of the three states it is in. "Something was
+   * lost" and "somebody went missing and came back" are different readings
+   * and lead to different actions — the second is the tracker working.
+   */
+  test('the chip distinguishes held, reclaimed and lost', async () => {
+    const op = await read('src/shell/operator.ts');
+    const at = op.indexOf("'IDENTITY'");
+    const block = op.slice(Math.max(0, at - 400), at + 400);
+    for (const word of ['HELD', 'BACK', 'LOST']) {
+      assert.ok(block.includes(word), `the IDENTITY chip no longer reports "${word}"`);
+    }
+    assert.match(
+      block,
+      /expired > 0 \? 'bad'/,
+      'a lost identity no longer colours the chip bad, so it reads as routine',
+    );
+  });
+});
