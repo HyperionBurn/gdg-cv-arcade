@@ -94,6 +94,52 @@ Three things, all on the same day it was created, which is the argument for it:
 
 ---
 
+## Is the fix still ALIVE, or merely still typed in?
+
+    python scripts/verify-guards.py --ledger
+
+`tests/feedback.test.ts` proves every anchor above still EXISTS. That is a much
+weaker claim than the fix working, and the difference is not academic: a
+constant can sit in a file nothing reads, or be overridden by a registry
+default, and the anchor check stays green either way.
+
+So this breaks each fix in turn — a number changed, a word replaced, a branch
+inverted — runs the suite, and requires something OTHER than the anchor check
+to notice. A row that survives its own fix being undone is a row held up by a
+sentence in a document.
+
+**Run on 2026-09-20 it found ten rows in that state**, and two live bugs:
+
+- **Row 20 had come back.** The reach band `shift`ed rather than shrank at a
+  slot edge, which preserves its WIDTH — twice the reach — so a body near the
+  edge got the whole spread on one side of itself. Measured at 2.51 torso
+  against a full stretch of 1.57. The distribution table in the source is not
+  wrong; it was measured on a CENTRED body, the one case that was fine.
+- **The same bug in Balloon Pop**, which has its own copy and is the game
+  somebody plays *because* stretching is the thing they cannot do. Both now
+  share `games/reach.ts`.
+
+Two other things worth knowing before trusting a run of it:
+
+- **`REACH_UP` in `hover.ts` decides nothing.** `tunables.get(key, fallback)`
+  returns the REGISTRY default whenever the key is registered, so a constant
+  edited in a game file can silently do nothing. There is now a test over all
+  37 call sites; the guard that existed was a `console.warn` behind
+  `import.meta.env?.DEV`, invisible in the production build and under
+  `node --test`.
+- **Two test files drove hand-written COPIES of the constants they claimed to
+  test** — the lane gate in `runner-lane.test.ts` and the rep gate in
+  `sixtyseven.test.ts`, both labelled as what the game installs. Excellent
+  behavioural tests, about numbers the game need not have been shipping.
+
+The sweep is only as honest as its mutations. Several reported a guarded row as
+unguarded because the mutation did not compile, or changed nothing — one set a
+constructor default that every caller overrides. `NOCOMP` is printed as its own
+verdict for that reason: a mutation that cannot build is not evidence either
+way.
+
+---
+
 ## What is deliberately NOT here
 
 Two things testers asked for that were **not** built, so the absence is on the

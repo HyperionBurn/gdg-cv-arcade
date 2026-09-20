@@ -343,6 +343,15 @@ python scripts/verify-guards.py
 It injects each violation in turn, requires the suite to FAIL, and restores.
 Run it after touching either file. Every guard currently reports `CAUGHT`.
 
+```bash
+python scripts/verify-guards.py --ledger
+```
+
+The same idea applied to FEEDBACK.md: it breaks each tester fix in turn and
+requires something OTHER than the ledger's own anchor check to notice. Run it
+after touching that file or any fix it anchors. All 27 rows currently report
+`ALIVE`; when it was first run, ten did not, and two of those were live bugs.
+
 This is not hypothetical. Two guards written on Sept 19 passed vacuously, and
 one of them was hiding a live bug — a colour map pointing `good` at
 `COLORS.muted`, which put Rhythm's `<GOOD>` flash and its `+N` popup at 1.88:1.

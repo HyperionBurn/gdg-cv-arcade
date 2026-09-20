@@ -249,6 +249,12 @@ Three rules came out of it, and they are cheap:
 
 `scripts/verify-guards.py` exists for step 3. Use it.
 
+`python scripts/verify-guards.py --ledger` does the same for every row of
+FEEDBACK.md — it undoes each tester fix and requires a test OTHER than the
+ledger's anchor check to object. Run it before claiming the feedback is
+implemented: "the anchor is still in the file" and "the fix still works" are
+different claims, and on 2026-09-20 ten rows were only the first.
+
 ---
 
 ## Numbers I got wrong today, and how
