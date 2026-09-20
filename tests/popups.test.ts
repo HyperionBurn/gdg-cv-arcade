@@ -17,7 +17,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { PopupLayer } from '../src/engine/juice.ts';
+import { PopupLayer, RollingNumber } from '../src/engine/juice.ts';
 
 const SIZE = 30;
 const WIDE = 1920;
@@ -383,5 +383,110 @@ describe('the separation check uses a width that is not too small', () => {
     } as unknown as CanvasRenderingContext2D;
     layer.draw(ctx, 'Archivo');
     assert.equal(ys[0], ys[1], 'a popup 500px away was staggered for nothing');
+  });
+});
+
+/**
+ * THE SCORE COUNTER, which is the other thing in this file that reaches a TV.
+ *
+ * `RollingNumber` eases a displayed score toward its target so a jump from
+ * 180 to 215 counts up instead of snapping. It is untested, and two of its
+ * properties are load-bearing well outside this file.
+ *
+ * FIRST, THE NaN GUARD. Its own comment calls it "the last thing standing
+ * between a bad score and the literal glyphs NaN rendered at 11vh on a
+ * television", and it is right: once NaN reaches `target` every `update`
+ * propagates it into `display` and nothing downstream checks. Scores here are
+ * computed from division by a body scale that is legitimately zero for a
+ * frame, so this is a real input, not a hypothetical one.
+ *
+ * SECOND, ROUNDING. `value` is `Math.round(display)`, and the versus results
+ * screen draws THAT while deciding the winner from the raw score. Those agree
+ * only because every game returns an integer — see the trap note in HANDOFF.
+ * These tests pin the rounding half of that pair.
+ */
+describe('RollingNumber', () => {
+  test('a settled counter reads exactly what it was set to', () => {
+    const n = new RollingNumber(10);
+    n.set(215, true);
+    assert.equal(n.value, 215);
+    assert.equal(n.isSettled, true);
+  });
+
+  test('it counts toward a new score rather than snapping', () => {
+    const n = new RollingNumber(10);
+    n.set(0, true);
+    n.set(200);
+    n.update(1 / 60);
+    assert.ok(n.exact > 0, 'it did not move');
+    assert.ok(n.exact < 200, 'it snapped instead of counting');
+  });
+
+  test('and it always arrives', () => {
+    const n = new RollingNumber(10);
+    n.set(0, true);
+    n.set(200);
+    for (let f = 0; f < 600; f++) n.update(1 / 60);
+    assert.equal(n.value, 200);
+    assert.equal(n.isSettled, true, 'a counter still crawling at the results screen');
+  });
+
+  /**
+   * The floor exists so the last few units do not crawl: a pure exponential
+   * approach spends a visible second creeping the final digit, which on a
+   * results screen looks like the game has hung.
+   */
+  test('the last few points do not crawl', () => {
+    const n = new RollingNumber(10);
+    n.set(0, true);
+    n.set(3);
+    let frames = 0;
+    while (!n.isSettled && frames < 600) {
+      n.update(1 / 60);
+      frames++;
+    }
+    assert.ok(frames < 30, `a three-point climb took ${frames} frames`);
+  });
+
+  /**
+   * THE ONE THAT REACHES THE TELEVISION. A body scale can legitimately be zero
+   * for a frame, so a score divided by it arrives here as NaN or Infinity.
+   * Dropped rather than stored — once it is in `target` it is permanent.
+   */
+  test('a bad number never reaches the display', () => {
+    const n = new RollingNumber(10);
+    n.set(120, true);
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      n.set(bad);
+      n.update(1 / 60);
+      assert.equal(Number.isFinite(n.value), true, `${bad} reached the display`);
+      assert.equal(n.value, 120, `${bad} moved the score`);
+    }
+  });
+
+  test('and neither does a bad increment', () => {
+    const n = new RollingNumber(10);
+    n.set(50, true);
+    n.add(Number.NaN);
+    n.add(Number.POSITIVE_INFINITY);
+    for (let f = 0; f < 60; f++) n.update(1 / 60);
+    assert.equal(n.value, 50);
+  });
+
+  /**
+   * `value` rounds and the versus screen draws it while deciding the winner
+   * from the unrounded score. Two scores that round together while differing
+   * would show the same number with a crown on one of them; the reason that
+   * cannot happen today is that every game returns a whole number, which this
+   * pins from the other side.
+   */
+  test('value rounds, so equal display can hide unequal input', () => {
+    const a = new RollingNumber(10);
+    const b = new RollingNumber(10);
+    a.set(18.6, true);
+    b.set(19.4, true);
+    assert.equal(a.value, 19);
+    assert.equal(b.value, 19);
+    assert.notEqual(a.exact, b.exact, 'exact is what a decision should use');
   });
 });
