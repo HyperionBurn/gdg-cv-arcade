@@ -522,3 +522,75 @@ describe('judging a punch', () => {
     assert.ok(TIMING.good < TIMING.wall);
   });
 });
+
+
+/**
+ * `?seed=` IS TYPED BY A HUMAN, SO IT WILL BE TYPED WRONG.
+ *
+ * rhythm.ts reads it as `Number(param)`, which gives NaN for anything that is
+ * not a number and Infinity for `1e400`. That value goes straight into
+ * `makeRng`, and a chart built from a broken generator is a round with no
+ * notes in it — on the game whose whole content IS the chart.
+ *
+ * It survives, and MORE THOROUGHLY than it first looks. I wrote this claiming
+ * the defence was the `^` in `(Math.floor(Math.abs(seed)) ^ 0x9e3779b9) >>> 0`,
+ * then mutated the `^` to a `+` expecting a failure and got none. Measured:
+ *
+ *   (floor(abs(NaN)) ^ K) >>> 0   2654435769
+ *   (floor(abs(NaN)) + K) >>> 0            0
+ *   floor(abs(NaN)) ^ K             -1640531527
+ *   floor(abs(NaN)) + K                   NaN
+ *
+ * Any ONE bitwise operation rescues it, because they all run ToUint32 or
+ * ToInt32 first, and there are several in series: the seed mix, then
+ * `a = (a + 0x6d2b79f5) >>> 0` on every step, then the `imul`/`^` inside it.
+ * Even a NaN initial state is coerced on the first call. The generator
+ * cannot emit a non-finite number by any single-line change.
+ *
+ * So these are CHARACTERISATION tests, not a guard on one mechanism — they
+ * pin the observable promise that a mistyped seed still yields a playable
+ * round. Worth having because `?screen=` had exactly this shape and did NOT
+ * survive its typo; this one was checked rather than assumed.
+ */
+describe('a mistyped seed still produces a playable chart', () => {
+  const BAD: ReadonlyArray<readonly [string, number]> = [
+    ['a word', Number('abc')],
+    ['an empty-ish value', Number(' ')],
+    ['an overflow', Number('1e400')],
+    ['a negative', -7],
+    ['a fraction', 2.5],
+  ];
+
+  for (const [what, seed] of BAD) {
+    test(`${what} charts notes and passes validation`, () => {
+      const map = generateBeatmap({ ...ROUND, seed });
+      assert.ok(
+        map.notes.length > 0,
+        `seed ${seed} produced an EMPTY chart — Rhythm's entire content is the ` +
+          `chart, so this is a 60-second round with nothing in it`
+      );
+      const bad = validateBeatmap(map);
+      assert.deepEqual(bad, [], `seed ${seed} produced an invalid chart: ${bad.join('; ')}`);
+      assert.ok(
+        map.notes.every((n) => Number.isFinite(n.time)),
+        `seed ${seed} produced notes with a non-finite time`
+      );
+    });
+  }
+
+  /**
+   * And they all collapse to the SAME chart, which is the honest consequence:
+   * `?seed=abc` is not random, it is one specific round. Worth knowing before
+   * somebody uses a typo as a bug report and cannot reproduce it.
+   */
+  test('and every invalid seed gives the same one', () => {
+    const a = generateBeatmap({ ...ROUND, seed: Number('abc') });
+    const b = generateBeatmap({ ...ROUND, seed: Number('1e400') });
+    assert.deepEqual(
+      a.notes.map((n) => `${n.kind}@${n.time.toFixed(3)}`),
+      b.notes.map((n) => `${n.kind}@${n.time.toFixed(3)}`),
+      'invalid seeds no longer agree, so the mix is doing something other than ' +
+        'coercing them all to zero'
+    );
+  });
+});
