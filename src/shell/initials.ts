@@ -99,6 +99,23 @@ export interface PendingScore {
 let pending: PendingScore | null = null;
 
 /** Called by a game before routing to 'initials'. */
+/**
+ * What the confirm key says, given how much has been typed.
+ *
+ * Exported and pure so the thing a tester asked for can be checked rather than
+ * described. Row 26 of FEEDBACK.md: a way to leave initials entry without
+ * typing a name. Before this the only exits were typing three letters or
+ * standing still for the 16s deadline, in front of a queue.
+ *
+ * Same key, same place, same one dwell — the word just stops lying about what
+ * pressing it will do. It still SUBMITS: `settleLetters` pads what is there,
+ * so an empty entry is stored exactly as the hard deadline would have stored
+ * it, and the score is never lost. Only the name is.
+ */
+export function okKeyLabel(key: string, typed: number): string {
+  return key === 'OK' && typed === 0 ? 'SKIP' : key;
+}
+
 export function setPendingScore(p: PendingScore): void {
   pending = p;
 }
@@ -481,7 +498,7 @@ export class InitialsScreen implements Screen {
    * never lost, only the name.
    */
   private keyLabel(key: string): string {
-    return key === 'OK' && this.letters.length === 0 ? 'SKIP' : key;
+    return okKeyLabel(key, this.letters.length);
   }
 
   /** A–Z plus DEL and OK, 7 x 4. Every cell is the same size, so the grid is
