@@ -519,6 +519,22 @@ and run the file, or use the editing tools.
 guard added this session was mutation-tested: break the fix, confirm the test
 fails, restore. There is a `scripts/verify-guards.py` for this. Do the same.
 
+**The versus results screen DECIDES from one number and DRAWS another, and
+they agree only because every score is a whole number.** `drawVersusResults`
+picks the winner from `res.score` (captured at round end) and draws
+`this.scores[slot].value`, which is `Math.round` of a `RollingNumber`'s
+animating display. Integers in, and the two always match. Add a fractional
+score — a time bonus, an accuracy percentage — and 18.6 against 19.4 puts
+**19 and 19 on screen with a `<WINNER>` crown on one of them**, in front of
+the two friends who just played. At a club fair that is an argument, and it
+would read as a rendering bug rather than a scoring one.
+
+Checked on the 20th: all seven games return integers by construction (Rhythm
+rounds both award paths, `laneScore` floors and caps, Runner floors, the rest
+are counts), and `smoke.ts` asserts `Number.isInteger` on every game's live
+score, which is what actually keeps this true. If you make a score fractional,
+decide the winner from the same rounded numbers the screen shows.
+
 ---
 
 ## If it goes wrong on the day
