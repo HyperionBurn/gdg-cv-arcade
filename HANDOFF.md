@@ -78,6 +78,26 @@ afternoon cannot.
 
 ---
 
+## Things the runbook promised that nothing checked
+
+Three more guards went in on the 20th, all the same shape as the slider-name
+guard that already existed — a claim printed on a card, read under pressure,
+with no way for the reader to verify it:
+
+| Claim | Now guarded by |
+|---|---|
+| "retrying — 1s, 2s, 4s, 8s, then every 10s" | `tests/recovery.test.ts` parses the sequence out of the README |
+| The Keys table (`0`–`9`) | `tests/keys.test.ts`, both directions |
+| EXPORT SCORES JSON, PANIC, CLEAR EVERYTHING and five more | `tests/runbook.test.ts` |
+
+Two of those found something. `9` goes to the MENU and the card never said so
+— the light way out of a misbehaving game, and marshals were being sent to
+PANIC or F5 instead. And the camera backoff and the key map both lived in
+`main.ts`, which no test can import because it boots the app on evaluation;
+both moved somewhere checkable.
+
+---
+
 ## What changed on 20 September
 
 **The tester-feedback ledger.** Every playtest report was already acted on, and
@@ -95,6 +115,14 @@ attract screen and they were never built: capture SWAPS the two atlases, so
 exactly one clip can exist. There is now a four-slot reel in its own 2.36 MB
 atlas, it draws only while nobody is in frame, and it is the first thing the
 cost guard sheds. Full reasoning is in the note on `REEL_SLOTS`.
+
+**And the other half of PLAN.md §4's clip rule.** "On a top-5 score OR A BIG
+COMBO" — only the score half was ever built. That matters now because captures
+feed the reel, and top-5 is common on day-one morning and rare by the afternoon
+once boards fill, so a reel fed by scores alone goes stale as the hall gets
+busy. Fruit Ninja asks for a clip on a triple chain or better. Mid-round
+captures are SPACED and refused near the end of a round, because `capture()`
+swaps atlases and would otherwise leave the end-of-round replay with no footage.
 
 **And the highlight buffer finally reports itself.** It is the largest
 allocation in the app and it could shed — or switch off entirely — without a
