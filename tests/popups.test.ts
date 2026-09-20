@@ -490,3 +490,80 @@ describe('RollingNumber', () => {
     assert.notEqual(a.exact, b.exact, 'exact is what a decision should use');
   });
 });
+
+/**
+ * AND AT 4:3, WHICH THIS FILE HAD NEVER TRIED.
+ *
+ * Every case above runs at 1920 — one aspect, the comfortable one. The stall's
+ * panel is unknown until setup, and the first 4:3 sweep found three defects
+ * that were invisible at 16:9, `<BLADES OUT!>` among them.
+ *
+ * A clip-aware browser sweep on the 20th, measuring with the real font at
+ * 1024x768, still puts `<BLADES OUT!>` about 13px past the right edge. That
+ * is far better than the -62.6 the clamp was written to fix and it is not
+ * zero, so the invariant this file states — on screen for every frame — is
+ * asserted here at the narrow aspect too.
+ *
+ * NOTE THE WIDTH MODEL. `measureText` here is `length * size * 0.56`, an
+ * approximation of Archivo rather than the font. If this passes while the
+ * browser reports an overflow, the gap is the model, not the clamp — and the
+ * browser is the one to believe.
+ */
+describe('a popup is on screen at 4:3 as well', () => {
+  const NARROW = 1024;
+
+  const extentAt = (text: string, x: number, width: number): { left: number; right: number } => {
+    const layer = new PopupLayer();
+    layer.width = width;
+    layer.spawn(text, x, 400, '#ea4335', SIZE);
+
+    let left = Infinity;
+    let right = -Infinity;
+    let scale = 1;
+    let tx = 0;
+    const ctx = {
+      save() {}, restore() {},
+      translate(px: number) { tx = px; },
+      scale(s: number) { scale = s; },
+      strokeText(t: string) {
+        const hw = halfOf(t) * scale;
+        left = Math.min(left, tx - hw);
+        right = Math.max(right, tx + hw);
+      },
+      fillText() {},
+      measureText: (t: string) => ({ width: t.length * SIZE * 0.56 * REAL_RATIO }),
+      set font(_v: string) {}, set textAlign(_v: string) {}, set textBaseline(_v: string) {},
+      set globalAlpha(_v: number) {}, set lineJoin(_v: string) {}, set miterLimit(_v: number) {},
+      set lineWidth(_v: number) {}, set strokeStyle(_v: string) {}, set fillStyle(_v: string) {},
+    } as unknown as CanvasRenderingContext2D;
+
+    for (let f = 0; f < 60; f++) {
+      layer.draw(ctx, 'Archivo');
+      layer.update(1 / 60);
+    }
+    return { left, right };
+  };
+
+  /** The string the 4:3 sweep keeps finding, at both edges of a narrow stage. */
+  for (const [where, x] of [
+    ['hard left', 30],
+    ['hard right', NARROW - 30],
+    ['centre', NARROW / 2],
+  ] as const) {
+    test(`<BLADES OUT!> stays on a 1024 stage from ${where}`, () => {
+      const e = extentAt('<BLADES OUT!>', x, NARROW);
+      assert.ok(e.left >= 0, `left edge went to ${e.left.toFixed(1)} from ${where}`);
+      assert.ok(
+        e.right <= NARROW,
+        `right edge reached ${e.right.toFixed(1)} on a ${NARROW} stage from ${where}`,
+      );
+    });
+  }
+
+  /** The longest banner in the game, which has the least room to spare. */
+  test('the longest instruction line also fits', () => {
+    const e = extentAt('<SLICE THE FRUIT — DODGE THE BOMBS>', NARROW / 2, NARROW);
+    assert.ok(e.left >= 0, `left edge went to ${e.left.toFixed(1)}`);
+    assert.ok(e.right <= NARROW, `right edge reached ${e.right.toFixed(1)}`);
+  });
+});

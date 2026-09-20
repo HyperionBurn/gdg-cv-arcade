@@ -622,6 +622,17 @@ if (import.meta.env.DEV || import.meta.env.MODE === 'probe') {
     },
 
     /**
+     * What leaves the safe area, or is too small to read. See
+     * src/dev/layout.ts. RUN IT AT 4:3 — everything is fine at 16:9 and the
+     * stall's panel is unknown until setup.
+     */
+    async layout(only?: string[], insetVh = 0) {
+      const { runLayoutSweep } = await import('./dev/layout');
+      const host = (window as unknown as { __arcade: never }).__arcade;
+      return runLayoutSweep(host as never, only, insetVh);
+    },
+
+    /**
      * Advance the app by `frames` fixed steps without waiting on rAF.
      * Deterministic, and far faster than real time.
      *

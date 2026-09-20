@@ -92,6 +92,24 @@ export function textBounds(
 }
 
 /**
+ * The overlap of two boxes, or `null` when they do not touch.
+ *
+ * A string drawn outside an active clip is INVISIBLE, not misplaced, and
+ * counting it is the third way this measurement lied. Attract's leaderboard
+ * rail draws its boards at x beyond the stage and clips to the rail box; the
+ * first clip-blind run reported `HIGH SCORES` 350px off a 1024 stage, which
+ * is true of the coordinates and false of the screen.
+ */
+export function intersect(a: Box, b: Box): Box | null {
+  const left = Math.max(a.left, b.left);
+  const right = Math.min(a.right, b.right);
+  const top = Math.max(a.top, b.top);
+  const bottom = Math.min(a.bottom, b.bottom);
+  if (right <= left || bottom <= top) return null;
+  return { left, right, top, bottom };
+}
+
+/**
  * How far a box escapes a stage, in stage pixels. Zero when it is inside.
  *
  * `inset` is the overscan margin: a TV crops its edges, so "on the stage" is
@@ -120,4 +138,165 @@ export function overflowOf(box: Box, stageW: number, stageH: number, inset = 0):
 export function drawnVh(m: Matrix2D, fontPx: number, stageH: number): number {
   const verticalScale = Math.hypot(m.c, m.d);
   return ((fontPx * verticalScale) / stageH) * 100;
+}
+
+/* ------------------------------------------------------------------ */
+/* The probe that uses the arithmetic above                            */
+/* ------------------------------------------------------------------ */
+
+import { runTurn } from './turn';
+
+export interface LayoutReport {
+  stage: { w: number; h: number };
+  /** Strings whose ink left the safe area, worst first. */
+  overflow: Array<{ text: string; px: number }>;
+  /** Settled size of the smallest strings, smallest first. */
+  smallest: Array<{ text: string; vh: number }>;
+  distinct: number;
+  insetPx: number;
+}
+
+interface LayoutHost {
+  audio: unknown;
+}
+
+/**
+ * Sweep the roster and report what leaves the safe area, or is too small.
+ *
+ * Run it at 4:3. Everything here is fine at 16:9 and the stall's panel is
+ * unknown until setup — the first 4:3 sweep found three real defects and only
+ * happened because the pane was the wrong shape by accident.
+ *
+ * TWO RULES THIS ENCODES, both learned by getting them wrong:
+ *
+ *   - SIZE IS THE MAXIMUM over a string's life, not the minimum. A score
+ *     drawing at 14vh inside a pop-scale is genuinely 1.4vh on its first
+ *     frame; reporting that as the size makes every animated string a defect.
+ *   - EXTENT IS FOUR CORNERS through the full matrix. `withTilt` rotates
+ *     cards, and an axis-aligned box around a rotated one is the only honest
+ *     answer to "did any ink leave the stage".
+ */
+export async function runLayoutSweep(
+  host: LayoutHost,
+  only?: string[],
+  insetVh = 0,
+): Promise<LayoutReport> {
+  const canvas = document.querySelector('canvas');
+  if (!canvas || canvas.width <= 300) {
+    throw new Error(
+      `runLayoutSweep: the stage is ${canvas?.width ?? 0}x${canvas?.height ?? 0}. ` +
+        'It reports 300x150 until the render loop has run once, and every ' +
+        'derived figure would be out by that ratio. Drive a few frames first.',
+    );
+  }
+  const W = canvas.width;
+  const H = canvas.height;
+  const insetPx = (insetVh / 100) * H;
+
+  const maxVh = new Map<string, number>();
+  const maxOut = new Map<string, number>();
+
+  const proto = CanvasRenderingContext2D.prototype;
+  const orig = proto.fillText;
+
+  // CLIP TRACKING, because a clipped string is invisible rather than wrong.
+  //
+  // Only rectangular clips are followed, which is what this app uses: every
+  // `clip()` here is preceded by a single `rect()`. A non-rectangular clip
+  // leaves the previous box in place, which errs toward REPORTING a string
+  // rather than hiding one — the safe direction for a probe.
+  const origSave = proto.save;
+  const origRestore = proto.restore;
+  const origRect = proto.rect;
+  const origClip = proto.clip;
+  // UNBOUNDED, NOT THE STAGE. Seeding the clip with the stage rectangle makes
+  // `intersect` clamp every off-stage string back to the edge, and an
+  // edge-aligned box overflows the stage by exactly zero — so a clip-aware
+  // sweep reported NO overflow anywhere, which is the same false clean bill
+  // as before with an extra step. The tell was that every string at a 3.5%
+  // inset overflowed by exactly the inset.
+  //
+  // The clip starts as "everything" and only ever narrows when the app calls
+  // `clip()`. Then a string past the edge stays past it.
+  const full: Box = { left: -1e9, right: 1e9, top: -1e9, bottom: 1e9 };
+  let clip: Box = full;
+  const stack: Box[] = [];
+  let lastRect: Box | null = null;
+
+  proto.save = function (this: CanvasRenderingContext2D) {
+    stack.push(clip);
+    return origSave.call(this);
+  };
+  proto.restore = function (this: CanvasRenderingContext2D) {
+    clip = stack.pop() ?? full;
+    return origRestore.call(this);
+  };
+  proto.rect = function (this: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
+    const m = this.getTransform();
+    lastRect = textBounds(m, x, y, { width: w, ascent: 0, descent: h }, 'left');
+    return origRect.call(this, x, y, w, h);
+  } as typeof proto.rect;
+  proto.clip = function (this: CanvasRenderingContext2D, ...a: never[]) {
+    if (lastRect) clip = intersect(clip, lastRect) ?? clip;
+    return (origClip as (...z: never[]) => void).call(this, ...a);
+  } as typeof proto.clip;
+  proto.fillText = function (this: CanvasRenderingContext2D, text: string | number, ...rest: never[]) {
+    try {
+      const s = String(text);
+      if (s.trim()) {
+        const x = Number(rest[0] ?? 0);
+        const y = Number(rest[1] ?? 0);
+        const m = this.getTransform();
+        const px = Number(/(\d+(?:\.\d+)?)px/.exec(this.font)?.[1] ?? 0);
+
+        const vh = drawnVh(m, px, H);
+        if (vh > (maxVh.get(s) ?? 0)) maxVh.set(s, vh);
+
+        const tm = this.measureText(s);
+        const box = textBounds(
+          m,
+          x,
+          y,
+          {
+            width: tm.width,
+            ascent: tm.actualBoundingBoxAscent || px * 0.8,
+            descent: tm.actualBoundingBoxDescent || px * 0.2,
+          },
+          this.textAlign,
+        );
+        // Only the visible part of the string can overflow anything.
+        const shown = intersect(box, clip);
+        const out = shown ? overflowOf(shown, W, H, insetPx) : 0;
+        if (out > (maxOut.get(s) ?? 0)) maxOut.set(s, out);
+      }
+    } catch {
+      /* a probe must never break a frame */
+    }
+    return (orig as (...a: never[]) => void).call(this, text as never, ...rest);
+  } as typeof proto.fillText;
+
+  try {
+    await runTurn(host as never, only);
+  } finally {
+    proto.fillText = orig;
+    proto.save = origSave;
+    proto.restore = origRestore;
+    proto.rect = origRect;
+    proto.clip = origClip;
+  }
+
+  return {
+    stage: { w: W, h: H },
+    insetPx: Math.round(insetPx),
+    distinct: maxVh.size,
+    overflow: [...maxOut.entries()]
+      .filter(([, px]) => px > 0.5)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)
+      .map(([text, px]) => ({ text, px: Math.round(px) })),
+    smallest: [...maxVh.entries()]
+      .sort((a, b) => a[1] - b[1])
+      .slice(0, 12)
+      .map(([text, vh]) => ({ text, vh: Number(vh.toFixed(2)) })),
+  };
 }

@@ -18,7 +18,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { textBounds, overflowOf, drawnVh, type Matrix2D } from '../src/dev/layout.ts';
+import { textBounds, overflowOf, drawnVh, intersect, type Matrix2D, type Box } from '../src/dev/layout.ts';
 
 const IDENTITY: Matrix2D = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
 /** 100 wide, 10 above the baseline, 4 below — a plausible line of display text. */
@@ -167,5 +167,66 @@ describe('drawnVh', () => {
     const k = Math.SQRT1_2;
     const rot: Matrix2D = { a: k, b: k, c: -k, d: k, e: 0, f: 0 };
     near(drawnVh(rot, 76.8, 768), 10, 'a tilted string is still 10vh tall');
+  });
+});
+
+/**
+ * THE THIRD WAY THE MEASUREMENT LIED.
+ *
+ * A string drawn outside an active clip is INVISIBLE, not misplaced. Attract's
+ * leaderboard rail lays its boards out at x beyond the stage and clips to the
+ * rail box, so a clip-blind sweep reported `HIGH SCORES` 350px off a 1024-wide
+ * stage — true of the coordinates and false of the screen.
+ *
+ * Two independent methods agreed on that 350 (advance width and the font's own
+ * ink box), which is worth remembering: agreement between two wrong models is
+ * not evidence.
+ */
+describe('intersect', () => {
+  const box = (left: number, right: number, top = 0, bottom = 10): Box => ({
+    left,
+    right,
+    top,
+    bottom,
+  });
+
+  test('overlapping boxes give the shared part', () => {
+    const got = intersect(box(0, 100), box(50, 200));
+    assert.deepEqual(got, { left: 50, right: 100, top: 0, bottom: 10 });
+  });
+
+  test('a box entirely outside the clip is invisible', () => {
+    assert.equal(intersect(box(0, 100), box(200, 300)), null);
+  });
+
+  test('touching edges do not count as visible', () => {
+    assert.equal(intersect(box(0, 100), box(100, 200)), null);
+  });
+
+  test('a contained box is unchanged', () => {
+    assert.deepEqual(intersect(box(10, 20, 2, 8), box(0, 100)), {
+      left: 10,
+      right: 20,
+      top: 2,
+      bottom: 8,
+    });
+  });
+
+  /**
+   * The case that produced the false finding: text laid out past the stage but
+   * clipped back to a panel. Nothing escapes, so nothing is reported.
+   */
+  test('clipped-away overflow is not overflow', () => {
+    const stage = { w: 1024, h: 768 };
+    const offStage = box(1110, 1374, 100, 140);
+
+    assert.ok(
+      overflowOf(offStage, stage.w, stage.h) > 300,
+      'unclipped, this really is off the stage',
+    );
+
+    const rail = box(40, 980, 80, 200);
+    const visible = intersect(offStage, rail);
+    assert.equal(visible, null, 'the rail clips it away entirely');
   });
 });

@@ -406,6 +406,31 @@ mistakes directly: a translate that was ignored, a rotation that an
 axis-aligned box cannot describe, and a nominal size read instead of a drawn
 one.
 
+**Run it with `__arcade.layout(games, insetVh)`.** Fourth measurement, and
+the first one worth believing, at 1024x768:
+
+| Inset | Result |
+|---|---|
+| 0 (the stage) | `<BLADES OUT!>` 13px over, then glyphs of the Fruit Ninja instruction line at 9-12px |
+| 3.5 (TV overscan) | the same strings, plus the inset |
+| 20 (positive control) | 12 strings, worst 133px — it does detect overflow when there is some |
+
+Getting there took fixing the probe twice more. Tracking clips removed the
+whole attract-rail false positive, and then seeding the clip with the STAGE
+rectangle produced a clean bill that was still wrong: `intersect` clamped
+every off-stage string back to the edge, and an edge-aligned box overflows
+the stage by exactly zero. The tell was that at a 3.5% inset everything
+overflowed by exactly the inset. The clip starts unbounded now.
+
+**The 13px is real and it is not the clamp.** `tests/popups.test.ts` only
+ever ran at 1920 — one aspect, the comfortable one — so 4:3 cases are added
+there now and they PASS. They pass because that file models text width as
+`length * size * 0.56` rather than measuring Archivo, which is the same
+estimate the clamp reserves from. Test and code share one wrong model, so
+neither can see the other's error; the browser, with the real font, can.
+Left as a measured note rather than a change: 13px is 1.3% of the stage,
+and moving what the clamp measures is a layout decision for the rehearsal.
+
 Mutating it earned its keep immediately. Projecting only the two OPPOSITE
 corners passed every test in the file — it reports a 56.6-wide box where the
 true one is 84.9 — because the assertions said "narrower and taller" rather
