@@ -209,6 +209,44 @@ Two things make this work that are worth repeating:
   passing tests. They tested the mechanism and never asked whether the
   condition could occur.
 
+**Re-run later on the 20th, and it is a test now.** The console one-liner had
+been retyped twice, so the patching lives in `src/dev/census.ts`
+(`__arcade.census()`, counts accumulate across calls because a full roster
+exceeds the console's 45s cap) and the result lives in
+`tests/fixtures/census.json`. `tests/census.test.ts` holds the discipline:
+every banner literal in `src/` must either appear in the recorded census or
+carry a written reason. A newly added banner is in neither list, so the suite
+fails until somebody sweeps it or explains it, which also stops the fixture
+rotting quietly.
+
+**53 banner literals. 34 drew. 19 did not, and all 19 are now explained**
+(failure screens 7, rig check 3, rare by construction 3, needs a body to go
+missing 2, the replay-covered rank line 3, and `<WALL!>` 1). No new bugs, which
+is the point of keeping the baseline: the next sweep is a diff.
+
+Two things the re-run taught that the first sweep did not:
+
+- **Sweep BOTH board states, or the census lies.** The first full sweep
+  reported 24 unexplained strings. Five were not dead at all, they were MASKED
+  by the leaderboard: months of simulated sweeps had left 67 Speed's best at
+  185 and the simulator scores about 183, so no record or first-score path
+  could ever be taken. Clearing the board drew four of the five from a SINGLE
+  game. A census reads the app in the state you left it, and persisted state
+  silently removes branches from the run.
+- **A hidden preview pane fails as a menu regression.** With the pane hidden
+  the tab reports `visibilityState: hidden`, layout collapses, and the canvas
+  goes 0x0. The dwell aims at tile-centre divided by `clientWidth`, so the
+  override lands NaN, nothing is ever hovered, and all seven games report
+  `picked=false` / `never reached the game` — character for character what the
+  real hand-teleport regression looked like, which is the one thing this
+  harness exists to tell apart. It cost about ten probes. `runTurn` now
+  preflights the canvas and says so in words.
+
+Also worth knowing: the brackets are not always what draws. `drawRankLine`
+writes `<FIRST ON THE BOARD>`, and what appears on screen at that moment is
+the instant replay stamp drawing `FIRST ON THE BOARD` unbracketed, 450 times
+in the cleared-board run. Checking the wrong one of those two costs an hour.
+
 ---
 
 ## And measure it at 4:3

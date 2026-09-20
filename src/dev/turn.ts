@@ -344,6 +344,31 @@ const VERSUS_GAMES = ['sixtyseven', 'fruitninja', 'balloonpop', 'posematch', 'rh
 const MAX_TURN_FRAMES = 60 * 180;
 
 export async function runTurn(host: Host, only?: string[]): Promise<TurnReport> {
+  // PREFLIGHT: A ZERO-SIZED CANVAS FAILS THIS SWEEP AS A DWELL BUG.
+  //
+  // The dwell aims the cursor at a normalised point: tile centre divided by
+  // `canvas.clientWidth`. When the canvas has no layout that divide is 0/0,
+  // the override lands as NaN, and the cursor never hovers anything. Every
+  // game then reports `picked=false` and `never reached the game` — which is
+  // exactly, character for character, what the real hand-teleport regression
+  // looked like, and this harness exists to tell those apart.
+  //
+  // It cost about ten probes to find on the 20th. The canvas was 0x0 because
+  // the browser pane was HIDDEN: the tab reports `visibilityState: hidden`,
+  // layout collapses, and the app sizes its backing store to nothing. Nothing
+  // was wrong with the app — the same sweep was green the moment the pane had
+  // a size. So check it once, up front, and say so in words.
+  const preflight = document.querySelector('canvas');
+  if (!preflight || preflight.clientWidth === 0 || preflight.clientHeight === 0) {
+    throw new Error(
+      'runTurn: the canvas has no layout size ' +
+        `(${preflight?.clientWidth ?? 0}x${preflight?.clientHeight ?? 0}, ` +
+        `document.visibilityState=${document.visibilityState}). ` +
+        'Every dwell would miss and the sweep would blame the menu. ' +
+        'Show the preview pane, or give the tab a viewport, and run it again.',
+    );
+  }
+
   const started = performance.now();
   const games = only?.length ? GAMES.filter((g) => only.includes(g as string)) : GAMES;
   const results: TurnResult[] = [];

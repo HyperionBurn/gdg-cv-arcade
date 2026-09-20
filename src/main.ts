@@ -596,6 +596,29 @@ if (import.meta.env.DEV) {
     },
 
     /**
+     * Count what actually draws and plays, instead of asserting about it.
+     * See src/dev/census.ts — the sweep that asks 'does this trigger ever
+     * fire?' rather than 'when it fires, is it right?'. Counts ACCUMULATE
+     * across calls so a full roster can be split under the console's
+     * evaluation cap; `censusReset()` starts over.
+     */
+    async census(only?: string[]) {
+      const { runCensus, formatCensus } = await import('./dev/census');
+      const host = (window as unknown as { __arcade: never }).__arcade;
+      const report = await runCensus(host as never, only);
+      console.log(formatCensus(report));
+      return report;
+    },
+    async censusReport() {
+      const { censusReport } = await import('./dev/census');
+      return censusReport();
+    },
+    async censusReset() {
+      const { resetCensus } = await import('./dev/census');
+      resetCensus();
+    },
+
+    /**
      * Advance the app by `frames` fixed steps without waiting on rAF.
      * Deterministic, and far faster than real time.
      *
