@@ -149,6 +149,7 @@ test harness, which is a development tool.
 | `0` | Attract (the idle screen) |
 | `1` | Rig check |
 | `2`–`8` | Jump to a game |
+| `9` | Back to the menu — the light way out of a game that is misbehaving |
 | `F` | Fullscreen on/off |
 | `C` | Hide/show the mouse pointer |
 | `M` | Mute/unmute |

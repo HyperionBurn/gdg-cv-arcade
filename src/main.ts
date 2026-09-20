@@ -15,7 +15,7 @@ import type { VisionFrame } from './core/types';
 import { resizeCanvas, viewportOf, drawText, measureText, vh } from './engine/draw';
 import { COLORS } from './shell/theme';
 import type { FrameContext } from './shell/screen';
-import { router } from './shell/router';
+import { router, SCREEN_KEYS } from './shell/router';
 import { drawDebugOverlay, toggleDebug, watchForDebug, logDebug } from './shell/debug';
 import { probeStorage } from './meta/storage';
 import { leaderboard } from './meta/leaderboard';
@@ -415,19 +415,6 @@ async function boot(): Promise<void> {
 /* ------------------------------------------------------------------ */
 /* Operator keys                                                       */
 /* ------------------------------------------------------------------ */
-
-const SCREEN_KEYS: Record<string, string> = {
-  '0': 'attract',
-  '9': 'menu',
-  '1': 'rigcheck',
-  '2': 'sixtyseven',
-  '3': 'fruitninja',
-  '4': 'balloonpop',
-  '5': 'redlight',
-  '6': 'posematch',
-  '7': 'runner',
-  '8': 'rhythm',
-};
 
 window.addEventListener('keydown', (e) => {
   // Any key doubles as the user gesture Web Audio needs to start.
