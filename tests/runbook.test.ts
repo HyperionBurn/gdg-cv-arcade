@@ -107,3 +107,87 @@ describe('the runbook matches the code', () => {
     }
   });
 });
+
+
+/**
+ * THE BUTTONS A MARSHAL IS SENT TO, UNDER PRESSURE.
+ *
+ * `runbook.test.ts` already guards the SLIDER names, because four of the five
+ * in that table were wrong when it was written — guessed from constant names
+ * rather than read off the console. The BUTTON names had the same exposure and
+ * no guard at all, and they are worse to get wrong: a slider you cannot find
+ * costs a minute of hunting, while EXPORT SCORES JSON is, in the README's own
+ * words, "the only copy".
+ *
+ * Both directions on purpose. A name the README promises and the console lacks
+ * sends somebody hunting at the one moment they have no time; a destructive or
+ * export button the console has and the README never names is a control nobody
+ * reaches for when it matters.
+ */
+const DAY_OF_BUTTONS: ReadonlyArray<readonly [string, string]> = [
+  ['EXPORT SCORES JSON', 'the only copy of the whole event; packing-up step 1'],
+  ['EXPORT TUNING JSON', 'the handover between the 24th and the 26th'],
+  ['EXPORT BRACKET JSON', 'first thing to press on a NOT SAVING chip — the one store nobody can reconstruct'],
+  ['PANIC', 'the answer to "a game is behaving strangely and you need it back"'],
+  ['CLEAR EVERYTHING', 'named as the thing that loses the day; has to be the real label to be feared'],
+  ['RESET ALL TUNING', 'pressed before the doors open, so day 2 does not inherit day 1 experiments'],
+  ['RESET BRACKET', 'the other half of that pre-doors reset'],
+  ['TURN REPLAYS ON', 'undoes a cost-guard shed, which is otherwise permanent'],
+];
+
+describe('the console has every button the runbook names', () => {
+  const operator = async (): Promise<string> => {
+    const { readFile } = await import('node:fs/promises');
+    return readFile('src/shell/operator.ts', 'utf8');
+  };
+
+  test('every day-of button really exists in the console', async () => {
+    const src = await operator();
+    const missing = DAY_OF_BUTTONS.filter(([name]) => !src.includes(name)).map(
+      ([name, why]) => `${name} (${why})`
+    );
+    assert.deepEqual(
+      missing,
+      [],
+      `the runbook sends a marshal to controls that do not exist:` +
+        missing.map((m) => ` ${m}`).join(';')
+    );
+  });
+
+  test('and the runbook still names every one of them', async () => {
+    const md = await readme();
+    const unlisted = DAY_OF_BUTTONS.filter(([name]) => !md.includes(name)).map(
+      ([name, why]) => `${name} (${why})`
+    );
+    assert.deepEqual(
+      unlisted,
+      [],
+      `these controls exist and the day-of card no longer mentions them:` +
+        unlisted.map((m) => ` ${m}`).join(';')
+    );
+  });
+
+  /**
+   * The two-step confirm is the only thing standing between a knocked mouse
+   * and the day. Anything that can destroy data has to go through it rather
+   * than being a plain button.
+   */
+  test('nothing destructive is a single click', async () => {
+    const src = await operator();
+    const loose: string[] = [];
+    for (const name of ['CLEAR EVERYTHING', 'RESET ALL TUNING', 'RESET BRACKET']) {
+      const i = src.indexOf(`'${name}'`);
+      if (i < 0) continue;
+      // Walk back to the call that owns this label.
+      const before = src.slice(Math.max(0, i - 400), i);
+      const call = before.lastIndexOf('confirmable(');
+      const plain = before.lastIndexOf('button(');
+      if (call < 0 || plain > call) loose.push(name);
+    }
+    assert.deepEqual(
+      loose,
+      [],
+      `these destroy data on a single click: ${loose.join(', ')}`
+    );
+  });
+});
