@@ -306,3 +306,81 @@ describe('the stopping budget is what the file says it is', () => {
     );
   });
 });
+
+
+/**
+ * A NUMBER DERIVED FROM CONSTANTS MUST BE CURRENT, OR SAY WHICH ONES MADE IT.
+ *
+ * `quietCeiling x moveEnter` is quoted twice in redlight.ts, in two arguments
+ * about why a frozen player used to be eliminated. Both said 1.615, and one of
+ * them said "with the shipped numbers". The shipped numbers are 2.3 and 1.1,
+ * so the product is 2.53; 1.615 is 1.9 x 0.85, the pair from an earlier
+ * design.
+ *
+ * The arguments are still worth keeping — they explain why the ceiling now
+ * bounds the learned floor rather than the threshold — but a historical figure
+ * presented as current is worse than no figure, because the second one claimed
+ * the product sat BELOW a noise floor of ~2 when today it sits above it. The
+ * sentence argued for its own conclusion using numbers that no longer support
+ * it.
+ *
+ * So: either the product is today's, or the comment names the constants it was
+ * computed from. That is the rule this checks.
+ */
+describe('a derived number is current or dated', () => {
+  const { moveEnter, quietCeiling } = DEFAULT_REDLIGHT_TUNABLES;
+
+  test('every quoted quietCeiling x moveEnter is right or says whose it is', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/games/redlight.ts', 'utf8');
+    const product = moveEnter * quietCeiling;
+
+    const quotes = [
+      ...src.matchAll(/`(?:quietCeiling \* moveEnter|moveEnter \* quietCeiling)`[^\n]{0,80}?([\d.]+)/g),
+    ];
+    assert.ok(quotes.length > 0, 'the file stopped quoting the ceiling product');
+
+    const bad: string[] = [];
+    for (const m of quotes) {
+      const stated = Number(m[1]);
+      if (Math.abs(stated - product) < 0.005) continue;
+      // Otherwise it must name the constants it came from, within the sentence.
+      const after = src.slice(m.index ?? 0, (m.index ?? 0) + 260);
+      if (/quietCeiling [\d.]+, moveEnter [\d.]+/.test(after)) continue;
+      bad.push(String(stated));
+    }
+    assert.deepEqual(
+      bad,
+      [],
+      `these are quoted as the ceiling product without saying they are ` +
+        `historical: ${bad.join(', ')}. Today it is ${product.toFixed(2)} ` +
+        `(quietCeiling ${quietCeiling} x moveEnter ${moveEnter}).`
+    );
+  });
+
+  /**
+   * AND THE CURRENT ONE HAS TO BE STATED SOMEWHERE.
+   *
+   * "Current or dated" is satisfied if EVERY quote is dated — and then the
+   * file never says what the product is today, so moving a constant breaks
+   * nothing and a reader has to do the arithmetic themselves. Mutating
+   * `quietCeiling` to 3.0 passed until this was added.
+   */
+  test('and the file states what the product is today', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/games/redlight.ts', 'utf8');
+    const product = moveEnter * quietCeiling;
+
+    const m = /Today the same product is ([\d.]+)/.exec(src);
+    assert.ok(
+      m,
+      'nothing says what `quietCeiling x moveEnter` is NOW, so both quotes ' +
+        'are historical and the current value is left to the reader'
+    );
+    assert.ok(
+      Math.abs(Number(m[1]) - product) < 0.005,
+      `the file says the product is ${m[1]} today; the constants give ` +
+        `${product.toFixed(2)}`
+    );
+  });
+});

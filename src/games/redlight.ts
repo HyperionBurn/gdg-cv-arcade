@@ -215,10 +215,16 @@ export interface RedLightTunables {
    * against a simulated body with realistic sensor noise (0.004 normalised,
    * about 3px of frame height): a PERFECTLY FROZEN player's energy settles at
    * ~1.99 torso-units/sec, while `quiet` crawls from 0.35 to 0.60 in six
-   * seconds on a 20s time constant — and its ceiling of
-   * `quietCeiling * moveEnter` = 1.615 sits BELOW the real floor anyway, so no
-   * amount of waiting could have saved them. They advanced during green
-   * without moving, and were eliminated during red for the same reason.
+   * seconds on a 20s time constant — and the ceiling, which at the time was
+   * `quietCeiling * moveEnter` = 1.615 (quietCeiling 1.9, moveEnter 0.85), sat
+   * BELOW the real floor anyway, so no amount of waiting could have saved
+   * them. They advanced during green without moving, and were eliminated
+   * during red for the same reason.
+   *
+   * THOSE ARE THE CONSTANTS OF THE DESIGN THIS REPLACED, kept because they are
+   * what made the failure happen. Today the same product is 2.53 and the
+   * ceiling bounds the learned FLOOR rather than the threshold — see
+   * `thresholdFor`, which is where that change is argued.
    *
    * The noise floor is a property of the ROOM, not of the player, and it is
    * observable in the first couple of seconds. So: learn it quickly while
@@ -1167,10 +1173,16 @@ export class RedLightGame extends GameBase {
     // THE CEILING BOUNDS THE LEARNED FLOOR, NOT THE FINAL THRESHOLD.
     //
     // It used to clamp the threshold itself to `moveEnter * quietCeiling`,
-    // which with the shipped numbers is 1.615 — and a body with realistic
-    // sensor noise reads a still-energy near 2. The clamp therefore sat BELOW
-    // the noise, so the detector called a frozen player "moving" no matter how
-    // long it was given to adapt. Measured: a perfectly still body advanced
+    // which with the constants of the time was 1.615 (quietCeiling 1.9,
+    // moveEnter 0.85) — and a body with realistic sensor noise reads a
+    // still-energy near 2. The clamp therefore sat BELOW the noise, so the
+    // detector called a frozen player "moving" no matter how long it was given
+    // to adapt.
+    //
+    // This said "with the shipped numbers", which stopped being true when
+    // those two moved to 2.3 and 1.1: the product is 2.53 now, ABOVE that
+    // noise floor rather than below it, so the sentence argued for its own
+    // conclusion using numbers that no longer support it. Measured: a perfectly still body advanced
     // during green and was eliminated during red within about six seconds.
     //
     // WHY A CREEPER IS NOT ELIMINATED, AND WHY THAT IS CORRECT.
