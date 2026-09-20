@@ -281,9 +281,23 @@ export const DEFAULT_REDLIGHT_TUNABLES: RedLightTunables = {
   // was barely under the closing level. 0.75 puts the close at ~2.9, clear of
   // still p50 and still far below moving p10 (5.07).
   exitRatio: 0.75,
-  // 2.4 -> 2.0. The threshold wants to sit between still p90 (2.92) and moving
-  // p10 (5.07). `quiet` converges near still p10 (~1.93), so 2.0 lands it at
-  // ~3.9 — the middle of that gap.
+  // THE SLOPE OF AN AFFINE THRESHOLD, not a pure multiple of the noise floor.
+  //
+  // This comment said "2.4 -> 2.0 ... so 2.0 lands it at ~3.9 — the middle of
+  // that gap", and described a model `thresholdFor` no longer uses: the
+  // threshold is `moveEnter + floor × quietMult`, and the constant is 1.6, not
+  // 2.0. The reasoning was correct arithmetic about a number that is not here.
+  //
+  // What 1.6 actually lands, with `moveEnter` 1.1 and the floor capped at
+  // `moveEnter × quietCeiling` = 2.53:
+  //
+  //   regime      noise floor   threshold   must land in
+  //   clean          0.27          1.53      0.4 - 4.1
+  //   realistic      2.28          4.75      3.5 - 5.2
+  //   hostile        3.89 -> 2.53  5.15      inverted, unsolvable
+  //
+  // Inside the window in both solvable regimes. See `thresholdFor` for why the
+  // shape is affine and why hostile has no answer at any slope.
   quietMult: 1.6,
   /**
    * Caps what the lobby is allowed to believe "standing still" looks like.
@@ -1194,8 +1208,14 @@ export class RedLightGame extends GameBase {
     // 7.7, above the point where a MOVING body is detected at all, and the one
     // hostile wants (~1.9) puts realistic at 3.3 — fine — but clean at 0.4,
     // under its own noise. Adding a constant floor gives the extra degree of
-    // freedom, and 1.1 + 1.45x lands where it needs to: clean 1.49, realistic
-    // 4.41, hostile 6.74.
+    // freedom, and `moveEnter + floor × quietMult` lands where it needs to.
+    //
+    // This said "1.1 + 1.45x ... clean 1.49, realistic 4.41, hostile 6.74",
+    // which is wrong twice: the shipped slope is `quietMult` = 1.6, not 1.45,
+    // and the hostile figure was computed WITHOUT the ceiling that caps the
+    // floor at 2.53. Recomputed from the constants actually in the file:
+    // clean 1.53, realistic 4.75, hostile 5.15 — still inside the two windows
+    // that have one.
     //
     // HOSTILE IS NOT SOLVABLE and that is a fact about the signal, not a tuning
     // failure. At double noise a motionless body's p90 (7.53) sits ABOVE a

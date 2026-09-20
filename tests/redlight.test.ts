@@ -19,7 +19,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { judgeRedLight } from '../src/games/redlight.ts';
+import { judgeRedLight, DEFAULT_REDLIGHT_TUNABLES } from '../src/games/redlight.ts';
 
 const FRAME = 1 / 60;
 const BREACH = 0.3;
@@ -140,5 +140,94 @@ describe('a player who just walked in', () => {
     const r = step(nearly, true, true, true);
     assert.ok(r.breach > nearly);
     assert.equal(r.eliminate, true);
+  });
+});
+
+
+/**
+ * THE THRESHOLD TABLE IN THE COMMENTS IS THE ONLY EXPLANATION OF THIS NUMBER.
+ *
+ * Red Light's elimination threshold is the constant the runbook describes as
+ * "too low and everyone is out in two seconds, unrecoverable at a stall". It
+ * is not one number but three, combined affinely:
+ *
+ *   threshold = moveEnter + min(quiet, moveEnter x quietCeiling) x quietMult
+ *
+ * Two comments describing it had gone stale in different ways. One still
+ * described a PURE MULTIPLE model the code had stopped using, and reasoned
+ * about a value of 2.0 while the constant was 1.6. The other stated the fitted
+ * line as "1.1 + 1.45x" with per-regime landings, where the shipped slope is
+ * 1.6 and the hostile figure had been computed without the ceiling.
+ *
+ * Nobody could have caught either by reading: both are internally consistent
+ * and only wrong against a constant several hundred lines away. So the table
+ * is recomputed here from the constants themselves.
+ */
+describe('the elimination threshold lands where its comment says', () => {
+  const { moveEnter, quietMult, quietCeiling } = DEFAULT_REDLIGHT_TUNABLES;
+  const thresholdFor = (noiseFloor: number): number =>
+    moveEnter + Math.min(noiseFloor, moveEnter * quietCeiling) * quietMult;
+
+  /**
+   * The three noise regimes the design was fitted against, with the window
+   * each one's threshold has to land in — still p90 below it, moving p10
+   * above. Hostile has no window: the two distributions have crossed.
+   */
+  const REGIMES: ReadonlyArray<readonly [string, number, number, number]> = [
+    ['clean', 0.27, 0.4, 4.1],
+    ['realistic', 2.28, 3.5, 5.2],
+  ];
+
+  for (const [name, floor, lo, hi] of REGIMES) {
+    test(`${name} noise puts the threshold inside its window`, () => {
+      const t = thresholdFor(floor);
+      assert.ok(
+        t >= lo && t <= hi,
+        `a ${name} room's noise floor of ${floor} gives a threshold of ` +
+          `${t.toFixed(2)}, outside the ${lo}-${hi} window. Below it, a still ` +
+          `player is eliminated; above it, a moving one is never caught.`
+      );
+    });
+  }
+
+  /** The ceiling is what stops a hostile room from running away entirely. */
+  test('and the ceiling caps what a hostile room can claim is still', () => {
+    const cap = moveEnter * quietCeiling;
+    assert.ok(
+      thresholdFor(3.89) === moveEnter + cap * quietMult,
+      'a hostile floor is no longer capped, so somebody flailing through the ' +
+        'lobby can train the detector to ignore them'
+    );
+  });
+
+  /**
+   * And the numbers written in the file are the numbers the file computes.
+   * This is the guard the two stale comments needed: the table is parsed out
+   * of the source and checked against the constants.
+   */
+  test('the table in the source is recomputed, not remembered', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/games/redlight.ts', 'utf8');
+
+    // PARSE FROM THE HEADER, not by pattern alone. My first version matched
+    // `(clean|realistic)` anywhere and found the PERCENTILE table thirty lines
+    // earlier — "clean still 0.23 0.28 0.35" — and reported 0.35 as a claimed
+    // threshold. redlight.ts has several tables and they all start with the
+    // same two words.
+    const header = src.indexOf('regime      noise floor   threshold');
+    assert.ok(header > 0, 'the threshold table has moved or lost its header');
+    const table = src.slice(header, header + 400);
+
+    const rows = [...table.matchAll(/\/\/\s+(clean|realistic)\s+([\d.]+)(?:\s*->\s*[\d.]+)?\s+([\d.]+)\s/g)];
+    assert.ok(rows.length >= 2, 'the threshold table is gone from redlight.ts');
+
+    for (const [, name, floorText, statedText] of rows) {
+      const real = thresholdFor(Number(floorText));
+      assert.ok(
+        Math.abs(real - Number(statedText)) < 0.05,
+        `the ${name} row claims a threshold of ${statedText} for a floor of ` +
+          `${floorText}; the constants give ${real.toFixed(2)}`
+      );
+    }
   });
 });
