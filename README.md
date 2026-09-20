@@ -774,6 +774,29 @@ width of roughly **0.46s**, against a `JUMP_DURATION` of 0.78s. Detection
 latency shifts that window earlier, it does not narrow it, so a player has to
 leave the ground between roughly 0.34s and 0.8s before the row.
 
+**The SLIDE is a different story, and a much easier one.** Same method on
+`high` rows:
+
+- Starting the crouch anywhere from 0.45s down to 0.12s before the row:
+  **7 of 7 cleared**.
+- RELEASING it early — even a quarter second before the row arrives —
+  **9 of 9 cleared**.
+
+That looked like a broken measurement rather than a forgiving mechanic, so it
+has a negative control: with the duck never pressed at all, **0 of 3 cleared**.
+High rows do collide and the attribution works; the slide really is that
+forgiving.
+
+The reason is the crouch gate's HYSTERESIS. Measured directly: after the
+crouch is released, the state does not drop for at least 0.37s, so a player
+who is already standing up still passes under the bar. That is the same
+mechanism `gestures.test.ts` pins — a body between the two thresholds stays
+down — paying off as forgiveness rather than as chatter.
+
+**So the Runner's two inputs are not equally risky, and only one of them is
+the go/no-go question.** The jump has about half a second of tolerance and
+has to be aimed; the slide only has to happen.
+
 **Read what this does and does not say.** It measures the GAME's tolerance,
 not whether a body under hall lighting can hit it — that still needs the
 rehearsal, and it is the whole reason `lowFaced`/`lowHit` are in the round
