@@ -205,3 +205,73 @@ describe('the sweep plays Red Light the way the stall will', () => {
     );
   });
 });
+
+/**
+ * ANYTHING WITH MODULE-LEVEL STATE BELONGS ON `__arcade`.
+ *
+ * `main.ts` already explains why for `highlights`: a dev-console
+ * `import('/src/meta/highlights.ts')` does not reach the app's instance,
+ * because Vite appends an HMR timestamp to module URLs it has reloaded, so a
+ * bare import resolves to a SECOND, freshly-constructed module. Its counters
+ * are all zero and it looks exactly like the feature being dead.
+ *
+ * That caught me on `tournament` today. Checking a bracket through a dynamic
+ * import reported `start()` succeeding and `active` true — on a module the app
+ * has never seen. The only tell was the console DOM disagreeing with it, and
+ * what I ended up trusting was `localStorage` read back by hand.
+ *
+ * And `operatorConsole()` has carried the comment "for `window.__arcade` and
+ * tests" since it was written, while neither used it. Driving the console meant
+ * synthesising a KeyboardEvent with `code: 'Backquote'`, which tests the hotkey
+ * rather than the thing behind it — and silently does nothing when the
+ * anti-lean guard rejects the chord.
+ *
+ * Both are on the handle now, and this is here so the next singleton does not
+ * have to be discovered the same way.
+ */
+describe('the dev handle reaches the real singletons', () => {
+  test('the stateful modules are all on it', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/main.ts', 'utf8');
+
+    const at = src.indexOf('__arcade = {');
+    assert.ok(at > 0, 'the dev handle is gone');
+    const block = src.slice(at, src.indexOf('\n  };', at));
+
+    for (const name of ['router', 'camera', 'vision', 'audio', 'simulator', 'highlights', 'tournament']) {
+      assert.match(
+        block,
+        new RegExp('(^|[^\w.])' + name + '\s*,'),
+        `\`${name}\` holds module-level state and is not on \`__arcade\`, so the ` +
+          `only way to inspect it from a console is a dynamic import — which ` +
+          `under Vite can hand back a different instance entirely`
+      );
+    }
+
+    assert.match(
+      block,
+      /get operator\(\)/,
+      'the operator console is off the handle again, so driving it means ' +
+        'synthesising a Backquote chord that the anti-lean guard may reject'
+    );
+  });
+
+  /** And the claim in `operator.ts` is true rather than aspirational. */
+  test('and operatorConsole is actually used by it', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const op = await readFile('src/shell/operator.ts', 'utf8');
+    const main = await readFile('src/main.ts', 'utf8');
+
+    const at = op.indexOf('export function operatorConsole(');
+    assert.ok(at > 0, 'operatorConsole is gone');
+    const note = op.slice(Math.max(0, at - 200), at);
+    if (/__arcade/.test(note)) {
+      assert.match(
+        main,
+        /operatorConsole\(\)/,
+        'operatorConsole says it exists for `window.__arcade` and nothing there ' +
+          'calls it. Either wire it or stop claiming it'
+      );
+    }
+  });
+});

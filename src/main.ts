@@ -22,7 +22,7 @@ import { leaderboard } from './meta/leaderboard';
 import { tunables } from './meta/tunables';
 import { tournament } from './meta/tournament';
 import { RigCheckScreen } from './shell/rigcheck';
-import { installOperatorConsole } from './shell/operator';
+import { installOperatorConsole, operatorConsole } from './shell/operator';
 import { highlights } from './meta/highlights';
 import { AttractScreen } from './shell/attract';
 import { MenuScreen } from './shell/menu';
@@ -543,6 +543,23 @@ if (import.meta.env.DEV) {
     // That looks exactly like "instant replay is dead" and is not. Reach it
     // through here instead.
     highlights,
+    // SAME TRAP, AND IT CAUGHT ME. Checking a bracket through
+    // `import('/src/meta/tournament.ts')` reported `start()` succeeding and
+    // `active` true on a module the app has never seen, which proves nothing
+    // about the app. The tell is that the console DOM disagrees with it.
+    //
+    // Anything with module-level state belongs on this handle for exactly this
+    // reason; the alternative is reading `localStorage` back by hand, which is
+    // what I ended up doing.
+    tournament,
+    // `operatorConsole()` has said "for `window.__arcade` and tests" since it
+    // was written, and until now neither used it. Driving the console meant
+    // synthesising a KeyboardEvent with `code: 'Backquote'` — which tests the
+    // hotkey rather than the thing behind it, and silently does nothing if the
+    // anti-lean guard rejects the chord.
+    get operator() {
+      return operatorConsole();
+    },
     get screen() {
       return router.active;
     },
