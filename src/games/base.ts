@@ -551,6 +551,32 @@ const MOMENT_GAP_SEC = 6;
 const RESULTS_ABANDONED_SEC = 2.6;
 
 /**
+ * Whether this round shows the two standing marks and the divider between them.
+ *
+ * In a two-player game people "stand in the middle and swap tracks" — reported
+ * from a playtest, and it is not a tracking bug: the pair genuinely do not know
+ * there are two places to stand until the round has started and their scores
+ * are already crossed over. So the divider and a plate per half are drawn
+ * FOUR SECONDS EARLY, during the countdown, while there is still time to move.
+ * The association is made before it has to be read under pressure.
+ *
+ * Exactly two players, and only where a side actually MEANS something. Red
+ * Light seats five in one shared frame and has no sides, so a divider there
+ * would be marking a boundary that does not exist.
+ *
+ * Exported and pure because the decision is the fix — the drawing is just
+ * rectangles, and `tickCountdown` is not reachable from a test.
+ */
+export function showsStandingMarks(
+  playerCount: number,
+  partyMode: boolean,
+  supportsVersus: boolean
+): boolean {
+  return playerCount === 2 && !partyMode && supportsVersus;
+}
+
+
+/**
  * The line under the results, telling the person who just played to move.
  *
  * "NEXT PLAYER IN 5" states a fact about the software. What the stall needs is
@@ -1437,7 +1463,9 @@ export abstract class GameBase implements Screen {
       });
     }
 
-    if (this.playerCount === 2) this.drawStandingMarks(fc);
+    if (showsStandingMarks(this.playerCount, this.config.partyMode ?? false, this.config.supportsVersus ?? false)) {
+      this.drawStandingMarks(fc);
+    }
 
     if (this.playerCount === 2) {
       // Landing, not blinking. A banner that simply exists on the next frame
@@ -1491,7 +1519,6 @@ export abstract class GameBase implements Screen {
    */
   private drawStandingMarks(fc: FrameContext): void {
     const { ctx, v } = fc;
-    if (this.config.partyMode || !this.config.supportsVersus) return;
 
     const y = v.height * 0.62;
     const h = vh(v, 6.4);

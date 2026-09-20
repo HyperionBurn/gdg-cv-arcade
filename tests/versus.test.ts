@@ -33,6 +33,7 @@ import {
   INVITE_UNTIL_SEC,
   type GameConfig,
 } from '../src/games/base.ts';
+import { showsStandingMarks } from '../src/games/base.ts';
 import { GAME_SEATS, seatBadge } from '../src/meta/games.ts';
 import { tunables } from '../src/meta/tunables.ts';
 import { setPlayMode, takePlayMode } from '../src/meta/mode.ts';
@@ -792,5 +793,72 @@ describe('the mode screen has an off switch', () => {
     for (const [name, cfg] of GAMES) {
       assert.equal(rosterSize(2, cfg, null), rosterSize(2, cfg, 'open'), name);
     }
+  });
+});
+
+/**
+ * "STAND IN THE MIDDLE AND SWAP TRACKS" — row 15 of FEEDBACK.md.
+ *
+ * Not a tracking bug. A pair genuinely does not know there are two places to
+ * stand until the round has started and their scores are already crossed over,
+ * at which point nothing can be done about it. So the divider and a plate per
+ * half are drawn FOUR SECONDS EARLY, during the countdown, while there is
+ * still time to move — the association is made before it has to be read under
+ * pressure.
+ *
+ * It had no test. Found by semantic mutation of the ledger's identifier
+ * anchors: disabling the call failed nothing in the suite except the check
+ * that FEEDBACK.md still quotes it.
+ */
+describe('a versus pair is told where to stand before the round starts', () => {
+  test('two players in a versus game get the marks', () => {
+    assert.equal(showsStandingMarks(2, false, true), true);
+  });
+
+  test('and a solo round does not', () => {
+    assert.equal(showsStandingMarks(1, false, true), false, 'a solo player was given a divider');
+  });
+
+  /**
+   * Red Light seats five in one shared frame and has no sides. A divider there
+   * marks a boundary that does not exist, which is worse than none — it tells
+   * five people to arrange themselves into two halves.
+   */
+  test('and a party game never does, however many are playing', () => {
+    for (const n of [2, 3, 5]) {
+      assert.equal(
+        showsStandingMarks(n, true, false),
+        false,
+        `a ${n}-player party round drew a divider across a frame with no sides`
+      );
+    }
+  });
+
+  test('and neither does a crowd in a game that does have sides', () => {
+    assert.equal(showsStandingMarks(3, false, true), false);
+    assert.equal(showsStandingMarks(0, false, true), false);
+  });
+
+  /**
+   * FOUR SECONDS EARLY is the whole point, so the call has to be on the
+   * COUNTDOWN path. Drawn only once play begins, it arrives after the moment
+   * it exists to prevent.
+   */
+  test('and the marks are drawn during the countdown, not after it', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/games/base.ts', 'utf8');
+
+    const start = src.indexOf('private tickCountdown(');
+    assert.ok(start >= 0, 'tickCountdown is gone');
+    const end = src.indexOf('\n  private ', start + 10);
+    const countdown = src.slice(start, end > start ? end : undefined);
+
+    assert.match(
+      countdown,
+      /showsStandingMarks\(/,
+      'the standing marks are no longer drawn during the countdown, so they ' +
+        'arrive after the moment they exist to prevent'
+    );
+    assert.match(countdown, /this\.drawStandingMarks\(fc\)/, 'the gate no longer draws anything');
   });
 });

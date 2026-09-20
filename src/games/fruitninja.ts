@@ -134,6 +134,45 @@ const BOMB_TIME_BUDGET_SEC = 12;
  * test of its own; the slice geometry is covered by `geometry.test.ts` and
  * everything else about Fruit Ninja was resting on a README measurement.
  */
+/**
+ * How loudly a chain celebrates itself.
+ *
+ * "They love combo chains." So the ESCALATION is what gets the budget: every
+ * extra fruit in one swipe has to look and sound bigger than the last, from the
+ * back of the queue, without anyone reading a number. Before this a 2-chain and
+ * a 5-chain got the same word, the same size and the same flash.
+ *
+ * A word beats a number at 3m: you read "TRIPLE" in one glance, where "3 CHAIN"
+ * is two tokens and a unit.
+ *
+ * SCORING IS DELIBERATELY UNTOUCHED, which is why nothing here returns points.
+ * It was measured and argued for, and the leaderboard is live across two days.
+ *
+ * Exported and pure so the escalation can be checked rather than described —
+ * it is three arithmetic expressions and a threshold, and every one of them
+ * reads as an arbitrary constant to somebody tidying up.
+ */
+export function chainCelebration(chain: number): {
+  word: string;
+  sizeVh: number;
+  popScale: number;
+  flash: number;
+  confetti: boolean;
+} {
+  const CHAIN_WORDS = ['', '', '<DOUBLE!>', '<TRIPLE!>', '<QUAD!>', '<FIVE!>'];
+  // Capped so a freak eight-fruit swipe cannot fill the screen with one word.
+  const big = Math.min(chain, 6);
+  return {
+    word: CHAIN_WORDS[chain] ?? `<${chain} CHAIN!>`,
+    sizeVh: 4.2 + big * 0.7,
+    popScale: 1.1 + big * 0.06,
+    flash: 0.1 + big * 0.05,
+    // Past a triple it stops being a slice and becomes an event: confetti in
+    // all four brand colours, the app's own "that was special" gesture.
+    confetti: chain >= 3,
+  };
+}
+
 export function bombPenalty(
   timeLeft: number,
   bombSecondsSoFar: number,
@@ -941,16 +980,10 @@ export class FruitNinjaGame extends GameBase {
     // wrong with it — what was missing is that a 2-chain and a 5-chain got the
     // same word, the same size and the same flash.
     if (chain > 1) {
-      // A word beats a number at 3m: you read "TRIPLE" in one glance, where
-      // "3 CHAIN" is two tokens and a unit.
-      const CHAIN_WORDS = ['', '', '<DOUBLE!>', '<TRIPLE!>', '<QUAD!>', '<FIVE!>'];
-      const word = CHAIN_WORDS[chain] ?? `<${chain} CHAIN!>`;
-      const big = Math.min(chain, 6);
-      this.popups.spawn(word, cx, cy - vh(v, 4), COLORS.ink, vh(v, 4.2 + big * 0.7), 1.1 + big * 0.06);
-      this.juice.flash(COLORS.yellow, 0.1 + big * 0.05, 6);
-      // Past a triple it stops being a slice and becomes an event: confetti in
-      // all four brand colours, the app's own "that was special" gesture.
-      if (chain >= 3) this.celebrateAt(cx, cy);
+      const cel = chainCelebration(chain);
+      this.popups.spawn(cel.word, cx, cy - vh(v, 4), COLORS.ink, vh(v, cel.sizeVh), cel.popScale);
+      this.juice.flash(COLORS.yellow, cel.flash, 6);
+      if (cel.confetti) this.celebrateAt(cx, cy);
 
       // AND A TRIPLE IS WORTH KEEPING. PLAN.md §4 asks for a clip "on a top-5
       // score OR A BIG COMBO" and only the score half was ever built.

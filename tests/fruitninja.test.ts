@@ -15,7 +15,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { bombPenalty, REACH_HALF_TORSOS } from '../src/games/fruitninja.ts';
+import { bombPenalty, chainCelebration, REACH_HALF_TORSOS } from '../src/games/fruitninja.ts';
 import { reachBandFor, FULL_STRETCH_TORSOS } from '../src/games/reach.ts';
 
 const BUDGET = 12; // BOMB_TIME_BUDGET_SEC
@@ -201,5 +201,82 @@ describe('fruit is thrown where the player can actually reach it', () => {
     const b = reachBandFor({ cx: null, unit: 0, rect: SLOT, radius: RADIUS, halfTorsos: REACH_HALF_TORSOS, fallbackInset: 0.18 });
     assert.ok(b.max > b.min, 'the pre-anchor band is empty, so no fruit can spawn');
     assert.ok(b.min > 0 && b.max < W, 'the pre-anchor band runs off the slot');
+  });
+});
+
+/**
+ * "THEY LOVE COMBO CHAINS." — row 21 of FEEDBACK.md.
+ *
+ * So the ESCALATION got the budget: a word per chain length, growing type,
+ * growing flash, and confetti past a triple. Every extra fruit in one swipe has
+ * to look bigger than the last from the back of the queue, without anyone
+ * reading a number. Before it, a 2-chain and a 5-chain got the same word, the
+ * same size and the same flash.
+ *
+ * It had no test. Found by semantic mutation of the ledger's identifier
+ * anchors: emptying `CHAIN_WORDS` failed nothing in the suite except the check
+ * that FEEDBACK.md still quotes it.
+ */
+describe('a longer chain celebrates louder', () => {
+  test('each length gets its own word', () => {
+    assert.equal(chainCelebration(2).word, '<DOUBLE!>');
+    assert.equal(chainCelebration(3).word, '<TRIPLE!>');
+    assert.equal(chainCelebration(4).word, '<QUAD!>');
+    assert.equal(chainCelebration(5).word, '<FIVE!>');
+  });
+
+  /** Beyond the named words it still says something, rather than nothing. */
+  test('and an unnamed length still gets a word rather than a blank', () => {
+    for (const n of [6, 7, 9]) {
+      const w = chainCelebration(n).word;
+      assert.ok(w.length > 2, `a ${n}-chain popped "${w}"`);
+      assert.ok(w.includes(String(n)), `a ${n}-chain does not say how long it was: "${w}"`);
+    }
+  });
+
+  /**
+   * The actual content of the row: it has to GROW. A guard on the words alone
+   * would be satisfied by five different words at one size, which is the state
+   * the report was about.
+   */
+  test('and the type and the flash both grow with it', () => {
+    let lastSize = 0;
+    let lastFlash = 0;
+    for (const n of [2, 3, 4, 5, 6]) {
+      const c = chainCelebration(n);
+      assert.ok(
+        c.sizeVh > lastSize,
+        `a ${n}-chain is not bigger than a ${n - 1}-chain (${c.sizeVh}vh vs ${lastSize}vh)`
+      );
+      assert.ok(c.flash > lastFlash, `a ${n}-chain does not flash harder than a ${n - 1}-chain`);
+      lastSize = c.sizeVh;
+      lastFlash = c.flash;
+    }
+  });
+
+  test('and confetti starts at a triple, not before', () => {
+    assert.equal(chainCelebration(2).confetti, false, 'a double already fires confetti');
+    for (const n of [3, 4, 5]) {
+      assert.equal(chainCelebration(n).confetti, true, `a ${n}-chain does not celebrate`);
+    }
+  });
+
+  /**
+   * Capped, so a freak swipe through eight fruit cannot fill the screen with
+   * one word — and the cap is what makes the growth safe to assert above.
+   */
+  test('and the escalation is bounded', () => {
+    assert.equal(chainCelebration(20).sizeVh, chainCelebration(6).sizeVh);
+    assert.ok(chainCelebration(20).sizeVh < 10, 'a long chain can cover the whole screen');
+  });
+
+  /**
+   * SCORING IS DELIBERATELY UNTOUCHED. It was measured and argued for, and the
+   * leaderboard is live across two days — so the celebration must stay purely
+   * visual. Nothing here may hand back points.
+   */
+  test('and none of it changes what a chain is worth', () => {
+    const keys = Object.keys(chainCelebration(4)).sort();
+    assert.deepEqual(keys, ['confetti', 'flash', 'popScale', 'sizeVh', 'word']);
   });
 });
