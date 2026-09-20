@@ -99,6 +99,8 @@ interface SimLike {
   triggerJump?: () => void;
   clearWristTargets?: () => void;
   setWristTargetAll?: (side: 'left' | 'right', target: { x: number; y: number } | null) => void;
+  /** Hold or release a crouch. Drives Rhythm's duck and the Runner's slide. */
+  setCrouch?: (on: boolean) => void;
 }
 
 /**
@@ -108,7 +110,12 @@ interface SimLike {
  * Red Light and Pose Match both score zero against a flailing or motionless
  * body — correctly — so a turn driven that way never earns a leaderboard place
  * and never exercises the initials screen, which is half of what this sweep is
- * for. These mirror the drivers in `smoke.ts`; keep the two in step.
+ * for. These mirror the drivers in `smoke.ts`, and `tests/probes.test.ts`
+ * now ENFORCES that rather than asking. The instruction used to be a comment
+ * saying "keep the two in step", and they drifted the first time one was
+ * touched: teaching the smoke probe to duck Rhythm's walls changed nothing,
+ * because `turn()` runs this copy, and the sweep meant to prove the fix kept
+ * reporting zero ducks.
  */
 const PLAY: Record<string, (s: SimLike) => void> = {
   sixtyseven: (s) => s.setPump(4.5, 1),
@@ -164,6 +171,21 @@ const DRIVE: Record<string, (s: SimLike, game: unknown) => void> = {
     if (g?.state !== 'playing') return;
     const rest = { left: { x: 0.38, y: 0.75 }, right: { x: 0.62, y: 0.75 } };
     const notes = g?.debug?.().notes ?? [];
+
+    // AND IT HAS TO DUCK. Walls are one of this game's two scoring paths and
+    // both drivers only ever punched. FOUND BY COUNTING AUDIO CUES over a full
+    // seven-game sweep: `wallhit` played 15 times and `duck` ZERO, so the
+    // simulated player hit every wall in the chart and cleared none, while
+    // every check stayed green.
+    //
+    // `isCrouching` is the HELD state rather than the edge, so a duck started
+    // early and held through the wall counts — which the game's own comment
+    // says is what everyone does the first time.
+    const wall = notes.find(
+      (x) => x.kind === 'wall' && x.status?.[0] === 'live' && x.delta > -0.35 && x.delta < 0.6
+    );
+    s.setCrouch?.(!!wall);
+
     for (const hand of ['left', 'right'] as const) {
       const n = notes.find(
         (x) =>

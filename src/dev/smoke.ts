@@ -236,6 +236,7 @@ const PROBES: Probe[] = [
     idle: (s) => {
       s.setSwipe(0);
       s.setPump(0);
+      s.setCrouch(false);
       s.clearWristTargets();
     },
     drive: (sim, game, tick, frames) => {
@@ -255,6 +256,27 @@ const PROBES: Probe[] = [
       const slice = 2;
       for (let done = 0; done < frames; done += slice) {
         const notes = g?.debug?.().notes ?? [];
+
+        // AND IT HAS TO DUCK, which it never did.
+        //
+        // Walls are one of this game's two scoring paths and the probe only
+        // ever punched. FOUND BY COUNTING AUDIO CUES over a full seven-game
+        // sweep: `wallhit` played 15 times and `duck` ZERO, so the simulated
+        // player hit every wall in the chart and cleared none. Every automated
+        // check passed the whole time, because nothing asserts that the duck
+        // path is reachable — the same shape as the quad-chain clip that could
+        // never fire.
+        //
+        // `isCrouching` is the HELD state, not the edge, so the duck can start
+        // early and be held through the wall — which is what the game's own
+        // comment says everyone does the first time. The window is
+        // `TIMING.wall` (0.45s) either side; crouching a little before it opens
+        // and holding until it closes is a player ducking, not a cheat.
+        const wall = notes.find(
+          (x) => x.kind === 'wall' && x.status[0] === 'live' && x.delta > -0.35 && x.delta < 0.6
+        );
+        sim.setCrouch(!!wall);
+
         for (const hand of ['left', 'right'] as const) {
           const n = notes.find(
             (x) =>
@@ -269,6 +291,7 @@ const PROBES: Probe[] = [
         }
         tick(slice);
       }
+      sim.setCrouch(false);
       sim.clearWristTargets();
     },
     idleMustBeZero: true,
