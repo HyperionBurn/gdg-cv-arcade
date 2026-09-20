@@ -152,7 +152,7 @@ interface Choice {
  * people racing each other and a five-lane Red Light is a group surviving
  * together. Using one word for both would make one of the two screens lie.
  */
-function choicesFor(id: GameId): [Choice, Choice] {
+export function choicesFor(id: GameId): [Choice, Choice] {
   const seats = GAME_SEATS[id] ?? 2;
   // SHORT ENOUGH NOT TO BE SHRUNK. `fitText` scales a long line down to fit
   // the card, and the whole reason the menu blurb is held at 2.4vh is that

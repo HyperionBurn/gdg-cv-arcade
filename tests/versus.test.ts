@@ -37,7 +37,7 @@ import { showsStandingMarks } from '../src/games/base.ts';
 import { GAME_SEATS, seatBadge } from '../src/meta/games.ts';
 import { tunables } from '../src/meta/tunables.ts';
 import { setPlayMode, takePlayMode } from '../src/meta/mode.ts';
-import { modeScreenApplies } from '../src/shell/mode.ts';
+import { modeScreenApplies, choicesFor } from '../src/shell/mode.ts';
 import { TOURNAMENT_GAMES, isTournamentGame, tournament } from '../src/meta/tournament.ts';
 import type { GameId } from '../src/meta/leaderboard.ts';
 import { laneScore, type ScorableRacer } from '../src/games/redlight.ts';
@@ -927,5 +927,49 @@ describe('a marshal can actually start a bracket', () => {
     assert.equal(tournament.active, true);
     assert.equal(tournament.reportCurrent(10, 20), true, 'a decided match did not advance');
     tournament.reset();
+  });
+});
+
+/**
+ * "MULTIPLAYER" AND "VERSUS" ARE NOT SYNONYMS, and the roster has to use both.
+ *
+ * `mode.ts` makes the distinction deliberately: a split screen is two people
+ * racing each other, a five-lane Red Light is a group surviving together, and
+ * one word for both would make one of the two screens lie.
+ *
+ * Checked the way this repo has caught three dead branches already — by
+ * counting what never draws. Over a full `turn()` of Fruit Ninja the mode
+ * screen drew `<HOW MANY PLAYING?>`, `JUST ME` and `VERSUS`, and never drew
+ * `ALL OF US`; over a Red Light turn it drew `ALL OF US` and `UP TO 5 IN ONE
+ * RACE` and never drew `VERSUS`. Both correct, and neither is dead — which is
+ * the thing worth keeping true.
+ */
+describe('the mode screen uses both wordings, and uses them correctly', () => {
+  test('a two-seat game offers VERSUS, a bigger one offers ALL OF US', () => {
+    for (const [id, seats] of Object.entries(GAME_SEATS) as Array<[GameId, number]>) {
+      if (seats < 2) continue;
+      const [solo, open] = choicesFor(id);
+      assert.equal(solo.title, 'JUST ME', `${id}'s first card is not the solo one`);
+      assert.equal(
+        open.title,
+        seats > 2 ? 'ALL OF US' : 'VERSUS',
+        `${id} seats ${seats} and offers "${open.title}" — a split screen is two ` +
+          `people racing, a wider game is a group surviving together, and one ` +
+          `word for both makes one of the screens lie`
+      );
+    }
+  });
+
+  /**
+   * And BOTH branches are reachable on the real roster. A wording no game on
+   * the list can produce is dead code that reads as a considered decision.
+   */
+  test('and both wordings are actually reachable', () => {
+    const titles = (Object.entries(GAME_SEATS) as Array<[GameId, number]>)
+      .filter(([, seats]) => seats >= 2)
+      .map(([id]) => choicesFor(id)[1].title);
+
+    assert.ok(titles.includes('VERSUS'), 'no game on the roster produces VERSUS any more');
+    assert.ok(titles.includes('ALL OF US'), 'no game on the roster produces ALL OF US any more');
   });
 });
