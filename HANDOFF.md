@@ -266,6 +266,41 @@ in the cleared-board run. Checking the wrong one of those two costs an hour.
 
 ---
 
+## The same trick, pointed at the test suite
+
+The census asks "what does the app never draw?". Point it at `tests/` and it
+asks "what does the suite never touch?", which found three inputs on the 20th
+that nothing tested at all.
+
+**Do it by MODULE, not by symbol name.** The first pass listed exported
+symbols no test file NAMES: 142 of 350, which sounds alarming and mostly is
+not. A function covered through its caller never appears by name {DASH}
+`isPlayable` is exercised by every `nextPlayable` test in a 28KB tournament
+suite, and `GhostPlayback` arrives through `ghosts.load()`. Chasing that list
+is chasing false positives.
+
+Modules that NO test imports is the honest signal: **8 of 54**, and five of
+those are drawing code or a worker entry, where a source-scanning guard and a
+screenshot are the right tools anyway.
+
+What it found, all three of which reach a player:
+
+| Was untested | Why it matters |
+|---|---|
+| `VerticalGestures` | The Runner's jump and Rhythm's duck. Every sibling detector in that file was covered. FEEDBACK's Runner row is about hit rate on JUMP obstacles specifically. |
+| `BladeTracker` | The whole input to Fruit Ninja. Three properties, all failing the same way: one blade harvesting the field at once. |
+| `RollingNumber` | Its own comment calls the finite check the last thing between a bad score and "NaN" at 11vh on a television. |
+| `Projection` | Every consumer-facing coordinate. Its header says a mistake here "makes a game feel subtly broken in a way that's very hard to debug from a desk". |
+
+And the tests taught the code twice, which is the sign they were worth
+writing. A blade test swiping 0.12 of the frame per step cut nothing {DASH} that
+is 0.6 torso units, a teleport, and `maxTravelPerFrame` was right to refuse
+it. A real arm covers about 0.2 torso units between frames even swung hard.
+Both blade tests now assert `reacquired === false` first, so a future draft
+fails loudly instead of quietly testing the snap path.
+
+---
+
 ## And measure it at 4:3
 
 The second most productive sweep, and it only happened because the pane was
