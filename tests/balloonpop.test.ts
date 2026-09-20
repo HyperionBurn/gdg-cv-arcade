@@ -22,7 +22,9 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isPoppable } from '../src/games/balloonpop.ts';
+import { isPoppable, popRadius, REACH_HALF_TORSOS } from '../src/games/balloonpop.ts';
+import { REACH_HALF_TORSOS as FRUIT_REACH_HALF_TORSOS } from '../src/games/fruitninja.ts';
+import { reachBandFor, FULL_STRETCH_TORSOS } from '../src/games/reach.ts';
 
 /**
  * Screen coordinates, y growing DOWNWARD, at a 720px-tall viewport:
@@ -84,5 +86,108 @@ describe('a balloon is poppable exactly while it is visible', () => {
   test('an impossible band fails closed', () => {
     assert.equal(isPoppable(100, 50, SHELF), false);
     assert.equal(isPoppable(50, 50, 114), false);
+  });
+});
+
+/**
+ * THE SAME REACH BUG, IN THE GAME LEAST ABLE TO AFFORD IT.
+ *
+ * Balloon Pop is the accessible one on the roster — the README's own word —
+ * and it carried its own copy of the reach band, with its own tighter 1.25
+ * torso half-width and the SAME shift-at-the-edge behaviour Fruit Ninja had.
+ * Shifting preserves the band's width, which is twice the reach, so a body
+ * near the edge of its slot got the whole 2.5 torso spread on one side of
+ * itself. In the game somebody plays precisely because stretching is the thing
+ * they cannot do.
+ *
+ * Both games now share `reach.ts`, which intersects instead of shifting.
+ */
+describe('balloons rise where the player can actually reach them', () => {
+  const W = 1920;
+  const H = 1080;
+  const UNIT = 0.3 * H;
+  const RADIUS = 0.045 * H;
+  const SLOT = { x: 0, width: W };
+
+  const band = (cx: number | null): { min: number; max: number } =>
+    reachBandFor({
+      cx,
+      unit: cx === null ? 0 : UNIT,
+      rect: SLOT,
+      radius: RADIUS,
+      halfTorsos: REACH_HALF_TORSOS,
+      fallbackInset: 0.15,
+    });
+
+  test('nowhere on the screen asks for more than a full stretch', () => {
+    const bad: string[] = [];
+    for (let f = 0.02; f <= 0.98; f += 0.02) {
+      const cx = f * W;
+      const b = band(cx);
+      const reach = Math.max(Math.abs(b.max - cx), Math.abs(cx - b.min)) / UNIT;
+      if (reach > FULL_STRETCH_TORSOS + 1e-9) {
+        bad.push(`${(f * 100).toFixed(0)}% across: ${reach.toFixed(2)} torso`);
+      }
+    }
+    assert.deepEqual(bad, [], 'balloons spawn out of reach at:\n  ' + bad.join('\n  '));
+  });
+
+  /**
+   * And this game asks for LESS than Fruit Ninja does, deliberately. If the two
+   * ever converge it is because somebody tidied them together without noticing
+   * that one of them is the game for people who cannot stretch.
+   */
+  test('and it asks for less reach than the crowd-puller does', () => {
+    assert.ok(
+      REACH_HALF_TORSOS < FRUIT_REACH_HALF_TORSOS,
+      `Balloon Pop reaches ${REACH_HALF_TORSOS} torso and Fruit Ninja ` +
+        `${FRUIT_REACH_HALF_TORSOS}. The accessible game must not ask for more.`
+    );
+    assert.ok(REACH_HALF_TORSOS > 0.6, 'the band has collapsed to a column above the player');
+  });
+});
+
+/**
+ * "DECREASE THE RANGE AT WHICH THEY REGISTER AS A STRIKEABLE OBJECT"
+ *
+ * Row 18 of FEEDBACK.md. The fix made pop slop a FLAT 0.04 torso instead of
+ * scaling with balloon size, because a size-proportional rule fired on a
+ * three-pixel graze at 720p and punished the small golden balloon twice —
+ * smaller AND faster.
+ *
+ * It had no behavioural test: found by mutation, the constant could be changed
+ * to anything and nothing failed but the check that the ledger still quotes
+ * it. The measured table in the source is what chose 0.04; these are the two
+ * properties that table was chosen FOR.
+ */
+describe('a balloon pops on contact, not on a graze', () => {
+  const H720 = 720;
+  const UNIT = 0.3 * H720;
+  const GOLDEN_R = 0.035 * H720;
+  const BIG_R = 0.063 * H720;
+
+  const margin = (r: number): number => popRadius(r, UNIT) - r;
+
+  test('the forgiveness does not scale with the balloon', () => {
+    assert.ok(
+      Math.abs(margin(GOLDEN_R) - margin(BIG_R)) < 1e-9,
+      `a small balloon gets ${margin(GOLDEN_R).toFixed(1)}px of slop and a big one ` +
+        `${margin(BIG_R).toFixed(1)}px. That is the size-proportional rule the report ` +
+        `was about, and it punishes the golden balloon twice`
+    );
+  });
+
+  test('and it is small enough that the hand is really on the balloon', () => {
+    // Against the SMALLEST balloon, which is where a fixed margin is worst.
+    const ratio = margin(GOLDEN_R) / GOLDEN_R;
+    assert.ok(
+      ratio < 0.4,
+      `the pop radius is ${(ratio * 100).toFixed(0)}% wider than the drawn golden ` +
+        `balloon, so it pops with the marker outside it — the graze the report named`
+    );
+    assert.ok(
+      margin(GOLDEN_R) > 2,
+      'the slop has gone to nothing; this game is about inclusion and needs some'
+    );
   });
 });

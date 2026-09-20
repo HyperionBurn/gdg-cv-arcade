@@ -45,6 +45,7 @@ import {
 import type { Viewport } from '../engine/draw';
 import { COLORS, PLAYER_COLORS, FONTS, SHADOW, STROKE, TRACK, WEIGHT } from '../shell/theme';
 import { GAME_COLORS } from '../meta/games';
+import { reachBandFor } from './reach';
 import type { FrameContext } from '../shell/screen';
 
 interface Balloon {
@@ -168,7 +169,8 @@ const ARM_HINT_SEC = 7;
  * Still clamped inside the slot, so a player standing at the very edge of frame
  * does not get balloons drawn off-screen.
  */
-const REACH_HALF_TORSOS = 1.25;
+/** Exported so a test can hold the band to it. See `reach.ts`. */
+export const REACH_HALF_TORSOS = 1.25;
 
 /** See the identical constants and the full derivation in games/fruitninja.ts. */
 const SOLO_LOCK_KEEP = 0.9;
@@ -266,6 +268,17 @@ const ENGAGE_WINDOW_MS = 1200;
  * reaches, which is the point: flailing 361 -> 322 while reaching 1572 -> 1660.
  */
 const POP_SLOP_TORSOS = 0.04;
+
+/**
+ * The radius a hand marker has to be inside to pop a balloon.
+ *
+ * Exported, pure, so the property the measured table above was chosen for can
+ * be checked rather than described: the forgiveness is FLAT, not proportional
+ * to the balloon, which is what the report asked for.
+ */
+export function popRadius(balloonR: number, unit: number): number {
+  return balloonR + POP_SLOP_TORSOS * unit;
+}
 
 /**
  * Torso height as a fraction of screen height, used only for the frame or two
@@ -586,30 +599,14 @@ export class BalloonPopGame extends GameBase {
    * only ever the first frame or two of a round.
    */
   private reachBand(slot: number, rect: SlotRect, radius: number): { min: number; max: number } {
-    const lo = rect.x + radius;
-    const hi = rect.x + rect.width - radius;
-
-    const cx = this.bodyX[slot] ?? null;
-    const unit = this.bodyUnit[slot] ?? 0;
-    if (cx === null || unit <= 0) {
-      return { min: rect.x + rect.width * 0.15, max: rect.x + rect.width * 0.85 };
-    }
-
-    const half = unit * REACH_HALF_TORSOS;
-    // Shift rather than shrink when the body is near the edge of its slot: a
-    // player standing off to one side should still get a full-width spread of
-    // balloons, just all on the side they can actually reach.
-    let min = cx - half;
-    let max = cx + half;
-    if (min < lo) {
-      max = Math.min(hi, max + (lo - min));
-      min = lo;
-    }
-    if (max > hi) {
-      min = Math.max(lo, min - (max - hi));
-      max = hi;
-    }
-    return { min: Math.min(min, max), max: Math.max(min, max) };
+    return reachBandFor({
+      cx: this.bodyX[slot] ?? null,
+      unit: this.bodyUnit[slot] ?? 0,
+      rect,
+      radius,
+      halfTorsos: REACH_HALF_TORSOS,
+      fallbackInset: 0.15,
+    });
   }
 
   /**
@@ -724,7 +721,7 @@ export class BalloonPopGame extends GameBase {
         // is now the same for every balloon and small enough that the hand
         // marker is visibly two-thirds inside the balloon when it pops. See
         // POP_SLOP_TORSOS for the measured table this came from.
-        const hitR = b.r + POP_SLOP_TORSOS * unit;
+        const hitR = popRadius(b.r, unit);
         const d = Math.hypot(blade.x - b.x, blade.y - b.y);
 
         if (d < hitR * 2.2) b.squash = Math.min(1, b.squash + 0.5);

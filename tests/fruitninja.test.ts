@@ -15,7 +15,8 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { bombPenalty, reachBandFor, FULL_STRETCH_TORSOS } from '../src/games/fruitninja.ts';
+import { bombPenalty, REACH_HALF_TORSOS } from '../src/games/fruitninja.ts';
+import { reachBandFor, FULL_STRETCH_TORSOS } from '../src/games/reach.ts';
 
 const BUDGET = 12; // BOMB_TIME_BUDGET_SEC
 const PENALTY = 8; // BOMB_TIME_PENALTY
@@ -151,7 +152,7 @@ describe('fruit is thrown where the player can actually reach it', () => {
 
   /** Farthest the band asks a body at `cx` to reach, in torso units. */
   const worstReach = (cx: number): number => {
-    const b = reachBandFor({ cx, unit: UNIT, rect: SLOT, radius: RADIUS });
+    const b = reachBandFor({ cx, unit: UNIT, rect: SLOT, radius: RADIUS, halfTorsos: REACH_HALF_TORSOS, fallbackInset: 0.18 });
     return Math.max(Math.abs(b.max - cx), Math.abs(cx - b.min)) / UNIT;
   };
 
@@ -172,7 +173,7 @@ describe('fruit is thrown where the player can actually reach it', () => {
   });
 
   test('a centred player still gets the full spread', () => {
-    const b = reachBandFor({ cx: W / 2, unit: UNIT, rect: SLOT, radius: RADIUS });
+    const b = reachBandFor({ cx: W / 2, unit: UNIT, rect: SLOT, radius: RADIUS, halfTorsos: REACH_HALF_TORSOS, fallbackInset: 0.18 });
     assert.ok(
       (b.max - b.min) / UNIT > 2.5,
       `a centred player's band is only ${((b.max - b.min) / UNIT).toFixed(2)} torso wide; ` +
@@ -187,7 +188,7 @@ describe('fruit is thrown where the player can actually reach it', () => {
    */
   test('and a player at the very edge still gets a band, not a spot', () => {
     for (const f of [0.03, 0.97]) {
-      const b = reachBandFor({ cx: f * W, unit: UNIT, rect: SLOT, radius: RADIUS });
+      const b = reachBandFor({ cx: f * W, unit: UNIT, rect: SLOT, radius: RADIUS, halfTorsos: REACH_HALF_TORSOS, fallbackInset: 0.18 });
       assert.ok(
         (b.max - b.min) / UNIT > 1.0,
         `at ${(f * 100).toFixed(0)}% across the band is ${((b.max - b.min) / UNIT).toFixed(2)} ` +
@@ -197,7 +198,7 @@ describe('fruit is thrown where the player can actually reach it', () => {
   });
 
   test('no body anchored yet falls back to the slot, not to nothing', () => {
-    const b = reachBandFor({ cx: null, unit: 0, rect: SLOT, radius: RADIUS });
+    const b = reachBandFor({ cx: null, unit: 0, rect: SLOT, radius: RADIUS, halfTorsos: REACH_HALF_TORSOS, fallbackInset: 0.18 });
     assert.ok(b.max > b.min, 'the pre-anchor band is empty, so no fruit can spawn');
     assert.ok(b.min > 0 && b.max < W, 'the pre-anchor band runs off the slot');
   });
