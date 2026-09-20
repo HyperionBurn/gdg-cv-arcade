@@ -40,7 +40,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { PoseTracker } from '../src/core/tracker.ts';
-import { RepCounter, type RepTunables } from '../src/core/gestures.ts';
+import { RepCounter, DEFAULT_REP_TUNABLES, type RepTunables } from '../src/core/gestures.ts';
 import { POSE, POSE_LANDMARK_COUNT } from '../src/core/types.ts';
 import type { Landmark, RawPose } from '../src/core/types.ts';
 
@@ -526,5 +526,84 @@ describe('67 Speed — "they had to 67 at a certain angle"', () => {
       one < both * 0.6,
       `one arm occluded should roughly halve the count: ${both} -> ${one}`
     );
+  });
+});
+
+/**
+ * AND THE GATE THESE TESTS DRIVE HAS TO BE THE GATE THE GAME SHIPS.
+ *
+ * `GATE` at the top of this file is a hand-written COPY of `REP_GATE` in
+ * `games/sixtyseven.ts`. Everything above proves those numbers behave — that
+ * every real pumping style counts, that hands-together scores like a t-pose,
+ * that no fixed anchor could have served both — and NONE of it would have
+ * noticed the game shipping different ones.
+ *
+ * FOUND BY MUTATION, sweeping every fix in FEEDBACK.md: raising the game's
+ * `upEnter` from 0.12 to 0.6 — which is roughly the shoulder-anchored gate
+ * rows 6 and 7 were reported against — failed exactly one test in the whole
+ * suite, the one that checks the ledger's anchor text still exists.
+ *
+ * `games/sixtyseven.ts` cannot be imported here; it extends GameBase and needs
+ * a canvas. Same shape, and the same fix, as the lane gate in
+ * `runner-lane.test.ts`.
+ */
+describe('the rep gate these tests drive is the gate the game ships', () => {
+  test('sixtyseven.ts installs exactly the GATE these tests use', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/games/sixtyseven.ts', 'utf8');
+
+    const at = src.indexOf('const REP_GATE = {');
+    assert.ok(at >= 0, 'sixtyseven.ts no longer declares REP_GATE');
+    const block = src.slice(at, src.indexOf('} as const;', at));
+
+    const num = (name: string): number => {
+      const line = block.split(/\r?\n/).find((l) => l.trim().startsWith(`${name}:`));
+      assert.ok(line, `REP_GATE no longer has ${name}`);
+      const m = /:\s*(-?\d+(?:\.\d+)?)\s*,/.exec(line);
+      assert.ok(m, `REP_GATE.${name} is no longer a plain number`);
+      return Number(m[1]);
+    };
+
+    assert.deepEqual(
+      {
+        upEnter: num('upEnter'),
+        upExit: num('upExit'),
+        downEnter: num('downEnter'),
+        downExit: num('downExit'),
+      },
+      {
+        upEnter: GATE.upEnter,
+        upExit: GATE.upExit,
+        downEnter: GATE.downEnter,
+        downExit: GATE.downExit,
+      },
+      'the game ships a different rep gate from the one every test above drives, ' +
+        'so those results say nothing about what a player gets'
+    );
+  });
+
+  /**
+   * The two fields REP_GATE takes from `DEFAULT_REP_TUNABLES` rather than
+   * writing out, so the copy above stays honest about those too.
+   */
+  test('and the borrowed fields still match their source', () => {
+    assert.equal(GATE.centreRate, DEFAULT_REP_TUNABLES.centreRate);
+    assert.equal(GATE.minRepIntervalMs, DEFAULT_REP_TUNABLES.minRepIntervalMs);
+  });
+
+  /**
+   * `centreRate` is what makes the gate style-agnostic: the centre learns where
+   * the middle of THIS arm's stroke is, and the gates run on deviation from it.
+   * At zero it never learns, the reference is whatever the first frame
+   * happened to be, and the gate is shoulder-anchored again — which is rows 6
+   * and 7 exactly.
+   */
+  test('and the centre still learns, or the anchor is fixed again', () => {
+    assert.ok(
+      GATE.centreRate > 0,
+      'centreRate is zero, so the stroke centre never adapts and every player ' +
+        'is measured against wherever their wrist happened to be on frame one'
+    );
+    assert.ok(GATE.centreRate < 0.2, 'the centre chases the stroke it is measuring');
   });
 });
