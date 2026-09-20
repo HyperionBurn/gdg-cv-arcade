@@ -92,12 +92,33 @@ const EXPECTED_ABSENT: Record<string, string> = {
 
   // ── Rare by construction, and deliberately so ───────────────────────────
   '<DEAD HEAT>': 'two players finish on exactly the same score',
-  '<QUAD!>': 'a four-slice chain; the sim reaches three',
-  '<FIVE!>': 'a five-slice chain; the sim reaches three',
+  // Rare MECHANICALLY, not just in the sim: a chain is the fruit caught by
+  // one swipe, and `spawn` emits one or two at a time (fruitninja.ts:677), so
+  // a quad needs two whole waves to overlap in space and in flight. This is
+  // why the combo CLIP was retuned down to a triple — its old threshold was
+  // set to a chain that effectively never occurs, found by this same census.
+  '<QUAD!>': 'a four-slice chain; spawn emits 1-2, so it needs two waves to overlap',
+  '<FIVE!>': 'a five-slice chain; rarer still, for the same reason',
 
   // ── Needs a body to go missing, which the simulator never does ──────────
   '<FACE THE CAMERA>': 'an arm stops being seen mid-round',
-  '<STEP INTO THE FRAME>': 'no body at all during gathering',
+
+  // ── Unreachable on THIS roster, and the reason here used to be wrong ─────
+  // It said "no body at all during gathering", which sounds plausible and is
+  // nothing to do with it. The gathering invite is chosen from CONFIG, not
+  // from who is in frame: `maxPlayers > 2` gets "UP TO N PLAYERS" (Red Light,
+  // 5 lanes), `supportsVersus` gets "1 OR 2 PLAYERS" (the other six), and
+  // this is the fallback for a game that is neither. No game on the roster is
+  // neither, so no body in any position can draw it.
+  //
+  // Kept rather than deleted: it is the else of a total function over config,
+  // and a solo-only game added later needs an invite. If one is, this string
+  // starts drawing and the "no reason survives the string starting to draw"
+  // test below trips, which is the correct outcome.
+  //
+  // Worth noting how this was caught — the allowlist made me write a reason
+  // down, and writing it down is what made it checkable.
+  '<STEP INTO THE FRAME>': 'the config fallback; every game is versus or multi-seat',
 
   // ── Absent BECAUSE a fix works ──────────────────────────────────────────
   // `<WALL!>` fires on a wall HIT. Both drivers now duck, which is exactly
