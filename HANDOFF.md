@@ -1,6 +1,6 @@
 # HANDOFF
 
-Written 19 Sept 2026, at the end of a long working session. The stall runs
+Written 19 Sept 2026 and extended on the 20th. The stall runs
 **24 and 26 September**. This is the state of things, what is deliberately
 unfinished, and the traps that cost me the most time — read the last section
 before you change any drawing code.
@@ -14,18 +14,19 @@ The authority for everything else is:
 | `PLAN.md` | What the event is and why each game is on the roster. |
 | `BRAND.md` | The eight tokens and the rules for using them. |
 | `CREDITS.md` | Attribution. |
+| `FEEDBACK.md` | **Every playtest report and where it landed.** Tested — see below. |
 
 ---
 
 ## State
 
-Green as of the last commit: **464 tests, 94 suites, 0 failures**, typecheck
+Green as of the last commit: **483 tests, 97 suites, 0 failures**, typecheck
 clean, production build verified to make **zero external requests**.
 
 ```bash
 npm run setup      # fetch models + fonts — REQUIRED before first run
 npm run dev        # http://localhost:5173
-npm test           # 464 tests, ~10s
+npm test           # 483 tests, ~10s
 npm run typecheck
 npm run kiosk      # production build, served on :4173 — use this on the day
 ```
@@ -77,6 +78,33 @@ afternoon cannot.
 
 ---
 
+## What changed on 20 September
+
+**The tester-feedback ledger.** Every playtest report was already acted on, and
+every one was documented at the site of its fix — which is the good version of
+the problem: the reasoning survives, but only as prose, scattered across
+seventeen files and load-bearing for nothing. `FEEDBACK.md` is now the ledger,
+27 rows, and `tests/feedback.test.ts` makes it bite three ways: every anchor
+must still exist in the file it names, every quoted report must still be quoted
+at a fix site, and **every tester quote in `src/` must appear in the ledger** —
+so a new report cannot be written into a comment without being filed. All three
+mutation-tested.
+
+**The attract reel.** PLAN.md §6 asked for looping highlight clips on the
+attract screen and they were never built: capture SWAPS the two atlases, so
+exactly one clip can exist. There is now a four-slot reel in its own 2.36 MB
+atlas, it draws only while nobody is in frame, and it is the first thing the
+cost guard sheds. Full reasoning is in the note on `REEL_SLOTS`.
+
+**And the highlight buffer finally reports itself.** It is the largest
+allocation in the app and it could shed — or switch off entirely — without a
+word anywhere. `d` now has `replay` and `reel` rows; the operator console has
+**DATA → REPLAYS & ATTRACT REEL** with buffer size, grab cost, shed level and
+switches for both. Exactly the storage-flag problem from the 19th, one layer
+down.
+
+---
+
 ## Open, and deliberate
 
 Things I looked at and chose not to change. If you disagree, the reasoning is
@@ -103,6 +131,12 @@ here so you can overrule it properly.
   lanes. Rewriting a measurement to a number nobody measured would falsify the
   record, and `LANES` documents the six-to-five change directly above the
   constant.
+- **The reel's memory budget wants one real measurement.** Total canvas backing
+  store is now 21.2 MB against a cliff measured at roughly 20 MB on THIS
+  machine, and a failure measured at 28. The guard sheds the reel first and
+  automatically, so the downside is "the reel disappears", not "the stall
+  stutters" — but check the `reel` row on `d` after an hour at the rehearsal.
+  If it says OFF, this laptop is past the cliff and the reel is not for it.
 - **Perf numbers need re-taking on the real rig.** Every measurement in
   `README.md` was taken in this dev pane. The full-screen blit is fill-rate
   bound and scales with the panel, not with the pane. Re-measure at the

@@ -607,11 +607,18 @@ Found by review and left deliberately. Each needs a call, not a patch.
   attract headline. Started from the BRACKET tab rather than "opt in via the
   menu" — see the amendment in PLAN.md §4 for why. Kept in this list because
   the call it needed has now been made, and that is worth being able to see.
-- **Highlight clips never reach a passer-by.** `attract.ts` imports nothing from
-  `meta/highlights.ts`, so a clip only ever replays on the same player's own
-  results screen, seconds after their own round. PLAN.md §6 wanted them looping
-  on attract to pull foot traffic. Only one clip buffer exists at a time, so
-  this needs a small backlog before it can be built.
+- ~~**Highlight clips never reach a passer-by.**~~ **Built 2026-09-20.** The
+  blocker was the one named here: only one clip buffer existed, because capture
+  SWAPS the rolling and saved atlases. There is now a four-slot reel in a
+  separate, separately-budgeted atlas — half-size cells, two seconds each, all
+  four slots in one 8×8 grid at 2.36 MB, for 21.2 MB total against a measured
+  cliff at ~20 MB and a measured failure at 28 MB. It is the FIRST thing the
+  cost guard sheds, ahead of halving the main cell.
+
+  It draws on attract **only when nobody is in frame**: with a body present the
+  live silhouette is the stronger hook and a second moving rectangle weakens
+  both. Controls are in the operator console under **DATA → REPLAYS & ATTRACT
+  REEL**, and the `d` overlay has `replay` and `reel` rows.
 - **Roster redundancy.** Fruit Ninja, Balloon Pop and Rhythm Punch all run on
   the same blade primitive — three of seven games share one input. The game-feel
   review's call, if a cut is forced: trim the **Runner** first (already

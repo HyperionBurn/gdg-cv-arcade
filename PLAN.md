@@ -222,6 +222,23 @@ Deterministic replay of the top run per game, played back translucent alongside 
 
 Rolling ~8s frame buffer. On a top-5 score or a big combo, export a clip. No email, no QR — it just **plays back instantly on screen** with the score stamped on it while the next player steps up. Feeds the photobooth work later, and the marketing person can film the TV.
 
+> **Extended 2026-09-20 — the attract reel.**
+> As written this reaches exactly one person: the player who just set the
+> score, who watched it happen in the room a moment earlier. §6 also asked for
+> "looping highlight clips" on attract and that half was never built, because
+> capture SWAPS the two atlases and only one clip can exist at a time.
+>
+> There is now a four-slot reel in its own atlas — the last two seconds of each
+> captured highlight, half-size cells, all four slots in one 8×8 grid. 2.36 MB
+> on top of the 18.87 MB the main buffer already holds, which is a deliberate
+> number: the measured GPU cliff is at roughly 20 MB and the configuration that
+> actually fell off it was 28 MB, so the reel is the first thing the cost guard
+> gives back, ahead of halving the main cell.
+>
+> It shows **only while nobody is in frame.** With a body present the live
+> silhouette is the stronger hook — "that is me on the TV" — and two moving
+> rectangles competing makes both weaker.
+
 ### Leaderboard
 
 - Per-game top 10, always visible on attract.
