@@ -20,13 +20,13 @@ The authority for everything else is:
 
 ## State
 
-Green as of the last commit: **555 tests, 120 suites, 0 failures**, typecheck
+Green as of the last commit: **562 tests, 122 suites, 0 failures**, typecheck
 clean, production build verified to make **zero external requests**.
 
 ```bash
 npm run setup      # fetch models + fonts — REQUIRED before first run
 npm run dev        # http://localhost:5173
-npm test           # 555 tests, ~10s
+npm test           # 562 tests, ~10s
 npm run typecheck
 npm run kiosk      # production build, served on :4173 — use this on the day
 ```
@@ -185,6 +185,34 @@ has run once, and the loop is throttled while the pane is hidden — so drive
 or every derived figure is out by the ratio. And `tr.a` includes the device
 pixel ratio, so work in stage pixels throughout rather than mixing them with
 viewport units.
+
+---
+
+## Write the guard, then make it fail
+
+Five source-reading guards went in today and **four of them first passed or
+failed for a reason other than the one they claimed.** Every single case was a
+search that matched somewhere I had not looked:
+
+| The guard | What it actually read |
+|---|---|
+| "runner.ts asks base.ts" | Its own COMMENT mentioning the function, so the call could be deleted and it stayed green |
+| "the capture is not gated on party mode" | Only the text AFTER `captureIfWorthy(`, missing a mutation placed in front of it — then, rewritten, the round-RESET assignment instead, so it failed on correct code |
+| "the HUD is inset by SAFE" | `indexOf('progressBar(')` found the OTHER call, 1080 lines earlier |
+| "the threshold table is recomputed" | `(clean\|realistic)` matched the PERCENTILE table thirty lines above. redlight.ts has several tables and they all start with the same two words |
+
+Three rules came out of it, and they are cheap:
+
+1. **Strip comments before matching source.** A guard satisfied by the prose
+   explaining it is worse than no guard.
+2. **Anchor on something unique to the site** — a header line, a distinctive
+   string — rather than on a function name that appears more than once. Then
+   slice a window from there.
+3. **Mutate the fix away and watch it go red, every time.** A green test proves
+   nothing about itself. Four of these five were only caught that way, and two
+   of them had *already been committed* when the mutation found them.
+
+`scripts/verify-guards.py` exists for step 3. Use it.
 
 ---
 
