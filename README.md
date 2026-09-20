@@ -451,6 +451,19 @@ All driven deterministically via `window.__arcade.tick()`:
   a booth laptop will not notice. Re-take this if anything starts allocating
   per frame.
 
+- **A whole bracket, end to end, 2026-09-20** — the feature whose own source
+  comment said it could not be reached. Operator console -> BRACKET -> two
+  names -> **START 2-PLAYER BRACKET**; the START control is replaced by RESET,
+  and the app's own store (not a test double) persists `state: running`. Then a
+  two-up round of that game: scores **170 v 163**, `reportCurrent` fires, the
+  match takes a winner, the bracket goes `complete`, and attract draws
+  **CHAMPION WAS** with the match card under it — PLAN.md §4's "winner's
+  initials go up in lights", reached from a cold start in about a minute.
+
+  Worth doing because nothing had ever run it. The note in `games/base.ts` said
+  `tournament.active` is false for every round the stall will ever play, which
+  was true when written and stopped being true when the console grew the tab.
+
 - **Production build**, `npm run kiosk` on 4173: all four Archivo weights fetch
   and report `loaded`, canvas text measures as Archivo rather than the
   fallback, `?sim=1` and the `d` overlay both work, `window.__arcade` is
