@@ -20,13 +20,19 @@ The authority for everything else is:
 
 ## State
 
-Green as of the last commit: **590 tests, 129 suites, 0 failures**, typecheck
-clean, production build verified to make **zero external requests**.
+Green as of the last commit: **687 tests, 157 suites, 0 failures**, typecheck
+clean, production build verified to make **zero external requests** — re-checked
+on the built bundle, not the dev server, along with all four Archivo weights
+reporting `loaded` and `window.__arcade` correctly absent.
+
+Every row of `FEEDBACK.md` now fails a test when its fix is undone, which is a
+stronger claim than the anchor check makes and is re-runnable:
+`python scripts/verify-guards.py --ledger`.
 
 ```bash
 npm run setup      # fetch models + fonts — REQUIRED before first run
 npm run dev        # http://localhost:5173
-npm test           # 590 tests, ~10s
+npm test           # 687 tests, ~12s
 npm run typecheck
 npm run kiosk      # production build, served on :4173 — use this on the day
 ```
@@ -123,6 +129,48 @@ once boards fill, so a reel fed by scores alone goes stale as the hall gets
 busy. Fruit Ninja asks for a clip on a triple chain or better. Mid-round
 captures are SPACED and refused near the end of a round, because `capture()`
 swaps atlases and would otherwise leave the end-of-round replay with no footage.
+
+**Then the ledger was mutation-swept, and ten of its rows were held up by
+nothing but the ledger text.** `tests/feedback.test.ts` proves each anchor still
+EXISTS, which is a much weaker claim than the fix working — a constant can sit
+in a file nothing reads and the check stays green. Breaking each fix in turn and
+requiring something OTHER than the anchor check to notice found ten rows in that
+state, and two live bugs:
+
+- **Row 20 had come back.** The reach band SHIFTED rather than shrank at a slot
+  edge, which preserves its width — twice the reach — so a body near the edge
+  got the whole spread on one side of itself. Measured at 2.51 torso against a
+  full stretch of 1.57. The distribution table in the source is not wrong; it
+  was measured on a CENTRED body, which is the one case that was always fine.
+- **The same bug in Balloon Pop**, which had its own copy and is the game
+  somebody plays *because* stretching is what they cannot do. Both now share
+  `games/reach.ts`.
+
+Two more things that sweep taught, both of which will outlive it:
+
+- **`REACH_UP` in `hover.ts` decides nothing.** `tunables.get(key, fallback)`
+  returns the REGISTRY default whenever the key is registered, so a constant
+  edited in a game file can silently do nothing. `tunables.ts` records this
+  biting `redlight.graceSec` once already. The guard for it was a `console.warn`
+  behind `import.meta.env?.DEV` — invisible in production and under
+  `node --test`. There is now a test across all 37 call sites.
+- **Two test files drove hand-written COPIES of the constants they claimed to
+  test** — the lane gate in `runner-lane.test.ts` and the rep gate in
+  `sixtyseven.test.ts`, each labelled as what the game installs. Excellent
+  behavioural tests, about numbers the game need not have been shipping. If you
+  write `const GATE = { ... }` at the top of a test file, read it out of the
+  source instead.
+
+**And the playtest can now produce numbers rather than impressions.**
+`meta/roundlog.ts` writes one line per finished round, exported from the DATA
+tab, and answers two of the four open questions in FEEDBACK.md — Runner hit rate
+by obstacle KIND and Pose Match first-wall pass rate with the gate it was
+measured against. It is deliberately write-only to the app: nothing reads it
+back, which is what made it safe to add four days out. Wiring it immediately
+paid for itself — the first numbers out of it were a 100% hit rate on every
+obstacle kind, which turned out to be both harnesses never jumping. The Runner
+had no closed-loop driver at all and still scored ~600, because distance accrues
+from the world scrolling.
 
 **And the highlight buffer finally reports itself.** It is the largest
 allocation in the app and it could shed — or switch off entirely — without a
@@ -347,9 +395,20 @@ here so you can overrule it properly.
 
   **Do not read a shed from a `turn()` sweep as a fault.** The harness
   fast-forwards a synthetic clock, which used to drive the guard to shed three
-  times in fourteen seconds. `setSynthetic` now suspends cost SAMPLING during a
-  fast-forward (capture keeps running). If you see a shed after a sweep now, it
-  is real.
+  times in fourteen seconds. `setSynthetic` now suspends the guard's DECISION
+  during a fast-forward — capture keeps running. If you see a shed after a
+  sweep now, it is real.
+
+  **But `avgGrabMs` on the `d` overlay is NOT clean after a sweep**, and this
+  paragraph used to say sampling was suspended, which is narrower than what
+  happens. `guard()` returns early, so `window`, `strikes` and `shedLevel` are
+  untouched — but `grabs`, `grabTotal` and `grabMax` keep counting, because
+  they are the evidence that capture ran at all, which is the other half of
+  what the sweep is for. Measured after an eleven-round `turn()`: **7.99 ms
+  mean against a 4 ms budget, 402 ms max**, sitting next to `shedLevel 0`. That
+  reads exactly like the GPU cliff and is nothing of the kind. Dev-only —
+  `synthetic` is never true in the production build, because `__arcade` does
+  not exist there.
 - **Perf numbers need re-taking on the real rig.** Every measurement in
   `README.md` was taken in this dev pane. The full-screen blit is fill-rate
   bound and scales with the panel, not with the pane. Re-measure at the
