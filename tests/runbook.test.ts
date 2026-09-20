@@ -256,3 +256,81 @@ describe('clearing a board clears the runs recorded against it', () => {
     );
   });
 });
+
+
+/**
+ * THE REST OF THE RISK TABLE.
+ *
+ * "The numbers that have never seen a real body" lists five constants a
+ * marshal is expected to tune on a playtest day. Two of them were already
+ * checked here — `moveEnter` because it had ALREADY drifted, documented at
+ * 0.85 against a real 1.1, on the one row whose risk column reads
+ * "unrecoverable at a stall"; and the punch latency because it is 61% of the
+ * perfect window.
+ *
+ * The other three were not, and a wrong number on this table is worse than a
+ * wrong number in a comment: it is read by somebody standing in a loud room
+ * deciding which way to drag a slider, and every row of it is a number they
+ * cannot check.
+ */
+describe('the rest of the risk table is the code', () => {
+  test('the reach box is the figure the README sends a marshal to tune', async () => {
+    const md = await readme();
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/shell/hover.ts', 'utf8');
+
+    const stated = /`REACH_X = ([\d.]+)`/.exec(md);
+    assert.ok(stated, 'the README stopped quoting REACH_X, the tune it calls highest-value');
+
+    // Source-parsed rather than imported: REACH_X is not exported, and the
+    // point is what the file says, not what a re-export says.
+    const real = /^const REACH_X = ([\d.]+);/m.exec(src);
+    assert.ok(real, 'REACH_X is gone from hover.ts');
+    assert.equal(
+      Number(stated[1]),
+      Number(real[1]),
+      `the README calls this the highest-value tune of the playtest and quotes ` +
+        `${stated[1]}; hover.ts uses ${real[1]}`
+    );
+  });
+
+  test('and so is the pose match threshold', async () => {
+    const md = await readme();
+    const { PASS_THRESHOLD } = await import('../src/games/poses.ts');
+
+    const stated = /\| `([\d.]+)` match threshold \|/.exec(md);
+    assert.ok(stated, 'the README stopped quoting the match threshold');
+    assert.equal(
+      Number(stated[1]),
+      PASS_THRESHOLD,
+      `the README quotes ${stated[1]} and says it has "only 0.07 headroom over ` +
+        `the worst confusable pair"; poses.ts uses ${PASS_THRESHOLD}. The headroom ` +
+        `claim is only true of one of them.`
+    );
+  });
+
+  /**
+   * That headroom figure is itself a claim: the README says 0.07 over the
+   * worst confusable pair, and poses.ts names that pair at 0.651. If either
+   * moves, the sentence a marshal reads before lowering the gate is wrong.
+   */
+  test('and the headroom it claims over the worst pair is real', async () => {
+    const md = await readme();
+    const { PASS_THRESHOLD } = await import('../src/games/poses.ts');
+    const { readFile } = await import('node:fs/promises');
+    const poses = await readFile('src/games/poses.ts', 'utf8');
+
+    const worst = /GOALPOST\/FLEX at ([\d.]+)/.exec(poses);
+    assert.ok(worst, 'poses.ts no longer names its worst confusable pair');
+
+    const claimed = /only \*?\*?([\d.]+)\*?\*? headroom over the worst confusable pair/i.exec(md);
+    assert.ok(claimed, 'the README stopped stating the headroom');
+
+    const actual = PASS_THRESHOLD - Number(worst[1]);
+    assert.ok(
+      Math.abs(actual - Number(claimed[1])) < 0.005,
+      `the README claims ${claimed[1]} of headroom; the gate is ${PASS_THRESHOLD} ` +
+        `and the worst pair is ${worst[1]}, so the real headroom is ${actual.toFixed(3)}`
+    );
+  });
+});
