@@ -297,14 +297,22 @@ describe('every banner the source can draw is accounted for', () => {
     // an eighth game lands.
     assert.equal(census.swept.length, 7, 'the sweep must cover every game');
 
-    const boards = census.runs.map((r) => r.board).sort();
-    assert.deepEqual(
-      boards,
-      ['cleared', 'populated'],
-      'The census needs BOTH a populated-board run and a cleared-board run. ' +
-        'With only one, persisted scores hide whole branches: the first ' +
-        'single-board sweep left five reachable banners looking dead.',
-    );
+    const boards = new Set(census.runs.map((r) => r.board));
+    for (const needed of ['cleared', 'populated']) {
+      assert.ok(
+        boards.has(needed),
+        `The census needs BOTH a populated-board run and a cleared-board run; ` +
+          `'${needed}' is missing. With only one, persisted scores hide whole ` +
+          `branches: the first single-board sweep left five reachable banners ` +
+          `looking dead.`,
+      );
+    }
+
+    // A 'production' run is the probe build (see runbook.test.ts). It is not
+    // required — it needs a built bundle rather than a source tree — but when
+    // it is present it is the only evidence that what ships behaves like what
+    // is developed. On the 20th it drew NOTHING the dev baseline did not, and
+    // played the identical 18 cues.
 
     // The union is what the first test checks, so it must actually be a union.
     const union = new Set(census.runs.flatMap((r) => r.bracketed));

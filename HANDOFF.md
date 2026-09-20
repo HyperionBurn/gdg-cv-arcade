@@ -315,6 +315,24 @@ never selects probe mode.
 zero console errors.** The canvas preflight fired there too, which is how I
 know it reads the same in both.
 
+**And then the census, which is the comparison the fixture was built for.**
+Full roster on the production bundle: 43 bracketed strings, 18 cues, 4581
+distinct strings, nothing truncated.
+
+Against the dev baseline: **nothing drew in production that the dev build did
+not, and the cue sets are identical, 18 for 18.** Two strings drew in the
+dev cleared-board run and not in production — `<PICK A SIDE>` and
+`<SET THE FIRST SCORE>` — and both are explained without involving the build:
+4174 is a separate origin with its own storage, and the 13 verification turns
+I had just run populated it with 2-4 rows per game. Both are among the five
+banners already known to be masked by a populated leaderboard, so this is the
+same effect reproducing rather than a new one.
+
+That is the useful negative result: minification and tree-shaking do not
+reach a single player-visible string or cue. The production run is now the
+third entry in `tests/fixtures/census.json`, and the guard asks for the two
+board states to be PRESENT rather than to be the only ones, so it can stay.
+
 ---
 
 ## The same trick, pointed at the test suite
