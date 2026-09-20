@@ -984,6 +984,28 @@ export abstract class GameBase implements Screen {
   private logRound(score: number): void {
     try {
       const detail = this.roundDetail();
+
+      // IDENTITY, ON EVERY ROUND, WITHOUT A SUBCLASS HAVING TO REMEMBER.
+      //
+      // This is the measurement for the one item on HANDOFF's eight-item list
+      // that no work here can close: the game has never met a real camera and
+      // two real bodies, and the fragile part is whether a player who is
+      // briefly lost gets their own id, lane and score back.
+      //
+      // Only written when something actually went missing. A row with no
+      // `idReserved` means nobody was lost for even a frame, which is the
+      // common case and the least interesting one — leaving the keys off
+      // keeps the log small and makes the rounds worth reading stand out.
+      //
+      // `idLost` is the number that matters. Anything above zero is a player
+      // who became a new person mid-round, which on screen looks like the
+      // game crashing rather than like tracking.
+      const id = this.tracker.identityStats();
+      const idDetail =
+        id.reserved > 0
+          ? { idReserved: id.reserved, idReclaimed: id.reclaimed, idLost: id.expired }
+          : undefined;
+
       roundLog.add({
         at: Date.now(),
         game: this.config.gameId,
@@ -992,7 +1014,7 @@ export abstract class GameBase implements Screen {
         // Played, not nominal: a round cut short by somebody walking off is
         // one of the things worth being able to see in the log.
         seconds: Number(Math.max(0, this.roundTotal - this.timeLeft).toFixed(1)),
-        ...(detail ? { detail } : {}),
+        ...(detail || idDetail ? { detail: { ...(detail ?? {}), ...(idDetail ?? {}) } } : {}),
       });
     } catch {
       /* never let the log cost somebody their turn */

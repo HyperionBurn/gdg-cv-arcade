@@ -165,14 +165,14 @@ Rows above are closed. These are open, and each names the number to watch:
 | Pose Match | Pass rate on the first wall. The gate is expected to want LOWER on real bodies than on the simulator. | **MATCH THRESHOLD** | **Recorded.** `firstWallCleared`, `firstWallGate`, `wallsFaced`, `wallsCleared` |
 | Runner | First-timer hit rate on `low` (jump) obstacles specifically. Under ~60%, weight them to near zero and ship lanes + slides. | `TrackGenerator.pickKind` | **Recorded.** `lowFaced` / `lowHit`, and the same by `high` and `block` |
 | Initials | Real entry times. The 16 s backstop can shrink if nobody needs it. **Read p90, not the median.** | `HARD_DEADLINE_SEC` | **Recorded.** `initialsSeconds` in the same export; median/p90/slowest on the console's DATA tab |
-| Red Light | Whether five racers in one frame hold their lanes for a full round. | **MOVE THRESHOLD** | Not recorded — it is an identity question, and lane holding has no counter yet |
+| Red Light | Whether five racers in one frame hold their lanes for a full round. **Read `idLost`.** | **MOVE THRESHOLD** | **Recorded.** `idReserved` / `idReclaimed` / `idLost` on every round row |
 
 **Take the export before you pack up.** Operator console → **DATA** →
 **EXPORT ROUNDS JSON**. One line per finished round, with the per-round detail
 above; `meta/roundlog.ts` says what is in it and why. The other three exports
 carry what a round ENDED on and cannot answer any of these.
 
-Three of the four are instrumented. Initials was the third, and it was
+All four are instrumented now. Initials was the third, and it was
 listed here as unrecordable because entry is a SCREEN and never passes
 through the round hook — true about the hook, and not a reason to ask
 somebody who is also running a queue to hold a stopwatch. The screen already
@@ -192,10 +192,29 @@ Read **p90**, not the median. The backstop exists for the slowest players and
 nobody else, so the only question it answers is how long the slowest tenth
 take. A median of 6s beside a p90 of 15s means 16 is doing its job.
 
-The one still open is Red Light, and it is genuinely not a tally: "did five
-people keep their own lanes" is a question about tracker identity. That one
-needs somebody watching, which is fine — it is a thing a person standing at
-the stall can actually see.
+Red Light was the fourth, and this row said it was "an identity question,
+and lane holding has no counter yet". The first half is right and the second
+half stopped being true once the tracker started counting. A lane IS an
+identity — `track.slot` — so a racer who stops holding their lane is a
+reservation that expired. `idLost` is that count.
+
+Every round row now carries three numbers when anything went missing, and no
+keys at all when nothing did:
+
+- `idReserved` — a confirmed body vanished for longer than half a second, so
+  the tracker held their id, lane and half of the screen open for them.
+- `idReclaimed` — they came back inside 1.5s and got all of it back. This is
+  the mechanism working, and it should be most of them.
+- `idLost` — the reservation timed out. Somebody became a new person
+  mid-round: score reset, lane colour changed. **This is the number to read.**
+
+READ IT WITH THE ROUND, NOT ALONE. A player who walks off deliberately also
+produces an `idLost`, and so does the last racer eliminated in Red Light
+wandering out of frame. It is "how many people stopped being themselves",
+which is the honest question; deciding whether that was the tracker's fault
+or the player's needs the round beside it. A round with `idLost` of 0 and
+`idReclaimed` of 6 is the tracker doing exactly its job through six
+occlusions, and that is the result to hope for.
 
 Instrumenting the Runner row paid for itself before the playtest: the first
 numbers it produced were a 100% hit rate on every obstacle kind, which turned

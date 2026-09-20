@@ -396,7 +396,7 @@ checkable only by whoever happened to be in the room.
 | 3 | Neon Runner is 1P only | **Done.** `maxPlayers: 2`, `supportsVersus: true`; two seeded tracks through a scissor rect. Scored 821 in the 2P sweep on the 20th. |
 | 4 | Nothing tells a pair which games they can play together | **Done.** `seatBadge()` in `meta/games.ts` draws `1-2P` / `1-5P`, and `null` for a solo game rather than a pointless "1P". |
 | 5 | Zero 2P regression coverage | **Done.** 75 tests across `versus.test.ts` and `runner-versus.test.ts`. |
-| 6 | It has never met a real camera and two real bodies | **OPEN, and only the rehearsal can close it.** Everything else here is simulator-verified. The fragile one is the solo identity lock across a track loss, which cannot be proven in sim. |
+| 6 | It has never met a real camera and two real bodies | **OPEN — only the rehearsal closes it, but it will now produce a NUMBER.** The fragile part named here was the identity lock across a track loss, and the tracker counts it: `idReserved` / `idReclaimed` / `idLost` on every round row. `idLost` above zero is somebody who became a new person mid-round. This also closed FEEDBACK's fourth owed row, which said lane holding was "an identity question" with no counter — a lane IS an identity. |
 | 7 | Faction remembered per kiosk vs asked every turn | **Done, as neither.** Remembered per PLAYER and confirmed (`<STILL PLAYING FOR X?>`), explicitly not one kiosk-wide value — see the note at initials.ts:271. |
 | 8 | Rhythm's HUD is the least legible thing at 3m | **Done.** The combo readout was `TYPE.micro`, 1.5vh, about 16px on a 1080p panel. It is `TYPE.label` now; the only `TYPE.micro` left in rhythm.ts is the comment explaining why. |
 

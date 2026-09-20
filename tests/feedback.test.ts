@@ -352,3 +352,84 @@ describe('a rejected instruction does not survive somewhere else', () => {
     );
   });
 });
+
+/**
+ * THE FOUR OWED ROWS NAME NUMBERS. THE NUMBERS HAVE TO EXIST.
+ *
+ * "Still owed to the next playtest" is a table of four questions, each with a
+ * knob and a place the number comes from. Three of the four were instrumented
+ * because they are countable inside a round; the fourth said lane holding was
+ * "an identity question" with no counter, which was true until the tracker
+ * grew one — a lane IS an identity, so a racer who stops holding theirs is a
+ * reservation that expired.
+ *
+ * All four now claim to be recorded, and that claim is only worth the code
+ * behind it. A rehearsal happens once. If the export is missing a field
+ * nobody finds out until the numbers are being read on the train home, and
+ * the answer is then "run the club fair again", which is not available.
+ */
+describe('the numbers the playtest table promises are actually written', () => {
+  const owed = async (): Promise<string> => {
+    const doc = await readDoc();
+    const start = doc.indexOf('## Still owed to the next playtest');
+    assert.ok(start > 0, 'the owed table is gone from FEEDBACK.md');
+    const end = doc.indexOf('\n## ', start + 1);
+    return doc.slice(start, end === -1 ? undefined : end);
+  };
+
+  /**
+   * Derived from the table rather than listed here: a fifth row added later
+   * gets checked without anybody remembering to update this test, which is
+   * the failure mode every enumerated guard in this repo has already had.
+   */
+  test('every field the table names is written by the app', async () => {
+    const section = await owed();
+    const claimed = [...section.matchAll(/`([a-zA-Z][a-zA-Z0-9]*)`/g)]
+      .map((m) => m[1] ?? '')
+      // Knob names and file references are not fields. A field is something
+      // the round log or an export actually carries, and those are the ones
+      // written in the source as object keys.
+      .filter((n) => !['TrackGenerator', 'pickKind', 'HARD_DEADLINE_SEC', 'idLost'].includes(n));
+    assert.ok(claimed.length >= 6, 'the table stopped naming any fields');
+
+    const { readdir, readFile } = await import('node:fs/promises');
+    const walk = async (dir: string): Promise<string[]> => {
+      const out: string[] = [];
+      for (const e of await readdir(dir, { withFileTypes: true })) {
+        const full = `${dir}/${e.name}`;
+        if (e.isDirectory()) out.push(...(await walk(full)));
+        else if (e.name.endsWith('.ts')) out.push(full);
+      }
+      return out;
+    };
+    let src = '';
+    for (const f of await walk('src')) src += await readFile(f, 'utf8');
+
+    const missing = claimed.filter((name) => !src.includes(name));
+    assert.deepEqual(
+      missing,
+      [],
+      'FEEDBACK.md promises these fields in the playtest export and nothing in ' +
+        'src/ writes them. A rehearsal happens once.',
+    );
+  });
+
+  /**
+   * The identity numbers are added centrally in `logRound`, not by each game's
+   * `roundDetail`, precisely so no game can forget them. If that call goes,
+   * every row silently loses the Red Light answer while the table still
+   * claims it.
+   */
+  test('identity counts are folded in for every game, not per game', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const base = await readFile('src/games/base.ts', 'utf8');
+    assert.match(
+      base,
+      /identityStats\(\)/,
+      'base.ts no longer asks the tracker for identity counts, so no round row has them',
+    );
+    for (const key of ['idReserved', 'idReclaimed', 'idLost']) {
+      assert.ok(base.includes(key), `${key} is promised by FEEDBACK.md and no longer written`);
+    }
+  });
+});

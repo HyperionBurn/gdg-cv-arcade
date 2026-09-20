@@ -493,6 +493,34 @@ function median(xs: readonly number[]): number {
 export class PoseTracker {
   private tracks: InternalTrack[] = [];
   private reservations: Reservation[] = [];
+
+  /**
+   * DID THE IDENTITY LOCK HOLD? The one question a simulator cannot answer.
+   *
+   * HANDOFF's eight-item list has exactly one row that no amount of work here
+   * can close: "it has never met a real camera and two real bodies", and the
+   * fragile part named in it is this — whether a player who is briefly lost
+   * gets their own id, lane and score back, or becomes a new person.
+   *
+   * A failure is loud and ambiguous. The player's score resets and their half
+   * of the screen changes colour, which at a stall reads as "the game
+   * crashed" or "it swapped us", and by the time anybody asks, the round is
+   * over. Nobody is going to count occlusions by eye while running a queue.
+   *
+   * So count them. Every miss leaves a reservation; it either comes back
+   * (`reclaimed`) or times out (`expired`), and `expired` is the one that
+   * costs somebody their run. `games/base.ts` folds these into the round log,
+   * so the rehearsal export answers this with a ratio instead of an
+   * impression. Counters only — nothing here changes a decision.
+   */
+  private reserved = 0;
+  private reclaimed = 0;
+  private expired = 0;
+
+  /** Reservations made, honoured, and lost. See the note on `reserved`. */
+  identityStats(): { reserved: number; reclaimed: number; expired: number } {
+    return { reserved: this.reserved, reclaimed: this.reclaimed, expired: this.expired };
+  }
   private nextId = 1;
   private opts: TrackerOptions;
   private lastT = -1;
@@ -528,6 +556,9 @@ export class PoseTracker {
   reset(): void {
     this.tracks = [];
     this.reservations = [];
+    this.reserved = 0;
+    this.reclaimed = 0;
+    this.expired = 0;
     this.primaryId = null;
     this.lastT = -1;
   }
@@ -562,7 +593,10 @@ export class PoseTracker {
       }
     }
     for (const r of this.reservations) r.ttl -= dt;
-    this.reservations = this.reservations.filter((r) => r.ttl > 0);
+    const alive = this.reservations.filter((r) => r.ttl > 0);
+    // An expiry is an identity nobody came back for. See `identityStats`.
+    this.expired += this.reservations.length - alive.length;
+    this.reservations = alive;
 
     // 2. Ask selection for the bodies in frame, telling it which of them we
     //    already know. Without `keep`, a stranger with a bigger bounding box
@@ -812,6 +846,7 @@ export class PoseTracker {
       unit: tr.heldUnit,
       ttl: this.opts.reclaimSec,
     });
+    this.reserved++;
   }
 
   /** The reservation, if any, this detection is entitled to inherit. */
@@ -841,7 +876,10 @@ export class PoseTracker {
 
     const scale = computeScale(landmarks, this.aspect);
     const claim = this.claimFor(c);
-    if (claim) this.reservations = this.reservations.filter((r) => r !== claim);
+    if (claim) {
+      this.reservations = this.reservations.filter((r) => r !== claim);
+      this.reclaimed++;
+    }
 
     const track: InternalTrack = {
       id: claim ? claim.id : this.nextId++,

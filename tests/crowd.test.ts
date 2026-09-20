@@ -841,3 +841,97 @@ describe('slots are frozen while a round is running', () => {
     assert.equal(byX[byX.length - 1]!.slot, 0, 'ordering did not resume');
   });
 });
+
+/**
+ * COUNTING WHETHER THE IDENTITY LOCK HELD, because a simulator cannot answer it.
+ *
+ * HANDOFF's eight-item list has exactly one row no work in this repo can
+ * close: the game has never met a real camera and two real bodies. The
+ * fragile part named in it is this — whether a player who is briefly lost
+ * gets their own id, lane and score back, or becomes a new person.
+ *
+ * A failure is loud and ambiguous. The score resets and half the screen
+ * changes colour, which at a stall reads as "it crashed" or "it swapped us",
+ * and by the time anybody asks, the round is over. Nobody counts occlusions
+ * by eye while running a queue.
+ *
+ * So `identityStats` counts them and `games/base.ts` folds them into the
+ * round log. These guards are what make the rehearsal export trustworthy: if
+ * the counters are wrong, the number the export reports is worse than none.
+ */
+describe('the identity lock, counted', () => {
+  const still = (x: number) => (): RawPose[] => [personAt(x, 3)];
+
+  /**
+   * TWO STAGES, AND THE TEST HAS TO CLEAR BOTH TO MEAN ANYTHING.
+   *
+   * A track survives `maxMissingFrames` (15, half a second at 30fps) on its
+   * own, with no reservation involved. Only a CONFIRMED track that dies past
+   * that leaves one, and the reservation then lives `reclaimSec` (1.5s, 45
+   * frames). A first draft of these tests used a five-frame gap, counted
+   * nothing, and would have passed just as happily against a tracker that had
+   * no reservations at all.
+   */
+  const LEAD_IN = 90; // long enough to be admitted and confirmed
+  const SURVIVES = 15; // maxMissingFrames
+  const RECLAIM = 45; // reclaimSec at 30fps
+
+  test('a clean round reserves nothing', () => {
+    const tracker = new PoseTracker({ maxPlayers: 2, aspect: A });
+    run(tracker, still(0.5), 90);
+    assert.deepEqual(tracker.identityStats(), { reserved: 0, reclaimed: 0, expired: 0 });
+  });
+
+  /**
+   * The case the mechanism exists for: gone long enough that the track dies,
+   * back before the reservation does. They must keep their id, and `expired`
+   * must stay zero.
+   */
+  test('a gap past the track, but inside the reservation, is reclaimed', () => {
+    const tracker = new PoseTracker({ maxPlayers: 2, aspect: A });
+    const gapEnd = LEAD_IN + SURVIVES + 10; // dies, then returns 10 frames later
+    const log = run(
+      tracker,
+      (f) => (f >= LEAD_IN && f < gapEnd ? [] : [personAt(0.45, 3)]),
+      gapEnd + 90,
+    );
+
+    const id = tracker.identityStats();
+    assert.ok(id.reserved > 0, 'a confirmed track that died should have left a reservation');
+    assert.ok(id.reclaimed > 0, 'and should have been reclaimed when the body returned');
+    assert.equal(id.expired, 0, 'it came back well inside reclaimSec');
+
+    const before = log[LEAD_IN - 1]?.players[0]?.id;
+    const after = log[log.length - 1]?.players[0]?.id;
+    assert.equal(after, before, 'the player came back as somebody else');
+  });
+
+  /**
+   * And the other side. This is the count that costs somebody their run, so
+   * it has to be distinguishable from a reclaim rather than lumped in with it.
+   */
+  test('a gap past the reservation expires it', () => {
+    const tracker = new PoseTracker({ maxPlayers: 2, aspect: A });
+    const gapEnd = LEAD_IN + SURVIVES + RECLAIM + 30; // comfortably past both
+    run(tracker, (f) => (f >= LEAD_IN && f < gapEnd ? [] : [personAt(0.45, 3)]), gapEnd + 60);
+
+    const id = tracker.identityStats();
+    assert.ok(id.reserved > 0, 'the body that left should have left a reservation');
+    assert.ok(id.expired > 0, 'past reclaimSec the identity must actually be released');
+  });
+
+  /**
+   * The counters have to clear on the turn boundary or every row in the round
+   * log is a running total pretending to be a per-round figure.
+   * `games/base.ts` calls `reset()` on entering `waiting`, once per turn.
+   */
+  test('a reset starts the next turn at zero', () => {
+    const tracker = new PoseTracker({ maxPlayers: 2, aspect: A });
+    const gapEnd = LEAD_IN + SURVIVES + 10;
+    run(tracker, (f) => (f >= LEAD_IN && f < gapEnd ? [] : [personAt(0.45, 3)]), gapEnd + 60);
+    assert.ok(tracker.identityStats().reserved > 0, 'setup should have counted something');
+
+    tracker.reset();
+    assert.deepEqual(tracker.identityStats(), { reserved: 0, reclaimed: 0, expired: 0 });
+  });
+});
