@@ -835,27 +835,46 @@ describe('nothing a player reads is drawn at diagnostic size', () => {
    * already had this argument once, on the seat badge, where 2.0vh was
    * rejected at 22px on a 1080p TV. These were 1.5vh, which is 16px.
    */
-  const SURFACES = [
-    'src/games',
-    'src/shell/attract.ts',
-    'src/shell/menu.ts',
-    'src/shell/initials.ts',
-    'src/shell/mode.ts',
+  /**
+   * EVERYTHING, MINUS THE MARSHAL SURFACES — not a list of screens I happened
+   * to think of.
+   *
+   * The first version of this named four shell files. It missed `hover.ts`
+   * outright, and a NEW player-facing screen would have been exempt by
+   * default, which is the wrong way for a guard to fail. Inverting it costs
+   * nothing: the files that draw no text contribute no calls, and adding a
+   * screen now means being covered rather than being forgotten.
+   *
+   * Each exclusion needs a reason, and all three are the same one: read at
+   * arm's length by one marshal, which is precisely what micro is for.
+   */
+  const SURFACE_DIRS = ['src/games', 'src/shell'];
+  const MARSHAL_ONLY: ReadonlyArray<readonly [string, string]> = [
+    ['operator.ts', 'the operator console — one person, arm\'s length'],
+    ['rigcheck.ts', 'the camera test tool, same reader and same distance'],
+    ['debug.ts', 'the `d` overlay, a diagnostic by definition'],
   ];
 
   test('no player-facing screen draws text at or below TYPE.micro', async () => {
-    const { readdir, readFile, stat } = await import('node:fs/promises');
+    const { readdir, readFile } = await import('node:fs/promises');
     const { join } = await import('node:path');
 
+    const excluded = new Set(MARSHAL_ONLY.map(([f]) => f));
     const files: string[] = [];
-    for (const s of SURFACES) {
-      if ((await stat(s)).isDirectory()) {
-        for (const f of await readdir(s)) if (f.endsWith('.ts')) files.push(join(s, f));
-      } else {
-        files.push(s);
+    for (const dir of SURFACE_DIRS) {
+      for (const f of await readdir(dir)) {
+        if (!f.endsWith('.ts') || excluded.has(f)) continue;
+        files.push(join(dir, f));
       }
     }
-    assert.ok(files.length >= 11, `only found ${files.length} player-facing files`);
+    assert.ok(files.length >= 15, `only found ${files.length} player-facing files`);
+
+    // And the exclusions must still exist, or one is a typo that silently
+    // exempts nothing and hides a file that should have been checked.
+    const shell = await readdir('src/shell');
+    for (const [f, why] of MARSHAL_ONLY) {
+      assert.ok(shell.includes(f), `src/shell/${f} is gone but still excluded (${why})`);
+    }
 
     const bad: string[] = [];
     let checked = 0;
@@ -940,11 +959,37 @@ describe('nothing a player reads is drawn at diagnostic size', () => {
  * does nothing.
  */
 describe('the deprecated drawing shims stay uncalled', () => {
-  const DEPRECATED = ['vignette', 'scanlines', 'glowCircle', 'panel', 'pill'];
+  /**
+   * DERIVED FROM THE FILE, not listed here.
+   *
+   * A hand-written list goes stale in the direction that matters: a shim added
+   * tomorrow would be exempt from the very rule it needs. Each export is
+   * matched against the span since the previous one, so a note attached to a
+   * different function cannot claim it.
+   */
+  async function deprecatedExports(): Promise<string[]> {
+    const { readFile } = await import('node:fs/promises');
+    const draw = await readFile('src/engine/draw.ts', 'utf8');
+    const found: string[] = [];
+    const marks = [...draw.matchAll(/export function (\w+)\s*\(/g)];
+    for (let i = 0; i < marks.length; i++) {
+      const at = marks[i]!.index ?? 0;
+      const prev = i > 0 ? (marks[i - 1]!.index ?? 0) : 0;
+      if (/@deprecated/.test(draw.slice(prev, at))) found.push(marks[i]![1]!);
+    }
+    return found;
+  }
 
   test('every one of them is still marked deprecated and still unused', async () => {
     const { readdir, readFile } = await import('node:fs/promises');
     const { join } = await import('node:path');
+
+    const DEPRECATED = await deprecatedExports();
+    assert.ok(
+      DEPRECATED.length >= 5,
+      `only ${DEPRECATED.length} deprecated exports found in draw.ts (${DEPRECATED.join(', ')}); ` +
+        `this scan has stopped reading the file it claims to`
+    );
 
     const walk = async (dir: string): Promise<string[]> => {
       const out: string[] = [];
@@ -978,14 +1023,14 @@ describe('the deprecated drawing shims stay uncalled', () => {
         .map((l) => l.replace(/\/\/.*$/, ''))
         .join('\n');
 
-      // A static regex literal with the names alternated, rather than one
-      // built per name from a template — `new RegExp(`...\w...`)` needs the
-      // backslash doubled, and the survivor is a DIFFERENT valid pattern or an
-      // outright syntax error. This file has been bitten by that twice.
+      // Built from the derived names, with the pattern pieces written as
+      // ordinary string literals — `new RegExp(`...\w...`)` inside a template
+      // needs the backslash doubled, and the survivor is a DIFFERENT valid
+      // pattern or an outright syntax error. This file has been bitten twice.
       //
       // The leading class excludes `.` so `stickerPill(` and `labelPill(` are
       // not read as calls to `pill(`.
-      const CALL = /(^|[^\w.])(vignette|scanlines|glowCircle|panel|pill)\s*\(/g;
+      const CALL = new RegExp('(^|[^\\w.])(' + DEPRECATED.join('|') + ')\\s*\\(', 'g');
       for (const m of code.matchAll(CALL)) {
         const before = code.slice(Math.max(0, (m.index ?? 0) - 24), m.index ?? 0);
         if (/export function\s*$/.test(before)) continue;
