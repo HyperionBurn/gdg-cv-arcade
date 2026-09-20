@@ -120,6 +120,91 @@ describe('diagnostics know the simulator is not a fault', () => {
       );
     }
   });
+
+  /**
+   * A FOURTH SURFACE, AND THE SWEEP ABOVE PASSED IT VACUOUSLY.
+   *
+   * `operator.ts` contains `isSimEnabled` — down in the CAMERA tab — so the
+   * file-level check for "reports health without knowing about `?sim=1`" was
+   * satisfied by a different part of the same file. The header's INFER chip
+   * meanwhile covered BOTH reasons the worker might be missing with a single
+   * string and a question mark: `OFFLINE (SIM?)`, in the yellow that means
+   * probably fine.
+   *
+   * Only one of the two is fine. Under `?sim=1` there is no worker by design.
+   * Without it, a worker that never came up means no pose is ever detected,
+   * every game sits on its STEP IN screen, and the stall is dead for the whole
+   * queue — and the chip handed a marshal the reassuring reading at exactly
+   * that moment.
+   *
+   * Found by opening the console in the PRODUCTION build and reading it, which
+   * is what a marshal does when they suspect something is wrong.
+   */
+  test('the INFER chip does not hedge about why the worker is missing', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/shell/operator.ts', 'utf8');
+
+    const at = src.indexOf('if (vs.ready) {');
+    assert.ok(at >= 0, 'the live strip no longer branches on vision readiness');
+    // The next chip after the INFER chain. Anchored on the bare label because
+    // `this.chip(` and `'CAMERA',` sit on separate lines in this file, and an
+    // anchor that spans the break silently finds nothing.
+    const end = src.indexOf("'CAMERA',", at);
+    assert.ok(end > at, 'could not find the end of the INFER branch');
+
+    // Comments stripped: this branch is now explained by a long note that
+    // names `isSimEnabled` and quotes the string it replaced, and a guard must
+    // not be able to pass by reading the prose about itself.
+    const code = src
+      .slice(at, end)
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\/\/.*$/, ''))
+      .join('\n');
+
+    assert.match(
+      code,
+      /isSimEnabled\(\)/,
+      'the INFER chip is back to one string for both cases. It has the answer ' +
+        'available — the CAMERA tab in the same file has used isSimEnabled() ' +
+        'for this since it was written'
+    );
+    assert.match(
+      code,
+      /this\.chip\(\s*'INFER'[^;]*'bad'\s*\)/,
+      'a vision worker that is not running OUTSIDE sim mode means nothing will ' +
+        'ever be detected. That is not a warning, it is a dead stall, and the ' +
+        'chip has to be the colour that says so'
+    );
+  });
+
+  /**
+   * The general form of it. A diagnostic that guesses is worse than one that
+   * says nothing: it spends the marshal's trust on a coin flip.
+   */
+  test('no readout guesses at sim mode with a question mark', async () => {
+    const offenders: string[] = [];
+    for (const { file, src } of await read()) {
+      if (file.startsWith('src/dev/')) continue;
+      // Comments blanked rather than deleted, so the line numbers in a failure
+      // message still point at the offending line. Needed because the note
+      // explaining the fix QUOTES the string it removed, and the first run of
+      // this guard duly reported the comment describing it.
+      src
+        .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
+        .split(/\r?\n/)
+        .map((l) => l.replace(/\/\/.*$/, ''))
+        .forEach((line, i) => {
+          if (/['"`][^'"`]*SIM\?/.test(line)) offenders.push(`${file}:${i + 1}`);
+        });
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      'a user-facing string hedges about the simulator. The app knows which it ' +
+        'is: call isSimEnabled() and say so'
+    );
+  });
 });
 
 /**

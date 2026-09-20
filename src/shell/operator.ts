@@ -548,10 +548,25 @@ export class OperatorOverlay {
         this.chip('DELEGATE', vs.delegate ?? '—', vs.delegate === 'CPU' ? 'warn' : 'good')
       );
       strip.appendChild(this.chip('DROPPED', String(vs.dropped), vs.dropped > 60 ? 'warn' : ''));
-    } else {
+    } else if (isSimEnabled()) {
       // Sim mode never starts the worker. Say so rather than showing zeros,
       // which read as "the camera is broken".
-      strip.appendChild(this.chip('INFER', 'OFFLINE (SIM?)', 'warn'));
+      strip.appendChild(this.chip('INFER', 'OFFLINE (SIM)', 'warn'));
+    } else {
+      // ONE CHIP USED TO COVER BOTH CASES, AND HEDGED: `OFFLINE (SIM?)`.
+      //
+      // This branch is reached whenever the worker is not running, and only
+      // one of the two reasons for that is harmless. Under `?sim=1` there is
+      // no worker by design. WITHOUT it, a worker that never came up means no
+      // pose will ever be detected: every game sits on its STEP IN screen and
+      // the stall is dead for the whole queue.
+      //
+      // The question mark handed a marshal the reassuring reading of the two
+      // at exactly the moment the other one was true, and in the colour that
+      // says "probably fine". The console has never needed to guess — the
+      // CAMERA tab below has called `isSimEnabled()` for this since it was
+      // written, for the same reason spelled out in the same words.
+      strip.appendChild(this.chip('INFER', 'NOT RUNNING', 'bad'));
     }
 
     strip.appendChild(
