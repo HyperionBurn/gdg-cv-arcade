@@ -691,7 +691,16 @@ export class InitialsScreen implements Screen {
     //
     // Wrapped like `logRound` in games/base.ts: a diagnostic that can break
     // the one screen with no other exit is worse than no diagnostic at all.
-    if (reason === 'completed') {
+    //
+    // AND NOT WHEN THE SIMULATOR IS DRIVING. The `turn()` harness dwells at a
+    // fixed cadence, so a full sweep logged fifteen entries of EXACTLY 5.8s
+    // and the console then read its own p90 off them and said "the 16s
+    // backstop has room to come down" — confident, specific, and derived
+    // entirely from a robot. That is the same trap `avgGrabMs` has after a
+    // sweep, and this one ends in a knob being turned down on the strength of
+    // it. Real bodies at the rehearsal are not in sim mode, so they still
+    // count.
+    if (reason === 'completed' && !isSimEnabled()) {
       try {
         roundLog.logInitials(this.elapsed);
       } catch (err) {

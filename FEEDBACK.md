@@ -182,6 +182,12 @@ that entries take about sixteen seconds, which is the backstop's own
 duration measured by the players who never typed anything, arguing to keep
 the backstop that produced the number.
 
+A `turn()` sweep does NOT pollute this. The harness dwells at a fixed
+cadence, so a full roster logged fifteen entries of exactly 5.8s, and the
+console read its own p90 off them and advised shrinking the backstop —
+confident, specific, and measured entirely from a robot. Simulated runs are
+excluded now; the rehearsal is not in sim mode, so real bodies still count.
+
 Read **p90**, not the median. The backstop exists for the slowest players and
 nobody else, so the only question it answers is how long the slowest tenth
 take. A median of 6s beside a p90 of 15s means 16 is doing its job.

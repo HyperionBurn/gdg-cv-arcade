@@ -122,15 +122,33 @@ describe('only a real entry counts as an entry time', () => {
 
   test('the entry time is written only under the completed branch', async () => {
     const src = await source();
-    const guard = src.indexOf("if (reason === 'completed') {");
-    assert.ok(guard > 0, 'the completed branch must exist by that name');
+    const branch = /if \(reason === 'completed'(.*?)\) \{/.exec(src);
+    assert.ok(branch, 'the completed branch must exist by that name');
 
     const calls = [...src.matchAll(/roundLog\.logInitials\(/g)];
     assert.equal(calls.length, 1, 'exactly one place should record an entry time');
     assert.ok(
-      (calls[0]?.index ?? 0) > guard,
+      (calls[0]?.index ?? 0) > (branch.index ?? 0),
       'logInitials is called outside the completed branch, so timeouts and ' +
         'skips would be counted as typing times',
+    );
+  });
+
+  /**
+   * A `turn()` sweep dwells at a fixed cadence, so it logged fifteen entries
+   * of exactly 5.8s — and the DATA tab then read its own p90 off them and
+   * advised shrinking the 16s backstop. Confident, specific, and measured
+   * entirely from a robot. The rehearsal is not in sim mode, so real bodies
+   * still count.
+   */
+  test('a simulated entry is not a real one', async () => {
+    const src = await source();
+    const branch = /if \(reason === 'completed'(.*?)\) \{/.exec(src);
+    assert.match(
+      branch?.[1] ?? '',
+      /isSimEnabled\(\)/,
+      'the completed branch must also exclude simulated runs, or a sweep ' +
+        'will argue for turning the backstop down on its own dwell speed',
     );
   });
 
