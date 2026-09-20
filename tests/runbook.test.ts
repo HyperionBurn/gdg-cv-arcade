@@ -473,3 +473,113 @@ describe('the hit radius row is the code', () => {
     );
   });
 });
+
+/**
+ * "THE CODE CHANGE YOU JUST MADE IS NOT IN EFFECT."
+ *
+ * `tunables.get(key, fallback)` returns the REGISTRY's default whenever the key
+ * is registered, and the caller's fallback is only a fallback. That is the
+ * right precedence — the operator console shows and resets to the registry
+ * value, so it has to be the truth — but it means a constant edited in a game
+ * file silently does nothing when the registry still holds the old number.
+ *
+ * Not hypothetical. `tunables.ts` records `redlight.graceSec` being widened
+ * 0.4 -> 0.55 in the game, documented in the README as being in effect, and
+ * never actually read. The guard that exists for it is a `console.warn` behind
+ * `import.meta.env?.DEV` — invisible in the production build, invisible under
+ * `node --test`, and invisible to anyone not watching a console at the moment
+ * the key is first read.
+ *
+ * FOUND BY MUTATION, sweeping FEEDBACK.md's fixes: changing `REACH_UP` in
+ * `hover.ts` moved the cursor by EXACTLY NOTHING at any raise height, because
+ * `hover.reachUp` is registered and the registry wins. Six ledger rows looked
+ * unguarded; some of them are pointing at constants that no longer decide
+ * anything. A test is the only place this can be said out loud.
+ */
+describe('every live-tunable constant agrees with the registry', () => {
+  const read = async (): Promise<Array<{ file: string; src: string }>> => {
+    const { readdir, readFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const walk = async (dir: string): Promise<string[]> => {
+      const out: string[] = [];
+      for (const e of await readdir(dir, { withFileTypes: true })) {
+        const full = join(dir, e.name);
+        if (e.isDirectory()) out.push(...(await walk(full)));
+        else if (full.endsWith('.ts')) out.push(full);
+      }
+      return out;
+    };
+    return Promise.all(
+      (await walk('src')).map(async (file) => ({
+        file: file.split(/[\\/]/).join('/'),
+        src: await readFile(file, 'utf8'),
+      }))
+    );
+  };
+
+  /** `const NAME = 1.5;`, `NAME: 1.5,` inside an object, or a bare number. */
+  function resolve(expr: string, all: Array<{ src: string }>): number | null {
+    if (/^-?\d+(\.\d+)?$/.test(expr)) return Number(expr);
+
+    const dot = expr.split('.');
+    if (dot.length === 2) {
+      // `OBJ.prop` — find the object literal, then the property inside it.
+      const [obj, prop] = dot as [string, string];
+      for (const { src } of all) {
+        const at = src.indexOf(`const ${obj}`);
+        if (at < 0) continue;
+        const block = src.slice(at, src.indexOf('\n};', at) + 3);
+        const m = new RegExp(`\\b${prop}:\\s*(-?\\d+(?:\\.\\d+)?)`).exec(block);
+        if (m) return Number(m[1]);
+      }
+      return null;
+    }
+
+    const found: number[] = [];
+    for (const { src } of all) {
+      const m = new RegExp(`const ${expr}\\s*=\\s*(-?\\d+(?:\\.\\d+)?)\\s*;`).exec(src);
+      if (m) found.push(Number(m[1]));
+    }
+    return found.length === 1 ? found[0]! : null;
+  }
+
+  test('no call site passes a fallback the registry overrides with something else', async () => {
+    const all = await read();
+    const specs = new Map(tunables.list().map((t) => [t.key, t.default]));
+
+    const disagree: string[] = [];
+    let resolved = 0;
+    let unresolved = 0;
+
+    for (const { file, src } of all) {
+      for (const m of src.matchAll(/tunables\.get\(\s*'([\w.]+)'\s*,\s*([\w.]+)\s*\)/g)) {
+        const key = m[1]!;
+        const def = specs.get(key);
+        if (def === undefined) continue; // unregistered: the fallback IS the value
+        const value = resolve(m[2]!, all);
+        if (value === null) {
+          unresolved++;
+          continue;
+        }
+        resolved++;
+        if (Math.abs(value - def) > 1e-9) {
+          disagree.push(`${file}: ${key} call site says ${value}, registry ships ${def}`);
+        }
+      }
+    }
+
+    // A parser that resolves nothing would pass this silently, which is the
+    // failure mode this whole file exists to complain about.
+    assert.ok(
+      resolved >= 20,
+      `only ${resolved} fallbacks resolved (${unresolved} unresolved) — this ` +
+        `guard has stopped reading the call sites it claims to check`
+    );
+    assert.deepEqual(
+      disagree,
+      [],
+      'a constant was edited in a game file and the registry still holds the ' +
+        'old number, so the change is NOT in effect:\n  ' + disagree.join('\n  ')
+    );
+  });
+});

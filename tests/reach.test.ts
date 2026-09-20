@@ -231,3 +231,67 @@ describe('the hand cursor can reach both sides', () => {
     assert.ok(left.x <= 0.1, `left edge unreachable: x=${left.x.toFixed(3)}`);
   });
 });
+
+/**
+ * AND ON A GOOD CAMERA, THE CEILING IS THE THING THAT BINDS.
+ *
+ * Everything above exercises TIGHT framings, where the measured headroom is
+ * smaller than `REACH_UP` and the adaptive shrink decides the box. On a
+ * well-placed camera there is more room than `reachUp` needs, the shrink does
+ * nothing, and the constant itself sets how far a player has to stretch.
+ *
+ * That is the case the report came from — "when I reach up I get height
+ * restricted, the pointer stays a little below" — and it was the only one with
+ * no test. FOUND BY MUTATION: changing `REACH_UP` in `hover.ts` failed nothing
+ * in the entire suite except the check that FEEDBACK.md still quotes it. Row 3
+ * of the ledger; 1.15 was the anatomical maximum and 1.0 is about 87% of full
+ * extension, which is the whole substance of the fix.
+ *
+ * Pinned from BOTH sides, because both directions are a broken stall: too
+ * demanding and the top row needs a locked-out overhead stretch, too small and
+ * the cursor pins to the top edge before the arm is up.
+ */
+describe('a well-framed camera still asks for a comfortable reach', () => {
+  /** The framing with room to spare over the head. */
+  const F = FRAMINGS[0]!;
+
+  const cursorAt = (dy: number): { x: number; y: number; present: boolean } => {
+    const tracker = new PoseTracker();
+    const cursor = new HoverCursor();
+    return settle(tracker, cursor, bodyWithWrist({ ...F, wristY: wristAt(F, dy) }));
+  };
+
+  test('one torso above the shoulder reaches the very top', () => {
+    const s = cursorAt(-1.0);
+    assert.equal(s.present, true, 'a full raise did not even arm the cursor');
+    assert.ok(
+      s.y <= 0.03,
+      `a wrist one torso above the shoulder puts the cursor at ${(s.y * 100).toFixed(1)}% ` +
+        `down the screen, not the top. That is the reported complaint: the top row ` +
+        `needs a stretch the player has already made`
+    );
+  });
+
+  test('and a partial raise has NOT already pinned to the top', () => {
+    const s = cursorAt(-0.8);
+    assert.equal(s.present, true);
+    assert.ok(
+      s.y > 0.05,
+      `a wrist 0.8 torso up is already at ${(s.y * 100).toFixed(1)}% down the screen. ` +
+        `The box has collapsed, so a centimetre of wrist is a big jump of cursor and ` +
+        `the top rows are unselectable for the opposite reason`
+    );
+  });
+
+  /** The ceiling really is the thing being measured here, not the shrink. */
+  test('this framing has more headroom than the reach box wants', () => {
+    const shoulder = shoulderOf(F);
+    const torso = torsoOf(F);
+    assert.ok(
+      shoulder / torso > 1.2,
+      `this framing only has ${(shoulder / torso).toFixed(2)} torso of headroom, so the ` +
+        `adaptive shrink is deciding the box and the two tests above are not ` +
+        `measuring the constant they claim to`
+    );
+  });
+});
