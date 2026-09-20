@@ -60,6 +60,17 @@ interface Row {
   report: string;
   files: string[];
   snippets: string[];
+  /**
+   * Each snippet tied to the file it was written against.
+   *
+   * The anchor column reads `` `file` · `snippet` ``, and TWO rows carry more
+   * than one pair — row 12 spans redlight.ts and menu.ts, row 22 spans
+   * rhythm.ts and tunables.ts. Keeping only two flat lists let a snippet be
+   * satisfied by the OTHER file in the same row, so a fix could move to the
+   * wrong place and the ledger would still read as honest. Row 12 is the menu
+   * blurb regression, which has already come back once.
+   */
+  pairs: Array<{ file: string; snippet: string }>;
 }
 
 /** Parses the one pipe table whose header starts with `#`. */
@@ -72,12 +83,22 @@ async function ledger(): Promise<Row[]> {
     const anchors = m[4] ?? '';
     const files: string[] = [];
     const snippets: string[] = [];
+    const pairs: Array<{ file: string; snippet: string }> = [];
+    // A file token opens a group; every snippet after it belongs to that file
+    // until the next one. Order is the only thing tying them together, which is
+    // why this walks the tokens rather than sorting them into two buckets.
+    let current = '';
     for (const tok of anchors.matchAll(/`([^`]+)`/g)) {
       const t = tok[1] ?? '';
-      if (t.includes('/') && t.endsWith('.ts')) files.push(t);
-      else snippets.push(t);
+      if (t.includes('/') && t.endsWith('.ts')) {
+        files.push(t);
+        current = t;
+      } else {
+        snippets.push(t);
+        if (current) pairs.push({ file: current, snippet: t });
+      }
     }
-    rows.push({ n: m[1] ?? '', report: m[2] ?? '', files, snippets });
+    rows.push({ n: m[1] ?? '', report: m[2] ?? '', files, snippets, pairs });
   }
   return rows;
 }
@@ -149,17 +170,24 @@ describe('the tester-feedback ledger is honest', () => {
         bad.push(`row ${row.n}: no file in the anchor column`);
         continue;
       }
-      const bodies: string[] = [];
+      const bodies = new Map<string, string>();
       for (const f of row.files) {
         try {
-          bodies.push(await readFile(f, 'utf8'));
+          bodies.set(f, await readFile(f, 'utf8'));
         } catch {
           bad.push(`row ${row.n}: ${f} does not exist`);
         }
       }
-      for (const s of row.snippets) {
-        if (!bodies.some((b) => b.includes(s))) {
-          bad.push(`row ${row.n}: "${s}" is gone from ${row.files.join(', ')}`);
+      // Every snippet against ITS OWN file. Checking against the union would
+      // let a two-file row pass with the fix in the wrong one.
+      if (row.snippets.length !== row.pairs.length) {
+        bad.push(`row ${row.n}: a snippet appears before any file in the anchor column`);
+      }
+      for (const { file, snippet } of row.pairs) {
+        const body = bodies.get(file);
+        if (body === undefined) continue; // already reported as missing
+        if (!body.includes(snippet)) {
+          bad.push(`row ${row.n}: "${snippet}" is gone from ${file}`);
         }
       }
     }
