@@ -549,6 +549,26 @@ const MOMENT_TAIL_SEC = 4;
 const MOMENT_GAP_SEC = 6;
 
 const RESULTS_ABANDONED_SEC = 2.6;
+
+/**
+ * The line under the results, telling the person who just played to move.
+ *
+ * "NEXT PLAYER IN 5" states a fact about the software. What the stall needs is
+ * for the person who just finished to physically move, and a player who has
+ * just seen their score is looking at their score, not working out that a
+ * countdown is addressed to them. Reported at a playtest as wanting an
+ * explicit step-out instruction — row 16 of FEEDBACK.md.
+ *
+ * Both halves on one line, in the place the line already occupied: THE
+ * INSTRUCTION FIRST, because it is the part that has to be acted on, and the
+ * number after it, because it is the part that says how urgently. Exported so
+ * that order can be checked rather than described — it is the whole fix, and
+ * it is one template literal away from being undone by a tidy-up.
+ */
+export function handoffLine(secondsLeft: number): string {
+  return `STEP OUT — NEXT PLAYER IN ${secondsLeft}`;
+}
+
 const RESULTS_EMPTY_GRACE_SEC = 0.9;
 
 /**
@@ -1744,7 +1764,7 @@ export abstract class GameBase implements Screen {
       // instruction first because it is the part that has to be acted on, the
       // number after it because it is the part that says how urgently.
       const remain = Math.ceil(RESULTS_SEC - this.stateTime);
-      drawText(ctx, `STEP OUT — NEXT PLAYER IN ${remain}`, v.width / 2, v.height * 0.93, {
+      drawText(ctx, handoffLine(remain), v.width / 2, v.height * 0.93, {
         size: vh(v, 2),
         color: COLORS.ink,
         font: FONTS.mono,

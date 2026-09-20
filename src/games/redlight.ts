@@ -492,6 +492,22 @@ export interface ScorableRacer {
  * Ten points a second is enough to separate a two-second gap and not enough to
  * let a fast finisher out-rank a whole extra lap of progress.
  */
+/**
+ * The word across the banner, which is the only instruction most players read.
+ *
+ * `<PUMP>`, NOT `<MOVE>`. The whole confusion at the playtest was people
+ * reading "move" and walking, which cannot work at a stall: there is no floor
+ * space, and stepping toward the camera changes the body scale every threshold
+ * in this game is divided by. So the word names the motion that SCORES rather
+ * than the one that eliminates you — row 13 of FEEDBACK.md, and the same
+ * confusion row 12 fixed on the menu blurb.
+ *
+ * Exported and pure so that can be checked rather than described.
+ */
+export function bannerWord(light: 'red' | 'green'): string {
+  return light === 'red' ? '<FREEZE>' : '<PUMP>';
+}
+
 export function laneScore(racers: Iterable<ScorableRacer>, slot: number): number {
   for (const r of racers) {
     if (r.lane !== slot) continue;
@@ -2114,11 +2130,7 @@ export class RedLightGame extends GameBase {
     const { ctx, v } = fc;
     const red = this.light === 'red';
     const col = this.stateColor();
-    // '<PUMP>', not '<MOVE>'. The whole confusion at the playtest was people
-    // reading "move" and walking, which cannot work at a stall: there is no
-    // floor space, and stepping toward the camera changes the body scale every
-    // threshold here is divided by.
-    const word = red ? '<FREEZE>' : '<PUMP>';
+    const word = bannerWord(this.light);
 
     const cy = vh(v, 32.4);
     // Slams in on the transition, then settles. Bounded at 1.8vh: any more and
