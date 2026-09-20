@@ -26,7 +26,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { HoverCursor } from '../src/shell/hover.ts';
+import { HoverCursor, DWELL } from '../src/shell/hover.ts';
 import { PoseTracker, type TrackedPlayer } from '../src/core/tracker.ts';
 import { POSE } from '../src/core/types.ts';
 import type { RawPose } from '../src/core/types.ts';
@@ -292,6 +292,111 @@ describe('a well-framed camera still asks for a comfortable reach', () => {
       `this framing only has ${(shoulder / torso).toFixed(2)} torso of headroom, so the ` +
         `adaptive shrink is deciding the box and the two tests above are not ` +
         `measuring the constant they claim to`
+    );
+  });
+});
+
+/**
+ * AND A PICK STILL TAKES A DELIBERATE HOLD — row 2 of FEEDBACK.md.
+ *
+ * Reported as selection "might be too fast", alongside landing on games they
+ * had not chosen. PLAN.md §6 specified 1.2s; the menu went to 1.5s, because a
+ * wrong pick burns a whole turn out of a moving queue and that is the most
+ * expensive mistake the shell can make.
+ *
+ * It had no behavioural test. Found by mutation: `DWELL.deliberate` could be
+ * set to anything and nothing in the suite failed except the check that the
+ * ledger still quotes it — including, notably, setting it back to the 1.2 the
+ * report was about.
+ *
+ * This lives in the reach file because the body-and-cursor harness is here;
+ * driving a dwell needs a real pose, a real tracker and a settled filter, and
+ * a second copy of that is how two harnesses drift apart.
+ */
+describe('a menu pick takes a deliberate hold', () => {
+  const F = FRAMINGS[0]!;
+  const pose = bodyWithWrist({ ...F, wristY: wristAt(F, -0.5) });
+
+  /**
+   * Seconds of steady hover before the target commits, or null if it never
+   * did within `hold`.
+   */
+  function timeToCommit(dwell: number, hold: number): number | null {
+    const tracker = new PoseTracker();
+    const cursor = new HoverCursor(dwell);
+    // Settle first, with no targets, so the filter has caught up and the
+    // cursor is already where it is going to sit.
+    const warm = 60;
+    const at = settle(tracker, cursor, pose, warm);
+    assert.equal(at.present, true, 'the cursor never armed, so nothing was being held');
+
+    const target = {
+      id: 'tile',
+      x: at.x * V.width - 200,
+      y: at.y * V.height - 150,
+      w: 400,
+      h: 300,
+    };
+
+    for (let f = 0; f < Math.round(hold * FPS); f++) {
+      const t = (warm + f) / FPS;
+      const players: TrackedPlayer[] = tracker.update([pose], t);
+      const s = cursor.update(frameCtx(t), players[0] ?? null, [target]);
+      if (s.committed === 'tile') return f / FPS;
+    }
+    return null;
+  }
+
+  test('holding for the authored dwell commits, and takes about that long', () => {
+    const took = timeToCommit(DWELL.deliberate, 4);
+    assert.notEqual(took, null, 'a steady hold over a tile never selected it at all');
+    assert.ok(
+      Math.abs(took! - DWELL.deliberate) < 0.15,
+      `a hold committed after ${took!.toFixed(2)}s against an authored ${DWELL.deliberate}s`
+    );
+  });
+
+  /**
+   * AND IT IS BOUNDED ABOVE, which the test before it is not — that one
+   * compares the dwell against ITSELF, so it passes at any value. Raising
+   * `deliberate` to 2.5s sailed through it.
+   *
+   * The ceiling is row 24 of the same ledger: "seven dwell tiles slow down
+   * every turn in a queue". Choosing is time nobody is playing, and it is paid
+   * by everybody waiting, not just by the person choosing. 2s is the most this
+   * can cost before that complaint is the live one.
+   */
+  test('and it is not slow enough to be the other complaint', () => {
+    const took = timeToCommit(DWELL.deliberate, 2.0);
+    assert.notEqual(
+      took,
+      null,
+      `a tile still had not committed after 2s of steady holding — dwell is ` +
+        `${DWELL.deliberate}s. Seven tiles at that price is a queue standing still`
+    );
+  });
+
+  test('and the 1.2s the report was about does NOT commit', () => {
+    const took = timeToCommit(DWELL.deliberate, 1.2);
+    assert.equal(
+      took,
+      null,
+      `a tile committed after ${took?.toFixed(2)}s. PLAN.md's original 1.2s is the ` +
+        `timing testers reported as too fast, and as landing them on games they ` +
+        `had not chosen`
+    );
+  });
+
+  /**
+   * The rule the three dwell times encode: what a mistake COSTS sets how long
+   * you have to mean it. A wrong game is a whole turn; a wrong letter is one
+   * hover of a DEL sitting right there.
+   */
+  test('the dwell scale is ordered by what a mistake costs', () => {
+    assert.ok(
+      DWELL.deliberate > DWELL.standard && DWELL.standard > DWELL.fast,
+      `dwell times are ${DWELL.deliberate} / ${DWELL.standard} / ${DWELL.fast}; a menu ` +
+        `tile must be the slowest and a letter the quickest`
     );
   });
 });
