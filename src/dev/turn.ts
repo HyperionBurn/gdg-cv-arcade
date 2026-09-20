@@ -38,6 +38,7 @@
 
 import type { GameId } from '../meta/leaderboard';
 import { tunables } from '../meta/tunables';
+import { JUMP_DURATION } from '../games/runner-world';
 
 export interface TurnStep {
   name: string;
@@ -87,6 +88,17 @@ interface CursorLike {
   state: { committed: string | null; hovered: string | null; present: boolean };
 }
 
+/**
+ * The slice of a simulator `driveRunner` uses. Named so the shared body is
+ * identical in both harnesses although they hold different simulator types —
+ * `turn.ts` has a structural `SimLike`, `smoke.ts` the real `PoseSimulator`.
+ */
+interface RunnerSim {
+  setLane?: (n: number) => void;
+  triggerJump?: () => void;
+  setCrouch?: (on: boolean) => void;
+}
+
 interface SimLike {
   auto: boolean;
   realism?: unknown;
@@ -117,6 +129,75 @@ interface SimLike {
  * because `turn()` runs this copy, and the sweep meant to prove the fix kept
  * reporting zero ducks.
  */
+/**
+ * Runner driver timing, in SECONDS of time-to-row. Keep in step with smoke.ts.
+ *
+ * `JUMP_LEAD_SEC` is `JUMP_DURATION / 2` — the jump arc is symmetric, so the
+ * stretch where the feet clear a low barrier is centred half a jump after the
+ * trigger. Derived rather than tuned, so changing the arc cannot silently
+ * desync the driver from the collision test the way a typed-in number would.
+ */
+const JUMP_LEAD_SEC = JUMP_DURATION / 2;
+/** Start the slide a little early and hold it across the row. */
+const SLIDE_LEAD_SEC = 0.45;
+const SLIDE_HOLD_SEC = 0.2;
+/**
+ * Blocks need a lane CHANGE, which is not an action — the sim body has to
+ * physically cross, and `LaneDetector` then has to hold the new lane before
+ * the game believes it. 1.2s was not enough: measured, every block was still
+ * hit, 6 for 6. Raised until the number moved.
+ */
+const BLOCK_LEAD_SEC = 2.4;
+
+/* RUNNER-DRIVER-BODY-START */
+/**
+ * ONE FRAME OF COMPETENT RUNNER PLAY.
+ *
+ * Duplicated character for character in `smoke.ts`. The two harnesses keep
+ * their own drivers by design, and `probes.test.ts` compares these two bodies
+ * directly, so the copies cannot drift the way the Rhythm duck did.
+ */
+function driveRunner(s: RunnerSim, game: unknown): void {
+  const g = game as { debugState?: (slot?: number) => Record<string, unknown> } | null;
+  const st = g?.debugState?.() ?? null;
+  if (!st || st.state !== 'playing') {
+    s.setCrouch?.(false);
+    return;
+  }
+
+  const next = st.nextRow as { rel: number; cells: string[] } | null;
+  if (!next) {
+    s.setCrouch?.(false);
+    return;
+  }
+
+  // `cells` is serialised as `lane:kind` for the console readout.
+  const cells = next.cells.map((c) => {
+    const [lane, kind] = c.split(':');
+    return { lane: Number(lane), kind: kind ?? '' };
+  });
+  const lane = Number(st.lane) || 0;
+  const here = cells.find((c) => c.lane === lane);
+  const eta = next.rel / Math.max(1, Number(st.speed) || 1);
+
+  // A block cannot be jumped or slid — it has to be gone around, and the
+  // generator guarantees at least one lane is open.
+  if (here?.kind === 'block' && eta < BLOCK_LEAD_SEC) {
+    const blocked = new Set(cells.filter((c) => c.kind === 'block').map((c) => c.lane));
+    const free = [0, -1, 1].find((l) => !blocked.has(l));
+    if (free !== undefined) s.setLane?.(free);
+  }
+
+  if (here?.kind === 'low' && !st.airborne && eta > 0 && eta < JUMP_LEAD_SEC) {
+    s.triggerJump?.();
+  }
+
+  // Held, not an edge: a slide started early and held through the row is what
+  // the game's own note says everybody does the first time.
+  s.setCrouch?.(here?.kind === 'high' && eta < SLIDE_LEAD_SEC && eta > -SLIDE_HOLD_SEC);
+}
+/* RUNNER-DRIVER-BODY-END */
+
 const PLAY: Record<string, (s: SimLike) => void> = {
   sixtyseven: (s) => s.setPump(4.5, 1),
   fruitninja: (s) => s.setSwipe(2.2, 0.75),
@@ -198,6 +279,28 @@ const DRIVE: Record<string, (s: SimLike, game: unknown) => void> = {
       s.setWristTargetAll?.(hand, n?.target?.[0] ?? rest[hand]);
     }
   },
+
+  /**
+   * AND THE RUNNER HAD NO DRIVER AT ALL.
+   *
+   * Both harnesses called `triggerJump()` ONCE, in the open-loop setup, and
+   * then never again for the rest of the round. So the simulated runner stood
+   * in the centre lane and walked into every obstacle in it — and because
+   * distance accrues from the world scrolling, it still scored ~600 and every
+   * check stayed green.
+   *
+   * FOUND THE SAME WAY AS THE RHYTHM WALLS: by counting something that should
+   * vary and never did. The round log's first output was `lowFaced 4 / lowHit
+   * 4`, `highFaced 4 / highHit 4`, `blockFaced 1 / blockHit 1` — a 100% hit
+   * rate on every obstacle kind, across both runners. Jump and slide have
+   * never been exercised by automation, which is most of this game.
+   *
+   * TIMING IS DERIVED, NOT TUNED. The jump arc is symmetric, so the window
+   * where the feet are above a low barrier is centred half a jump after the
+   * trigger — `JUMP_DURATION / 2`. Acting on time-to-row rather than metres
+   * keeps that true as the runner speeds up through the round.
+   */
+  runner: (s, game) => driveRunner(s, game),
   // Adopt the pose the wall is actually asking for. Random flailing scores
   // zero here, which is the correct behaviour and a useless turn.
   posematch: (s, game) => {

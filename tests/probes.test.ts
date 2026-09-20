@@ -79,6 +79,61 @@ describe('both harnesses play the game the same way', () => {
   });
 
   /**
+   * THE RUNNER HAD NO DRIVER AT ALL, AND SCORED 600 ANYWAY.
+   *
+   * Both harnesses called `triggerJump()` ONCE, in the open-loop setup, and
+   * then never again. The simulated runner stood in the centre lane and walked
+   * into every obstacle in it for the whole round — and because distance
+   * accrues from the world scrolling, it still scored ~600 and every check
+   * stayed green. Jump and slide, which is most of this game, had never been
+   * exercised by automation.
+   *
+   * Found by the same method as the Rhythm walls: counting something that
+   * should vary and never did. The round log's first output was a 100% hit
+   * rate on every obstacle kind, on both runners —
+   *
+   *   before   lowHit 4/4    highHit 4/4   blockHit 1/1   scored 602 / 588
+   *   after    lowHit 0/4    highHit 0/3   blockHit 0/0   scored 934 / 983
+   *
+   * The driver body is duplicated character for character rather than shared,
+   * because these two files deliberately keep their own drivers — so this
+   * compares the copies directly instead of trusting a comment asking somebody
+   * to remember.
+   */
+  test('the Runner driver is the same in both, character for character', async () => {
+    const bodies: string[] = [];
+    for (const f of ['src/dev/smoke.ts', 'src/dev/turn.ts']) {
+      const src = await read(f);
+      const start = src.indexOf('/* RUNNER-DRIVER-BODY-START */');
+      const end = src.indexOf('/* RUNNER-DRIVER-BODY-END */');
+      assert.ok(start >= 0 && end > start, `${f} has no marked Runner driver body`);
+      bodies.push(src.slice(start, end).replace(/\r\n/g, '\n').trim());
+    }
+    assert.equal(
+      bodies[0],
+      bodies[1],
+      'the two Runner drivers have drifted. They are duplicated on purpose; ' +
+        'keeping them identical is what stops one harness playing a game the ' +
+        'other cannot'
+    );
+    assert.ok((bodies[0]?.length ?? 0) > 400, 'the marked body looks empty');
+  });
+
+  /** The tuning either side of that body has to match too. */
+  test('and they agree on the Runner lead times', async () => {
+    const leads: string[] = [];
+    for (const f of ['src/dev/smoke.ts', 'src/dev/turn.ts']) {
+      const code = codeOf(await read(f));
+      const got = ['JUMP_LEAD_SEC', 'SLIDE_LEAD_SEC', 'SLIDE_HOLD_SEC', 'BLOCK_LEAD_SEC'].map(
+        (k) => `${k}=${new RegExp(`const ${k} = ([^;]+);`).exec(code)?.[1]?.trim() ?? 'MISSING'}`
+      );
+      leads.push(got.join(' '));
+    }
+    assert.ok(!leads[0]?.includes('MISSING'), `smoke.ts is missing a lead constant: ${leads[0]}`);
+    assert.equal(leads[0], leads[1], `the two harnesses time the Runner differently:\n  ${leads.join('\n  ')}`);
+  });
+
+  /**
    * A closed-loop driver exists for exactly the games where mashing is not
    * competent play. If one harness has a driver the other lacks, that game is
    * being played well in one sweep and flailed through in the other — and the

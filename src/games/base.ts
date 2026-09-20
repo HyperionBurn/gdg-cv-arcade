@@ -54,6 +54,7 @@ import { tunables } from '../meta/tunables';
 import { ghosts, drawGhost, type GhostPlayback } from '../meta/ghosts';
 import { highlights } from '../meta/highlights';
 import { tournament, isTournamentGame } from '../meta/tournament';
+import { roundLog } from '../meta/roundlog';
 import { setPendingScore } from '../shell/initials';
 import { takePlayMode, type PlayMode } from '../meta/mode';
 import { router } from '../shell/router';
@@ -900,6 +901,47 @@ export abstract class GameBase implements Screen {
       // already the app's "that is settled" sound.
       const placed = best?.rank.rank ?? null;
       audio.play('land', placed === null ? 0.82 : 1.15 - Math.min(0.3, (placed - 1) * 0.035));
+    }
+
+    this.logRound(best?.score ?? 0);
+  }
+
+  /**
+   * Counters this game wants carried into the round log. Default: none.
+   *
+   * See `meta/roundlog.ts` for why this exists and why it is a loose
+   * `Record<string, number>` rather than a shape per game. Anything returned
+   * here is written once, at the end of a round, and read by a human from a
+   * JSON export — nothing in the app reads it back.
+   */
+  protected roundDetail(): Record<string, number> | undefined {
+    return undefined;
+  }
+
+  /**
+   * The whole call wrapped, because a DIAGNOSTIC MUST NOT BE ABLE TO END A
+   * TURN.
+   *
+   * `roundLog.add` already validates and swallows its own storage failures,
+   * but `roundDetail()` is overridden by game code and this runs on the path
+   * every round takes. The cost of being wrong here is a player losing their
+   * go in front of a queue; the cost of the try is nothing.
+   */
+  private logRound(score: number): void {
+    try {
+      const detail = this.roundDetail();
+      roundLog.add({
+        at: Date.now(),
+        game: this.config.gameId,
+        players: this.playerCount,
+        score,
+        // Played, not nominal: a round cut short by somebody walking off is
+        // one of the things worth being able to see in the log.
+        seconds: Number(Math.max(0, this.roundTotal - this.timeLeft).toFixed(1)),
+        ...(detail ? { detail } : {}),
+      });
+    } catch {
+      /* never let the log cost somebody their turn */
     }
   }
 

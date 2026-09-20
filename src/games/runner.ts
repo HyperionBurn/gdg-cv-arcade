@@ -102,6 +102,7 @@ import {
   SPEED_RAMP_SEC,
   STAND_HEIGHT,
   START_SPEED,
+  type ObstacleCell,
   type ObstacleKind,
   type TrackRow,
   type WorldView,
@@ -423,7 +424,54 @@ export class RunnerGame extends GameBase {
     return this.world;
   }
 
+  /**
+   * PLAYTEST INSTRUMENTATION. See `meta/roundlog.ts`.
+   *
+   * FEEDBACK.md's open Runner row asks for the first-timer hit rate on `low`
+   * (jump) obstacles SPECIFICALLY, and sets a clear-rate threshold below which
+   * jumps get weighted to near zero and lanes and slides ship instead. That is
+   * a ship decision resting on a number nobody can count by eye while running
+   * a queue, and until now nothing recorded it — `s.hits` is a total, with no
+   * denominator and no breakdown by kind.
+   *
+   * FACED is the denominator, and it is not "obstacles generated": it is
+   * obstacles the runner was LATERALLY LINED UP WITH when the row reached
+   * them. A `low` you side-stepped is not a jump you failed, so counting it
+   * would flatter the jump mechanic by exactly the amount players avoid it.
+   *
+   * Counted once per cell, via a WeakSet of the cell objects rather than a
+   * flag on `ObstacleCell` — the world renderer shares that type and does not
+   * need to know about this. Cells are per-slot (one generator each, same
+   * seed, separate `destroyed` flags), so two runners on the same course
+   * contribute two independent samples, which is what an aggregate rate wants.
+   */
+  private facedBy: Record<ObstacleKind, number> = { low: 0, high: 0, block: 0 };
+  private hitBy: Record<ObstacleKind, number> = { low: 0, high: 0, block: 0 };
+  private countedCells = new WeakSet<ObstacleCell>();
+
+  /** Idempotent per cell: whichever of hit-or-crossing happens first wins. */
+  private faceCell(cell: ObstacleCell): void {
+    if (this.countedCells.has(cell)) return;
+    this.countedCells.add(cell);
+    this.facedBy[cell.kind]++;
+  }
+
+  protected override roundDetail(): Record<string, number> {
+    return {
+      lowFaced: this.facedBy.low,
+      lowHit: this.hitBy.low,
+      highFaced: this.facedBy.high,
+      highHit: this.hitBy.high,
+      blockFaced: this.facedBy.block,
+      blockHit: this.hitBy.block,
+    };
+  }
+
   protected onStart(): void {
+    this.facedBy = { low: 0, high: 0, block: 0 };
+    this.hitBy = { low: 0, high: 0, block: 0 };
+    this.countedCells = new WeakSet<ObstacleCell>();
+
     // Re-read per round, not per frame: a marshal moving the slider between
     // plays has to see it take effect on the next go, and `LaneDetector` reads
     // its tunables out of a struct rather than a getter.
@@ -716,6 +764,15 @@ export class RunnerGame extends GameBase {
       // Centre crossing — the tightest point, so the honest place to measure.
       if (!row.resolved && prevZ < row.z && nowZ >= row.z) {
         row.closeness = this.closenessAt(s, row);
+
+        // Everything still standing that the runner is lined up with was
+        // faced and cleared. `destroyed` cells were already counted on the hit.
+        for (const cell of row.cells) {
+          if (cell.destroyed) continue;
+          const ox = LANE_X[cell.lane + 1] ?? 0;
+          if (Math.abs(s.laneX - ox) >= OBSTACLE_HALF_W + PLAYER_HALF_W) continue;
+          this.faceCell(cell);
+        }
       }
 
       if (rel < -half) {
@@ -740,6 +797,12 @@ export class RunnerGame extends GameBase {
 
       if (cell.kind === 'low' && feet >= LOW_TOP) continue;
       if (cell.kind === 'high' && head <= HIGH_BOTTOM) continue;
+
+      // Faced AND hit. Most hits land before the row's centre crossing, so
+      // counting the denominator only at the crossing would miss exactly the
+      // obstacles the question is about.
+      this.faceCell(cell);
+      this.hitBy[cell.kind]++;
 
       this.onHit(fc, slot, row, cell.kind);
       cell.destroyed = true;

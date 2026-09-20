@@ -32,6 +32,7 @@
 import type { GameId } from '../meta/leaderboard';
 import { GAME_SEATS } from '../meta/games';
 import type { PoseSimulator } from '../core/simulator';
+import { JUMP_DURATION } from '../games/runner-world';
 
 export interface SmokeCheck {
   name: string;
@@ -90,6 +91,86 @@ interface Probe {
    */
   drive?: (sim: PoseSimulator, game: unknown, tick: (n: number) => void, frames: number) => void;
 }
+
+/**
+ * Runner driver timing, in SECONDS of time-to-row. Keep in step with turn.ts.
+ *
+ * `JUMP_LEAD_SEC` is `JUMP_DURATION / 2` — the jump arc is symmetric, so the
+ * stretch where the feet clear a low barrier is centred half a jump after the
+ * trigger. Derived rather than tuned, so changing the arc cannot silently
+ * desync the driver from the collision test the way a typed-in number would.
+ */
+const JUMP_LEAD_SEC = JUMP_DURATION / 2;
+/** Start the slide a little early and hold it across the row. */
+const SLIDE_LEAD_SEC = 0.45;
+const SLIDE_HOLD_SEC = 0.2;
+/**
+ * Blocks need a lane CHANGE, which is not an action — the sim body has to
+ * physically cross, and `LaneDetector` then has to hold the new lane before
+ * the game believes it. 1.2s was not enough: measured, every block was still
+ * hit, 6 for 6. Raised until the number moved.
+ */
+const BLOCK_LEAD_SEC = 2.4;
+
+/**
+ * The slice of a simulator `driveRunner` uses. Named so the shared body is
+ * identical in both harnesses although they hold different simulator types —
+ * `turn.ts` has a structural `SimLike`, `smoke.ts` the real `PoseSimulator`.
+ */
+interface RunnerSim {
+  setLane?: (n: number) => void;
+  triggerJump?: () => void;
+  setCrouch?: (on: boolean) => void;
+}
+
+/* RUNNER-DRIVER-BODY-START */
+/**
+ * ONE FRAME OF COMPETENT RUNNER PLAY.
+ *
+ * Duplicated character for character in `smoke.ts`. The two harnesses keep
+ * their own drivers by design, and `probes.test.ts` compares these two bodies
+ * directly, so the copies cannot drift the way the Rhythm duck did.
+ */
+function driveRunner(s: RunnerSim, game: unknown): void {
+  const g = game as { debugState?: (slot?: number) => Record<string, unknown> } | null;
+  const st = g?.debugState?.() ?? null;
+  if (!st || st.state !== 'playing') {
+    s.setCrouch?.(false);
+    return;
+  }
+
+  const next = st.nextRow as { rel: number; cells: string[] } | null;
+  if (!next) {
+    s.setCrouch?.(false);
+    return;
+  }
+
+  // `cells` is serialised as `lane:kind` for the console readout.
+  const cells = next.cells.map((c) => {
+    const [lane, kind] = c.split(':');
+    return { lane: Number(lane), kind: kind ?? '' };
+  });
+  const lane = Number(st.lane) || 0;
+  const here = cells.find((c) => c.lane === lane);
+  const eta = next.rel / Math.max(1, Number(st.speed) || 1);
+
+  // A block cannot be jumped or slid — it has to be gone around, and the
+  // generator guarantees at least one lane is open.
+  if (here?.kind === 'block' && eta < BLOCK_LEAD_SEC) {
+    const blocked = new Set(cells.filter((c) => c.kind === 'block').map((c) => c.lane));
+    const free = [0, -1, 1].find((l) => !blocked.has(l));
+    if (free !== undefined) s.setLane?.(free);
+  }
+
+  if (here?.kind === 'low' && !st.airborne && eta > 0 && eta < JUMP_LEAD_SEC) {
+    s.triggerJump?.();
+  }
+
+  // Held, not an edge: a slide started early and held through the row is what
+  // the game's own note says everybody does the first time.
+  s.setCrouch?.(here?.kind === 'high' && eta < SLIDE_LEAD_SEC && eta > -SLIDE_HOLD_SEC);
+}
+/* RUNNER-DRIVER-BODY-END */
 
 const PROBES: Probe[] = [
   {
@@ -303,6 +384,15 @@ const PROBES: Probe[] = [
     play: (s) => {
       s.setLane?.(0);
       s.triggerJump();
+    },
+    // Closed-loop, because standing in the centre lane and walking into every
+    // obstacle is not play. See `driveRunner` above for how that was found.
+    drive: (sim, game, tick, frames) => {
+      const slice = 2;
+      for (let done = 0; done < frames; done += slice) {
+        driveRunner(sim, game);
+        tick(slice);
+      }
     },
     idle: (s) => s.setPump(0),
     // Distance accrues because the world scrolls — that IS the game.
