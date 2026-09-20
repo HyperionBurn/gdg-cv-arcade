@@ -28,6 +28,8 @@ import {
   factionSplit,
   textColor,
   MIN_CONTRAST,
+  MIN_LEGIBLE,
+  TYPE,
 } from '../src/shell/theme.ts';
 import { FACTIONS } from '../src/meta/leaderboard.ts';
 import { GAME_SEATS } from '../src/meta/games.ts';
@@ -795,5 +797,86 @@ describe('the HUD respects the overscan safe area', () => {
       'in a one-slot layout rect.width is the whole screen, so a 3vh inset ' +
         "puts the chase line's right edge past the overscan boundary"
     );
+  });
+});
+
+/**
+ * `TYPE.micro` IS "OPERATOR, DIAGNOSTIC AND DECORATIVE ONLY. NEVER
+ * PLAYER-FACING CONTENT." — and nothing checked it.
+ *
+ * Everything under `src/games` is player-facing by definition: it is drawn on
+ * the playfield, during a round, to be read across a hall. So micro has no
+ * business in any of it.
+ *
+ * FOUND CHASING THE LAST OF THE EIGHT THINGS THIS SESSION SET OUT TO DO —
+ * "Rhythm's HUD is still the least legible thing on the roster at 3m". It was
+ * `COMBO ×N.NN` at `TYPE.micro`, about 16px on a 1080p panel, and the comment
+ * directly above it called it the best feedback in the game according to the
+ * playtest. Both things were true at once for weeks.
+ *
+ * Sizes BETWEEN micro and `TYPE.label` are left alone deliberately: a 'M/S'
+ * unit under a speed readout is a judgement call the token scale already
+ * allows, and banning the whole band would be a rule nobody could follow.
+ */
+describe('nothing a player reads is drawn at diagnostic size', () => {
+  /** Calls that put words on the canvas. */
+  const DRAWERS = /\b(drawText|stickerPill|labelPill|drawTabularNumber)\s*\(/g;
+
+  test('no game draws text at or below TYPE.micro', async () => {
+    const { readdir, readFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+
+    const files = (await readdir('src/games')).filter((f) => f.endsWith('.ts'));
+    assert.ok(files.length >= 7, `only found ${files.length} game files`);
+
+    const bad: string[] = [];
+    let checked = 0;
+
+    for (const f of files) {
+      const raw = await readFile(join('src/games', f), 'utf8');
+      // Comments stripped: this note quotes the token it bans.
+      const src = raw
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .split(/\r?\n/)
+        .map((l) => l.replace(/\/\/.*$/, ''))
+        .join('\n');
+
+      for (const call of src.matchAll(DRAWERS)) {
+        // Only the options object of THIS call, so a particle burst's own
+        // `size:` cannot be mistaken for type. `vh(v, 0.7)` in a confetti
+        // config is what a looser scan finds first.
+        const span = src.slice(call.index ?? 0, (call.index ?? 0) + 500);
+        const m = /size:\s*vh\(\s*v\s*,\s*(TYPE\.(\w+)|[0-9.]+)\s*\)/.exec(span);
+        if (!m) continue;
+        checked++;
+
+        const token = m[2];
+        if (token === 'micro') {
+          bad.push(`${f}: ${call[1]} at TYPE.micro`);
+          continue;
+        }
+        if (token) continue; // a named token above micro
+        const size = Number(m[1]);
+        if (Number.isFinite(size) && size <= TYPE.micro) {
+          bad.push(`${f}: ${call[1]} at ${size}vh, at or under TYPE.micro (${TYPE.micro})`);
+        }
+      }
+    }
+
+    // A scan that resolved nothing would pass silently, which is the failure
+    // this whole file exists to complain about.
+    assert.ok(checked >= 30, `only resolved ${checked} sized draw calls across the games`);
+    assert.deepEqual(
+      bad,
+      [],
+      'these are read by a stranger across a hall, at the size the kit reserves ' +
+        'for diagnostics:\n  ' + bad.join('\n  ')
+    );
+  });
+
+  /** The token has to still mean what the ban is based on. */
+  test('and micro is still the smallest thing in the scale', () => {
+    assert.ok(TYPE.micro < TYPE.label, 'micro is no longer below label');
+    assert.ok(TYPE.micro < MIN_LEGIBLE, 'micro has risen above the 3m floor; this ban is moot');
   });
 });

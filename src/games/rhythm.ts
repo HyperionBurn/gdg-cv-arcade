@@ -1719,10 +1719,28 @@ export class RhythmGame extends GameBase {
       });
       ctx.restore();
 
-      // The multiplier the playtest singled out as the best feedback in the
-      // game, drawn in the kit's DISABLED grey.
-      drawText(ctx, `COMBO ×${this.comboMultiplier(s.combo).toFixed(2)}`, rect.centerX, vh(v, 32), {
-        size: vh(v, TYPE.micro),
+      // THE MULTIPLIER THE PLAYTEST SINGLED OUT AS THE BEST FEEDBACK IN THE
+      // GAME, DRAWN AT THE SIZE RESERVED FOR DIAGNOSTICS.
+      //
+      // `TYPE.micro` is 1.5vh — about 16px on a 1080p panel, read at three
+      // metres — and the token's own note reserves it for operator, diagnostic
+      // and decorative use, never for player-facing content. This is the most
+      // player-facing number in the game.
+      //
+      // It is `TYPE.label` now, which the scale describes as a kicker or badge
+      // attached to something bigger. That is exactly what this is: it hangs
+      // off the combo count above it and is meaningless alone, so it does not
+      // need to clear MIN_LEGIBLE on its own.
+      //
+      // The y moves 32 -> 32.8 because 2.2vh is 47% taller and the combo count
+      // above it POPS to 1.2x: at cy 29 and 3.2vh that reaches 30.92vh, and a
+      // 2.2vh label centred at 32 starts at 30.9. It would have touched at the
+      // one moment both are worth looking at. 32.8 leaves 0.78vh of air.
+      //
+      // The old note here said this was drawn in the kit's disabled grey. It
+      // has been ink for a while; the colour was fixed and the size was not.
+      drawText(ctx, `COMBO ×${this.comboMultiplier(s.combo).toFixed(2)}`, rect.centerX, vh(v, 32.8), {
+        size: vh(v, TYPE.label),
         color: COLORS.ink,
         font: FONTS.body,
         weight: WEIGHT.bold,
