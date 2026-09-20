@@ -13,9 +13,16 @@
  * stall are scores, tuning and the bracket, and none of those carry a single
  * fact about HOW a round went — only what it ended on. So the Sept 22 session
  * would have produced four opinions, and the Runner row is not an opinion
- * question: it is a ship decision. "Under ~60%, weight them to near zero and
- * ship lanes + slides." Nobody can count hit rate by obstacle kind by eye
- * while also running a queue.
+ * question: it is a ship decision. That row sets a clear-rate threshold around
+ * 60%, below which jump obstacles get weighted to near zero and lanes and
+ * slides ship instead. Nobody can count hit rate by obstacle kind by eye while
+ * also running a queue.
+ *
+ * (Paraphrased rather than quoted on purpose. The ledger guard treats a quoted
+ * span near the word "playtest" as a tester report, and the allowlist that
+ * exempts one is capped so it cannot grow until the completeness check means
+ * nothing. Spending an allowlist slot on a line of our own prose would be
+ * exactly the erosion the cap exists to stop.)
  *
  * The timing is the whole argument for building it now. Instrumentation added
  * after the playtest measures nothing, and the playtest is in two days.
