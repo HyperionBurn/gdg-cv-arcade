@@ -121,6 +121,59 @@ const GUARD_GRACE = 8;
 /** A score in the top N of its board is worth replaying. PLAN.md §4: top-5. */
 export const REPLAY_RANK = 5;
 
+/* ------------------------------------------------------------------ *
+ * The attract reel
+ * ------------------------------------------------------------------ */
+
+/**
+ * PLAN.md §6 wants "looping highlight clips" on attract, and until now a clip
+ * only ever replayed on the same player's own results screen, seconds after
+ * their own round — so the one screen the stall stares at for eight hours, the
+ * one whose entire job is pulling a stranger out of a corridor, never showed
+ * anybody playing.
+ *
+ * The blocker was never the drawing. It was that exactly ONE clip exists: the
+ * rolling buffer and the saved clip swap, and the next capture overwrites the
+ * last one. A reel needs a backlog.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS DOES NOT JUST ALLOCATE MORE ATLASES
+ *
+ * Read the cliff table at the top of this file first. Past roughly 20 MB of
+ * canvas backing store the browser stopped keeping these GPU-resident on the
+ * measurement machine and every blit became a readback — a 448 ms frame. The
+ * two main atlases are already 18.87 MB of that budget, so a third full-size
+ * atlas (+9.44 MB) is not a 50% increase, it is a step over a measured cliff.
+ *
+ * So the reel is deliberately the cheap one:
+ *
+ *   - HALF-SIZE CELLS. It plays in a card on attract, roughly a third of the
+ *     screen, never full-bleed. 128x72 upscaled into that box is the same
+ *     pixel density the full-size cell has at full-bleed.
+ *   - TWO SECONDS, not eight. It is a loop in a corner, not a replay somebody
+ *     is reading a score off. Four different two-second moments hold a
+ *     passer-by better than one eight-second one anyway.
+ *   - ONE ATLAS FOR ALL FOUR SLOTS. 4 x 2 s x 8 fps = 64 cells, which is
+ *     exactly the 8x8 grid the main atlas already uses.
+ *
+ *     1024 x 576 x 4 bytes = 2.36 MB, total 21.2 MB
+ *
+ * That is 2.4 MB over the measured-good configuration and 6.9 MB under the one
+ * that fell off the cliff. It is the largest version of this feature I am
+ * willing to ship without re-measuring on the booth laptop, which is why
+ * `REEL_MAX_BYTES` exists and why the reel is the FIRST thing dropped when
+ * anything sheds.
+ */
+export const REEL_SLOTS = 4;
+/** Seconds of footage kept per reel slot. The END of the clip, not the start. */
+export const REEL_SECONDS = 2;
+/** Cell size as a fraction of the main config's. */
+const REEL_SCALE = 0.5;
+/** Hard ceiling on the reel atlas alone. See the note above for the arithmetic. */
+export const REEL_MAX_BYTES = 4 * 1024 * 1024;
+/** Full plays of one entry before the reel advances to the next. */
+const REEL_LOOPS = 2;
+
 /**
  * Below this `particles.quality` the buffer halves its capture rate; below
  * `QUALITY_OFF` it stops entirely. The watchdog only drops quality when frames
@@ -180,6 +233,20 @@ interface Atlas {
   ctx: AnyCtx;
   cols: number;
   rows: number;
+}
+
+/**
+ * One slot of the attract reel. Holds an INDEX into the shared reel atlas
+ * rather than an atlas of its own — the whole point is that four entries cost
+ * one allocation.
+ */
+interface ReelEntry {
+  /** Slot index; its cells start at `slot * cellsPerSlot`. */
+  slot: number;
+  count: number;
+  fps: number;
+  srcAspect: number;
+  meta: ClipMeta;
 }
 
 interface Clip {
@@ -278,6 +345,21 @@ class Highlights {
   private loops = 0;
   private maxLoops = 2;
 
+  /* -- the attract reel -- */
+  private reelAtlas: Atlas | null = null;
+  private reelEntries: ReelEntry[] = [];
+  /** Next slot to write. Ring: the oldest highlight is the one that goes. */
+  private reelWrite = 0;
+  /** Cells per slot, and the cell size — fixed at allocation, never re-derived. */
+  private reelCells = 1;
+  private reelCw = 1;
+  private reelCh = 1;
+  private reelAllocFailed = false;
+  private _reelEnabled = true;
+  /** Which entry is on screen, and when it started. */
+  private reelAt = 0;
+  private reelStart = -Infinity;
+
   /**
    * Point the buffer at the main canvas. Called once from `main.ts`; everything
    * else is a no-op until it is.
@@ -373,6 +455,12 @@ class Highlights {
     this.shedMeanMs = 0;
     this.window.length = 0;
     this.grace = GUARD_GRACE;
+    // AND REVIVE THE REEL. Re-enabling is an explicit operator action meaning
+    // "try again"; clearing the shed level but leaving the reel permanently
+    // dead would make the console's own switch a half-measure, and the reel is
+    // the first thing the guard takes. If the machine really cannot afford it
+    // the guard will take it again, visibly, on the `reel` row of `d`.
+    this.reelAllocFailed = false;
   }
 
   /**
@@ -465,7 +553,16 @@ class Highlights {
 
     this.shedLevel++;
     this.shedMeanMs = mean;
-    if (this.shedLevel === 1) {
+    if (this.shedLevel === 1 && this.reelAtlas) {
+      // THE REEL GOES FIRST, and it is the only step that costs nothing a
+      // player can see. It is 2.36 MB of canvas backing store on a machine
+      // that has just told us it is past its budget, and the measured failure
+      // at the top of this file is a CLIFF in total allocation rather than a
+      // slope — so giving back 2.36 MB can move the whole app back over it.
+      // A replay on the results screen is worth more than a loop in a corner.
+      this.clearReel();
+      this.reelAllocFailed = true;
+    } else if (this.shedLevel <= 2) {
       // Half the cell is a quarter of the pixels. Costs the buffered footage,
       // which is a fair price for not freezing the screen.
       this.configure({
@@ -475,6 +572,7 @@ class Highlights {
     } else {
       this._enabled = false;
       this.playing = false;
+      this.clearReel();
     }
   }
 
@@ -533,7 +631,231 @@ class Highlights {
     this.spare = saved;
     this.write = 0;
     this.buffered = 0;
+
+    // Join the reel. Done HERE rather than at the call site because there are
+    // two capture paths and there will be more; a reel you have to remember to
+    // enrol into is a reel that is empty on the day.
+    this.enrol(this.clip);
     return true;
+  }
+
+  /* ---------------- the attract reel ---------------- */
+
+  get reelEnabled(): boolean {
+    // The master switch governs. An operator who turns highlights off means
+    // off, and if the main atlases never allocated there is no footage for a
+    // reel to be made of anyway.
+    return this._enabled && this._reelEnabled && !this.reelAllocFailed && !this.allocFailed;
+  }
+
+  /**
+   * Operator console. Turning the reel off also frees its atlas — the reason
+   * to turn it off is memory or fill rate, and keeping 2.36 MB allocated for a
+   * feature nobody is showing would answer neither.
+   */
+  setReelEnabled(on: boolean): void {
+    this._reelEnabled = on;
+    if (!on) this.clearReel();
+    this.reelAllocFailed = false;
+  }
+
+  clearReel(): void {
+    this.reelAtlas = null;
+    this.reelEntries = [];
+    this.reelWrite = 0;
+    this.reelAt = 0;
+    this.reelStart = -Infinity;
+  }
+
+  private ensureReel(): boolean {
+    if (this.reelAtlas) return true;
+    if (!this._reelEnabled || this.reelAllocFailed) return false;
+
+    const cw = Math.max(32, Math.round(DEFAULT_CONFIG.width * REEL_SCALE));
+    const ch = Math.max(18, Math.round(DEFAULT_CONFIG.height * REEL_SCALE));
+    const cells = Math.max(1, Math.round(REEL_SECONDS * DEFAULT_CONFIG.fps));
+    const total = cells * REEL_SLOTS;
+    const cols = Math.ceil(Math.sqrt(total));
+    const rows = Math.ceil(total / cols);
+
+    if (cols * cw * rows * ch * 4 > REEL_MAX_BYTES) {
+      // Refuse rather than silently shrink. The size above is argued for in
+      // the note on REEL_SLOTS; a version that quietly halves itself would
+      // make that note a lie and the stats unreadable.
+      this.reelAllocFailed = true;
+      return false;
+    }
+
+    const atlas = makeAtlas(cols, rows, cw, ch);
+    if (!atlas) {
+      this.reelAllocFailed = true;
+      return false;
+    }
+    this.reelAtlas = atlas;
+    this.reelCells = cells;
+    this.reelCw = cw;
+    this.reelCh = ch;
+    return true;
+  }
+
+  /**
+   * Copies the TAIL of a freshly captured clip into the next reel slot.
+   *
+   * The tail, not the head: the last two seconds of a top-five run contain the
+   * thing that made it a top-five run. The first two contain somebody finding
+   * their feet.
+   *
+   * Cost is `reelCells` downscaled blits, once, on the frame a round ends —
+   * which is the transition into the results screen, not a frame anybody is
+   * playing on. Measured below via `reelStats().copyMs`.
+   */
+  private enrol(clip: Clip): void {
+    if (!this.ensureReel()) return;
+    const atlas = this.reelAtlas;
+    if (!atlas) return;
+
+    const take = Math.min(this.reelCells, clip.count);
+    if (take < 2) return;
+
+    const t0 = performance.now();
+    const slot = this.reelWrite % REEL_SLOTS;
+    const base = slot * this.reelCells;
+    // The last `take` frames of the clip, oldest first.
+    const from = clip.count - take;
+
+    try {
+      for (let i = 0; i < take; i++) {
+        const srcIdx = (clip.start + from + i) % clip.frames;
+        const sx = (srcIdx % clip.atlas.cols) * clip.cw;
+        const sy = Math.floor(srcIdx / clip.atlas.cols) * clip.ch;
+        const dstIdx = base + i;
+        const dx = (dstIdx % atlas.cols) * this.reelCw;
+        const dy = Math.floor(dstIdx / atlas.cols) * this.reelCh;
+        atlas.ctx.drawImage(
+          clip.atlas.canvas as CanvasImageSource,
+          sx, sy, clip.cw, clip.ch,
+          dx, dy, this.reelCw, this.reelCh
+        );
+      }
+    } catch {
+      // A reel is decoration. It must never be the reason a round ends badly.
+      this.reelAllocFailed = true;
+      this.clearReel();
+      return;
+    }
+
+    const entry: ReelEntry = {
+      slot,
+      count: take,
+      fps: clip.fps,
+      srcAspect: clip.srcAspect,
+      meta: { ...clip.meta },
+    };
+    const existing = this.reelEntries.findIndex((e) => e.slot === slot);
+    if (existing >= 0) this.reelEntries[existing] = entry;
+    else this.reelEntries.push(entry);
+    this.reelWrite = (this.reelWrite + 1) % REEL_SLOTS;
+    this.reelCopyMs = performance.now() - t0;
+    this.reelCopies++;
+  }
+
+  private reelCopyMs = 0;
+  private reelCopies = 0;
+
+  /** How many moments the reel can currently show. */
+  reelSize(): number {
+    return this.reelEntries.length;
+  }
+
+  /**
+   * Draws one frame of the reel into `rect` and returns what it drew, so the
+   * caller can caption it in its own type. Returns null when the reel has
+   * nothing — which is the whole of day 1 morning, and must look like a
+   * deliberate empty space rather than a hole.
+   *
+   * Cycling is owned here rather than by the caller: how long a moment holds
+   * the screen is a property of the footage (`count / fps`), and attract has
+   * no business knowing that.
+   */
+  renderReel(fc: FrameContext, rect: { x: number; y: number; w: number; h: number }): ClipMeta | null {
+    const atlas = this.reelAtlas;
+    if (!this.reelEnabled || !atlas || this.reelEntries.length === 0) return null;
+
+    if (this.reelAt >= this.reelEntries.length) this.reelAt = 0;
+    // Synthetic clocks run backwards in this app — see the note in `tick`.
+    if (this.reelStart === -Infinity || fc.now < this.reelStart) this.reelStart = fc.now;
+
+    let entry = this.reelEntries[this.reelAt];
+    if (!entry) return null;
+    let dur = entry.count / entry.fps;
+    if (!(dur > 0)) return null;
+
+    const elapsed = (fc.now - this.reelStart) / 1000;
+    if (elapsed >= dur * REEL_LOOPS) {
+      this.reelAt = (this.reelAt + 1) % this.reelEntries.length;
+      this.reelStart = fc.now;
+      entry = this.reelEntries[this.reelAt];
+      if (!entry) return null;
+      dur = entry.count / entry.fps;
+      if (!(dur > 0)) return null;
+    }
+
+    const local = ((fc.now - this.reelStart) / 1000) % dur;
+    const frame = Math.min(entry.count - 1, Math.floor(local * entry.fps));
+    const idx = entry.slot * this.reelCells + frame;
+    const sx = (idx % atlas.cols) * this.reelCw;
+    const sy = Math.floor(idx / atlas.cols) * this.reelCh;
+
+    // Letterbox on the aspect the footage was CAPTURED at. A reel entry can
+    // outlive a viewport resize by hours.
+    const boxAspect = rect.w / rect.h;
+    let dw = rect.w;
+    let dh = rect.h;
+    if (entry.srcAspect > boxAspect) dh = rect.w / entry.srcAspect;
+    else dw = rect.h * entry.srcAspect;
+    const dx = rect.x + (rect.w - dw) / 2;
+    const dy = rect.y + (rect.h - dh) / 2;
+
+    const { ctx } = fc;
+    ctx.save();
+    ctx.shadowBlur = 0;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    try {
+      ctx.drawImage(
+        atlas.canvas as CanvasImageSource,
+        sx, sy, this.reelCw, this.reelCh,
+        dx, dy, dw, dh
+      );
+    } catch {
+      ctx.restore();
+      this.reelAllocFailed = true;
+      this.clearReel();
+      return null;
+    }
+    ctx.restore();
+    return entry.meta;
+  }
+
+  reelStats(): {
+    enabled: boolean;
+    slots: number;
+    filled: number;
+    bytes: number;
+    copyMs: number;
+    copies: number;
+    showing: string | null;
+  } {
+    const a = this.reelAtlas;
+    return {
+      enabled: this.reelEnabled,
+      slots: REEL_SLOTS,
+      filled: this.reelEntries.length,
+      bytes: a ? a.cols * this.reelCw * a.rows * this.reelCh * 4 : 0,
+      copyMs: this.reelCopyMs,
+      copies: this.reelCopies,
+      showing: this.reelEntries[this.reelAt]?.meta.gameId ?? null,
+    };
   }
 
   /** Convenience: capture only when the score earns it. */
@@ -800,6 +1122,11 @@ class Highlights {
     this.grabMax = 0;
     this.framesSeen = 0;
     this.skipped = 0;
+    // The reel's counters are stats like any other. Leaving them running
+    // across a reset makes `copies` a number that only ever goes up and can
+    // never be read against a window, which is the one thing it is for.
+    this.reelCopyMs = 0;
+    this.reelCopies = 0;
   }
 
   getConfig(): HighlightConfig {

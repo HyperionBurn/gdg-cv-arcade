@@ -51,6 +51,7 @@ import { Juice } from '../engine/juice';
 import { Projection } from '../engine/projection';
 import { drawPose, SKELETON_STYLES } from '../engine/skeleton';
 import { FACTIONS, leaderboard } from '../meta/leaderboard';
+import { highlights } from '../meta/highlights';
 import { MENU_TILES, isTileAvailable, type MenuTile } from './menu';
 import { drawBracket, tournament, type RenderBracket } from '../meta/tournament';
 import {
@@ -359,6 +360,7 @@ export class AttractScreen implements Screen {
     this.juice.popTransform(ctx);
 
     this.drawCallToAction(fc, box);
+    this.drawReel(fc, box);
     this.drawLeaderboardRail(fc, dt, box);
     this.drawFactionBand(fc, box);
 
@@ -389,6 +391,168 @@ export class AttractScreen implements Screen {
     for (const d of DECOR) {
       decorShape(ctx, d.kind, d.x * v.width, d.y * v.height, vh(v, d.r), d.c, d.tilt);
     }
+  }
+
+  /**
+   * A LOOPING HIGHLIGHT, IN THE SPACE THE SILHOUETTE IS NOT USING.
+   *
+   * PLAN.md §6 lists "looping highlight clips" as part of the foot-traffic
+   * engine and they never reached this screen — a clip only ever replayed on
+   * the player's own results screen, seconds after their own round. So the one
+   * screen the stall stares at for eight hours never showed anybody playing.
+   *
+   * WHY IT IS GATED ON AN EMPTY ROOM, which is the only real design decision
+   * here. When somebody IS in frame, the live silhouette is the hook — "that
+   * is me on the TV" is a stronger pull than any recording, and a second
+   * moving rectangle competing with it makes both weaker. When the room is
+   * empty the same region is blank paper, and a stranger in a corridor who has
+   * not looked up yet is exactly who the reel is for. So the reel occupies the
+   * silhouette's space only while the silhouette has nothing to show.
+   *
+   * It also means the reel costs nothing on the frames that matter: the ones
+   * where a body is being tracked, projected and drawn.
+   *
+   * WHERE. Right of the three-step block, which is 46vh wide in a column that
+   * is roughly twice that on 16:9, and above the faction band. On a narrow
+   * screen there is no such gap and the card is skipped entirely rather than
+   * shrunk into illegibility or allowed to sit on top of the steps.
+   */
+  private drawReel(fc: FrameContext, box: ReturnType<AttractScreen['frame']>): void {
+    if (this.players.length > 0) return;
+
+    const { ctx, v } = fc;
+
+    // Clear of everything the left column already draws, and of the rail.
+    //
+    // 45vh is MEASURED, not guessed. Instrumenting `fillText` on this screen at
+    // 1536x1152, the widest run below the rule is not the steps block — those
+    // top out at 35.3vh with STAND IN FRAME — it is the footer line
+    // '7 GAMES · 60 SECONDS · ONE SCORE' at 41.4vh, which sits at 73vh and is
+    // squarely inside the band this card wants. My first version reserved a
+    // round 49vh for the steps and would have overlapped the footer on any
+    // screen narrow enough to matter.
+    const left = box.colX + vh(v, 45);
+    const right = box.railX - vh(v, SPACE.lg);
+    const top = vh(v, 44);
+    const bottom = box.bandY - vh(v, SPACE.md);
+
+    const availW = right - left;
+    const availH = bottom - top;
+    // A legibility floor, not a layout one: below about 28vh of width the
+    // caption stops resolving '67 SPEED DUEL' plus a five-digit score at three
+    // metres, and a picture with an unreadable caption is a stuck camera feed.
+    // A screen with no room simply does not get the card.
+    if (availW < vh(v, 28) || availH < vh(v, 20)) return;
+
+    const capH = vh(v, 6.2);
+    // 16:9 footage plus the caption strip, fitted to whichever axis binds.
+    let w = Math.min(availW, vh(v, 62));
+    let h = (w * 9) / 16 + capH;
+    if (h > availH) {
+      h = availH;
+      w = ((h - capH) * 16) / 9;
+    }
+    const x = left + (availW - w) / 2;
+    const y = top + (availH - h) / 2;
+
+    const pad = vh(v, 0.9);
+    const shot = { x: x + pad, y: y + pad, w: w - pad * 2, h: h - capH - pad };
+
+    // Draw the footage FIRST, then decide. `renderReel` returns null when the
+    // reel is empty — which is the whole of day 1 morning — and an empty card
+    // frame with nothing in it reads as a fault.
+    const probe = highlights.renderReel(fc, shot);
+    if (!probe) return;
+
+    // The card, painted UNDER the footage it already drew. Cheaper than
+    // measuring first: the alternative is a `reelSize()` check that can
+    // disagree with what `renderReel` actually did.
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-over';
+    stickerCard(ctx, v, x, y, w, h, {
+      fill: COLORS.paper,
+      outline: COLORS.ink,
+      outlineWidth: vh(v, STROKE.base),
+      shadow: vh(v, SHADOW.lifted),
+    });
+    ctx.restore();
+
+    // Caption strip. Game on the left, score on the right — the same order and
+    // the same alignment as a leaderboard row, so the two blocks on this
+    // screen agree with each other.
+    const tile = MENU_TILES.find((t) => t.id === probe.gameId);
+    const capY = y + h - capH / 2 - pad * 0.5;
+    const capSize = vh(v, 2.1);
+
+    ctx.save();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = COLORS.ink;
+    ctx.fillRect(x + pad, shot.y + shot.h + pad * 0.5, w - pad * 2, vh(v, STROKE.thin));
+    ctx.restore();
+
+    // LAY THE RIGHT-HAND BLOCK OUT FIRST, THEN FIT THE TITLE INTO WHAT IS LEFT.
+    //
+    // Drawing the title at a fixed size and hoping is how this overlapped on
+    // the first pass: measured at 1536x1152, '67 SPEED DUEL' ran to 792.8 and
+    // 'WAS' started at 787.9. Five pixels, invisible in a screenshot, and it
+    // gets worse on every narrower screen and every longer game name.
+    const scoreText = String(probe.score);
+    const scoreW = measureTabularNumber(ctx, scoreText, capSize, WEIGHT.black, FONTS.display, TRACK.number);
+    const gap = vh(v, 1.4);
+
+    ctx.save();
+    ctx.letterSpacing = '0.12em';
+    const initW = probe.initials
+      ? measureText(ctx, probe.initials, capSize, WEIGHT.bold, FONTS.body) + gap
+      : 0;
+    ctx.restore();
+
+    const rightEdge = x + w - pad * 2;
+    const titleX = x + pad * 2;
+    const titleMax = rightEdge - initW - scoreW - gap - titleX;
+
+    const title = tile?.title ?? 'HIGHLIGHT';
+    drawText(ctx, title, titleX, capY, {
+      size: fitText(ctx, title, titleMax, capSize, WEIGHT.extrabold, FONTS.body, TRACK.h2),
+      color: COLORS.ink,
+      font: FONTS.body,
+      weight: WEIGHT.extrabold,
+      align: 'left',
+      letterSpacing: TRACK.h2,
+    });
+
+    if (probe.initials) {
+      drawText(ctx, probe.initials, rightEdge - scoreW - gap, capY, {
+        size: capSize,
+        color: COLORS.ink,
+        font: FONTS.body,
+        weight: WEIGHT.bold,
+        align: 'right',
+        letterSpacing: '0.12em',
+      });
+    }
+    drawTabularNumber(ctx, scoreText, rightEdge, capY, {
+      size: capSize,
+      color: COLORS.ink,
+      weight: WEIGHT.black,
+      align: 'right',
+      letterSpacing: TRACK.number,
+    });
+
+    // The one piece of type that says what this rectangle IS. Without it a
+    // silent loop of somebody waving reads as a stuck camera feed.
+    const pillH = vh(v, 3.4);
+    labelPill(ctx, v, x + pad * 2, y + pad * 2 + pillH / 2, probe.label || 'HIGHLIGHT', pillH, {
+      size: vh(v, 1.55),
+      align: 'left',
+      // Yellow is a SURFACE here and the label is ink on top of it. Yellow
+      // type on paper is 1.7:1 and BRAND.md rules it out outright.
+      fill: COLORS.yellow,
+      outline: COLORS.ink,
+      outlineWidth: vh(v, STROKE.thin),
+      shadow: vh(v, SHADOW.base),
+      letterSpacing: '0.14em',
+    });
   }
 
   /** Begin the wipe out. Idempotent — several timers can race to leave. */

@@ -19,6 +19,7 @@
 import { leaderboard } from '../meta/leaderboard';
 import { tunables } from '../meta/tunables';
 import { tournament } from '../meta/tournament';
+import { highlights } from '../meta/highlights';
 import { camera } from '../core/camera';
 import { vision } from '../core/vision';
 import { isSimEnabled } from '../core/simulator';
@@ -211,7 +212,41 @@ function rows(fc: FrameContext): Row[] {
     out.push({ label: 'scores', value: 'NOT SAVING — DO NOT RELOAD', bad: true });
   }
 
-  // 7. Render cost, to separate "the game is slow" from "vision is slow".
+  // 7. The highlight buffer, which until now reported NOTHING anywhere.
+  //
+  // It is the largest single allocation in the app (18.9 MB across two
+  // atlases, plus 2.4 MB of attract reel) and it has a cost guard that can
+  // switch itself off without saying so. The failure it guards against is the
+  // measured GPU cliff at the top of meta/highlights.ts: past a certain total
+  // allocation every blit becomes a readback and one frame costs 448 ms.
+  //
+  // So a marshal seeing "the replays stopped" and a marshal seeing "the screen
+  // stutters" are looking at the same event, and before this row there was no
+  // way to tell — the same shape as the storage flags above, and the reason
+  // they exist.
+  const hs = highlights.stats();
+  if (!hs.enabled) {
+    out.push({ label: 'replay', value: 'OFF', bad: hs.shedLevel > 0 });
+  } else if (hs.shedLevel > 0) {
+    out.push({
+      label: 'replay',
+      value: `SHED x${hs.shedLevel} @ ${hs.shedMeanMs.toFixed(1)}ms`,
+      bad: true,
+    });
+  } else {
+    out.push({ label: 'replay', value: `${(hs.bytes / 1048576).toFixed(1)}MB ${hs.avgGrabMs.toFixed(1)}ms` });
+  }
+
+  const rs = highlights.reelStats();
+  out.push({
+    label: 'reel',
+    // `filled/slots` is the number that says whether attract has anything to
+    // show. 0/4 on a fresh boot is correct; 0/4 an hour in is not.
+    value: rs.enabled ? `${rs.filled}/${rs.slots}` : 'OFF',
+    bad: !rs.enabled && hs.enabled,
+  });
+
+  // 8. Render cost, to separate "the game is slow" from "vision is slow".
   out.push({ label: 'frame', value: `${(fc.dt * 1000).toFixed(1)}ms` , bad: fc.dt > 0.03 });
 
   return out;

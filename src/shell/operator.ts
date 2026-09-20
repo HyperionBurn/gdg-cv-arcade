@@ -41,6 +41,7 @@ import { vision } from '../core/vision';
 import type { TrackedPlayer } from '../core/tracker';
 import { audio } from '../engine/audio';
 import { leaderboard, type GameId } from '../meta/leaderboard';
+import { highlights } from '../meta/highlights';
 import { tunables, type TunableSpec } from '../meta/tunables';
 import {
   MAX_PLAYERS,
@@ -646,6 +647,20 @@ export class OperatorOverlay {
         break;
     }
     this.body.scrollTop = 0;
+  }
+
+  /**
+   * Re-render the current tab IN PLACE, keeping the scroll position.
+   *
+   * `renderTab` jumps to the top, which is right when you switch tabs and
+   * wrong when a button you just pressed rebuilds the pane underneath you:
+   * the REPLAYS and REEL switches sit at the bottom of a long DATA tab, and
+   * losing your place on every press makes a two-press sequence feel broken.
+   */
+  private refresh(): void {
+    const at = this.body?.scrollTop ?? 0;
+    this.renderTab();
+    if (this.body) this.body.scrollTop = at;
   }
 
   /* ---------------- tuning ---------------- */
@@ -1285,7 +1300,103 @@ export class OperatorOverlay {
       pane.appendChild(list);
     }
 
+    this.appendReplaySection(pane);
+
     return pane;
+  }
+
+  /**
+   * THE BIGGEST ALLOCATION IN THE APP HAD NO CONTROL AND NO READOUT.
+   *
+   * The highlight buffer is 18.9 MB across two canvases plus 2.4 MB of attract
+   * reel, and its cost guard can shed both without a word to anybody. The
+   * failure it guards against is the measured GPU cliff in meta/highlights.ts:
+   * past a certain total allocation every blit becomes a readback and one
+   * frame costs 448 ms.
+   *
+   * So on the wrong laptop, "the replays stopped" and "the screen stutters"
+   * are the SAME EVENT, and there was no way to tell from the outside. That is
+   * the same shape as the storage flags — a thing that quietly stops working
+   * while everything above it carries on looking fine — and it gets the same
+   * treatment: a readout that says what happened, and a switch to undo it.
+   *
+   * Live values, read at build time. The console rebuilds its pane on every
+   * open, which is exactly when a marshal is asking.
+   */
+  private appendReplaySection(pane: HTMLElement): void {
+    const hs = highlights.stats();
+    const rs = highlights.reelStats();
+
+    pane.appendChild(el('h3', 'op-group-title', 'REPLAYS & ATTRACT REEL'));
+    pane.appendChild(
+      el(
+        'p',
+        'op-hint',
+        'Instant replay on the results screen, and the looping highlight card ' +
+          'attract shows when nobody is in frame. Both shed themselves if capture ' +
+          'gets expensive — the reel goes first, because it is the only one a ' +
+          'player never waits for.'
+      )
+    );
+
+    const kv = el('div', 'op-kv');
+    const addKV = (k: string, v: string): void => {
+      const rowEl = el('div', 'op-kv-row');
+      rowEl.appendChild(el('span', undefined, k));
+      rowEl.appendChild(el('b', undefined, v));
+      kv.appendChild(rowEl);
+    };
+    addKV('BUFFER', hs.enabled ? `${(hs.bytes / 1048576).toFixed(1)} MB` : 'OFF');
+    addKV(
+      'GRAB COST',
+      hs.grabs > 0 ? `${hs.avgGrabMs.toFixed(2)} ms avg · ${hs.maxGrabMs.toFixed(1)} ms max` : '—'
+    );
+    addKV(
+      'SHED',
+      hs.shedLevel === 0 ? 'none' : `level ${hs.shedLevel} at ${hs.shedMeanMs.toFixed(1)} ms/grab`
+    );
+    addKV(
+      'REEL',
+      rs.enabled
+        ? `${rs.bytes ? (rs.bytes / 1048576).toFixed(1) + ' MB · ' : ''}${rs.filled} of ${rs.slots} slots`
+        : 'OFF'
+    );
+    pane.appendChild(kv);
+
+    if (hs.shedLevel > 0) {
+      pane.appendChild(
+        el(
+          'p',
+          'op-warn',
+          'Capture cost went over budget and the buffer shed itself. This laptop ' +
+            'may be past the GPU memory cliff. Turning replays back on resets the ' +
+            'shed and the reel; if it sheds again, leave it off.'
+        )
+      );
+    }
+
+    const row = el('div', 'op-row');
+    row.appendChild(
+      button('op-btn', hs.enabled ? 'TURN REPLAYS OFF' : 'TURN REPLAYS ON', () => {
+        highlights.setEnabled(!highlights.stats().enabled);
+        this.refresh();
+      })
+    );
+    row.appendChild(
+      button('op-btn', rs.enabled ? 'TURN REEL OFF' : 'TURN REEL ON', () => {
+        highlights.setReelEnabled(!highlights.reelEnabled);
+        this.refresh();
+      })
+    );
+    if (rs.filled > 0) {
+      row.appendChild(
+        confirmable('op-btn', 'CLEAR REEL', 'REALLY CLEAR?', () => {
+          highlights.clearReel();
+          this.refresh();
+        })
+      );
+    }
+    pane.appendChild(row);
   }
 }
 
