@@ -754,6 +754,34 @@ PLAN.md §3 flags the Runner as most likely to be cut. The build is good, but th
 jump window is **0.37–0.45s minus 0.10s of unavoidable detection latency**, which
 is rhythm-game tight for a body under hall lighting.
 
+**The window is now measured, not estimated, 2026-09-20.** "Rhythm-game
+tight" was an impression; this is the number. Driving the Runner with the
+jump fired at a PRECISE lead before each low row, and attributing each
+obstacle individually through `debugState().hits`:
+
+| Lead before the row | Cleared |
+|---|---|
+| 0.12s | 0 of 2 |
+| 0.20s | 2 of 5 |
+| 0.24s | 4 of 4 |
+| 0.28s | 4 of 4 |
+| 0.45s | 2 of 2 |
+| 0.70s | 2 of 2 |
+| 0.95s | 0 of 1 |
+
+So the clearing window runs from about **0.24s to about 0.7s** of lead — a
+width of roughly **0.46s**, against a `JUMP_DURATION` of 0.78s. Detection
+latency shifts that window earlier, it does not narrow it, so a player has to
+leave the ground between roughly 0.34s and 0.8s before the row.
+
+**Read what this does and does not say.** It measures the GAME's tolerance,
+not whether a body under hall lighting can hit it — that still needs the
+rehearsal, and it is the whole reason `lowFaced`/`lowHit` are in the round
+log. Sample sizes are one to five per point, so treat the edges as
+approximate and the middle as solid. What it does settle is that the
+forgiveness budget is about half a second rather than the 0.37-0.45s this
+section assumed, which is the more comfortable end of the argument.
+
 **Also confirm the streak cap with people.** `STREAK_CAP` was 12 and is now
 **8**. Measured over full 60s rounds with momentum forced to MAX — the most
 rows a round can possibly hold — a round contains **10, 10, 7, 17** scoring
