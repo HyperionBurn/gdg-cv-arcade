@@ -6,7 +6,7 @@
  * one — and exactly one getUserMedia — camera.ts.
  */
 
-import { camera } from './core/camera';
+import { camera, recoveryDelayMs } from './core/camera';
 import { vision } from './core/vision';
 import { setCameraAspect } from './core/tracker';
 import { audio } from './engine/audio';
@@ -208,7 +208,9 @@ function drawRigHealth(fc: FrameContext): void {
   // getUserMedia every ten seconds costs nothing against a dead stall.
   if (cam.status === 'error' && fc.now >= recoverAt) {
     recoverTries++;
-    recoverAt = fc.now + Math.min(10000, 1000 * 2 ** (recoverTries - 1));
+    // The sequence itself lives in core/camera.ts, where a test can read it —
+    // the README promises it to a marshal and tells them to wait through it.
+    recoverAt = fc.now + recoveryDelayMs(recoverTries);
     void camera.start();
   }
 

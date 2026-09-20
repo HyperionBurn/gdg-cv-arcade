@@ -38,6 +38,42 @@ export interface CameraOptions {
 
 const DEFAULT_OPTIONS: CameraOptions = { width: 1280, height: 720 };
 
+/**
+ * THE SCHEDULE A MARSHAL IS TOLD TO WAIT THROUGH.
+ *
+ * README's failure table answers a red CAMERA LOST bar with "It is already
+ * retrying — 1s, 2s, 4s, 8s, then every 10s, forever. Most USB knocks come
+ * back inside two tries", and the instruction is literally to **wait**. That
+ * makes the sequence a promise to a person standing in front of a queue with
+ * no way to check it, which is the same class of claim as the slider names
+ * `runbook.test.ts` already guards.
+ *
+ * It lived as an inline expression in `main.ts`, which cannot be imported in a
+ * test because it boots the app on evaluation — so nothing was checking it,
+ * and a change to the base or the cap would have quietly turned the runbook
+ * into fiction. Here it is a pure function of the attempt number, and
+ * `tests/recovery.test.ts` reads the sequence back out of the README.
+ *
+ * Doubling, then flat: the common causes (a bag catching the USB lead, an OS
+ * device suspend) come back the moment `getUserMedia` is asked again, so the
+ * early tries are close together; after that it is a real fault and one
+ * getUserMedia every ten seconds costs nothing against a dead stall.
+ */
+export const RECOVER_BASE_MS = 1000;
+export const RECOVER_CAP_MS = 10_000;
+
+/** Delay AFTER attempt `tries` (1-based) before the next one. */
+export function recoveryDelayMs(tries: number): number {
+  return Math.min(RECOVER_CAP_MS, RECOVER_BASE_MS * 2 ** (Math.max(1, tries) - 1));
+}
+
+/** Wall-clock ms from the first attempt to the start of attempt `n` (1-based). */
+export function recoveryElapsedMs(n: number): number {
+  let t = 0;
+  for (let i = 1; i < Math.max(1, n); i++) t += recoveryDelayMs(i);
+  return t;
+}
+
 const STORAGE_KEY = 'gdg-arcade:camera-device';
 
 type Listener = (state: CameraState) => void;
