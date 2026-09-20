@@ -42,6 +42,7 @@ import type { TrackedPlayer } from '../core/tracker';
 import { audio } from '../engine/audio';
 import { leaderboard, type GameId } from '../meta/leaderboard';
 import { highlights } from '../meta/highlights';
+import { ghosts } from '../meta/ghosts';
 import { tunables, type TunableSpec } from '../meta/tunables';
 import {
   MAX_PLAYERS,
@@ -1173,18 +1174,36 @@ export class OperatorOverlay {
 
     const danger = el('div', 'op-row op-row-danger');
     const name = GAMES.find((g) => g.id === this.scoresGame)?.name ?? this.scoresGame;
+
+    // THE GHOST IS A SAVED RUN, SO CLEARING A BOARD HAS TO CLEAR IT.
+    //
+    // `ghosts.clearAll()` existed with ZERO call sites anywhere in the tree,
+    // and these two buttons wiped the boards and the faction totals and left
+    // every recorded run in place. The result is a screen that contradicts
+    // itself: the leaderboard rail says BE THE FIRST! while the HUD races the
+    // player against "3 BEHIND BEST" — a best that is on no board and belongs
+    // to nobody. Seen exactly that way after pressing CLEAR EVERYTHING here.
+    //
+    // It matters at setup. The morning of the 24th starts with whatever the
+    // rig check and the demo rounds left behind, and CLEAR EVERYTHING is the
+    // button for making the stall look untouched. A button that says
+    // EVERYTHING and means "most things" is worse than one that says less.
     danger.appendChild(
       confirmable('op-btn op-btn-danger', `CLEAR ${name}`, 'CONFIRM — CLEAR THIS BOARD', () => {
         leaderboard.clearGame(this.scoresGame);
+        ghosts.clear(this.scoresGame);
+        this.refresh();
       })
     );
     danger.appendChild(
       confirmable(
         'op-btn op-btn-danger',
         'CLEAR EVERYTHING',
-        'CONFIRM — WIPE ALL BOARDS + FACTIONS',
+        'CONFIRM — WIPE ALL BOARDS + FACTIONS + GHOSTS',
         () => {
           leaderboard.clearAll();
+          ghosts.clearAll();
+          this.refresh();
         }
       )
     );

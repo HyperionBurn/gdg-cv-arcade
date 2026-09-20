@@ -191,3 +191,68 @@ describe('the console has every button the runbook names', () => {
     );
   });
 });
+
+
+/**
+ * A GHOST IS A SAVED RUN, SO CLEARING A BOARD HAS TO CLEAR IT.
+ *
+ * `ghosts.clearAll()` existed with ZERO call sites anywhere in the tree, and
+ * the console's two clear buttons wiped the boards and the faction totals and
+ * left every recorded run in place.
+ *
+ * The result contradicts itself on screen, and it was seen that way: after
+ * pressing CLEAR EVERYTHING the leaderboard rail says BE THE FIRST! while the
+ * HUD races the player against "1 BEHIND BEST" — a best that is on no board
+ * and belongs to nobody. It also MASKS the day-one chase line: a live ghost
+ * outranks the board in the chase precedence, so `<SET THE FIRST SCORE>` never
+ * appeared until the ghosts went too.
+ *
+ * It matters at setup. The morning of the 24th starts with whatever the rig
+ * check and the demo rounds left behind, and CLEAR EVERYTHING is the button
+ * for making the stall look untouched.
+ */
+describe('clearing a board clears the runs recorded against it', () => {
+  const operatorSrc = async (): Promise<string> => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/shell/operator.ts', 'utf8');
+    return src
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\/\/.*$/, ''))
+      .join('\n');
+  };
+
+  test('CLEAR EVERYTHING clears the ghosts too', async () => {
+    const code = await operatorSrc();
+    const at = code.indexOf("'CLEAR EVERYTHING'");
+    assert.ok(at > 0, 'the CLEAR EVERYTHING button is gone');
+    const span = code.slice(at, at + 400);
+    assert.match(span, /leaderboard\.clearAll\(\)/, 'it no longer clears the boards');
+    assert.match(
+      span,
+      /ghosts\.clearAll\(\)/,
+      'it leaves every recorded run behind, so the first player of the day ' +
+        'races a ghost whose score is on no board'
+    );
+  });
+
+  test('and so does clearing one board', async () => {
+    const code = await operatorSrc();
+    const at = code.indexOf('CONFIRM — CLEAR THIS BOARD');
+    assert.ok(at > 0, 'the per-board clear is gone');
+    const span = code.slice(Math.max(0, at - 200), at + 300);
+    assert.match(span, /leaderboard\.clearGame\(/, 'it no longer clears that board');
+    assert.match(span, /ghosts\.clear\(/, 'it leaves that game’s recorded run behind');
+  });
+
+  /** The confirm text is what a marshal reads before committing. */
+  test('and the confirmation says what it is about to destroy', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/shell/operator.ts', 'utf8');
+    assert.match(
+      src,
+      /CONFIRM — WIPE ALL BOARDS \+ FACTIONS \+ GHOSTS/,
+      'the confirm promises less than the button does'
+    );
+  });
+});

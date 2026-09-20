@@ -23,6 +23,7 @@ import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { FruitNinjaGame } from '../src/games/fruitninja.ts';
+import { leaderboard } from '../src/meta/leaderboard.ts';
 import {
   highlights,
   DEFAULT_CONFIG,
@@ -680,5 +681,55 @@ describe('a party round shows who won', () => {
       /partyMode/,
       'party rounds stopped feeding the attract reel; only the REPLAY should be suppressed'
     );
+  });
+});
+
+/**
+ * THE MORNING OF THE 24th IS THE ONLY TIME THESE PATHS RUN.
+ *
+ * Every board starts empty, so the first player of each game takes a branch
+ * nobody has ever seen. games/base.ts has a line for exactly that moment —
+ * `<FIRST ON THE BOARD>`, under a comment reading "NEW RECORD would be a lie,
+ * and #1 of 1 is joyless" — and it could never be seen.
+ *
+ * It draws on the results panel; the panel is suppressed whenever a replay is
+ * playing; and an empty board guarantees the score places and therefore that a
+ * replay plays. The condition that makes the line fire is the same condition
+ * that hides it. Third unreachable-by-construction feature found today by
+ * counting things that never happen.
+ *
+ * So the STAMP says it, on the thing that is actually on screen. Verified in
+ * the browser with every board and ghost cleared: round one stamps FIRST ON
+ * THE BOARD, round two stamps #2 TODAY.
+ */
+describe('the first score of the day says so', () => {
+  test('an empty board is stamped FIRST ON THE BOARD, not #1 TODAY', () => {
+    reset();
+    leaderboard.clearAll();
+    fill();
+    assert.equal(highlights.captureIfWorthy('sixtyseven' as never, 180), true);
+    assert.equal(highlights.clipMeta()?.label, 'FIRST ON THE BOARD');
+  });
+
+  test('and the second score is ranked normally', () => {
+    reset();
+    leaderboard.clearAll();
+    leaderboard.submit('sixtyseven' as never, 200, 'WAS', null);
+    fill();
+    assert.equal(highlights.captureIfWorthy('sixtyseven' as never, 180), true);
+    assert.equal(highlights.clipMeta()?.label, '#2 TODAY');
+  });
+
+  /**
+   * `isRecord` is `rank === 1 && board.length > 0`, so beating somebody is
+   * still a record and must not be relabelled.
+   */
+  test('and beating somebody is still a record', () => {
+    reset();
+    leaderboard.clearAll();
+    leaderboard.submit('sixtyseven' as never, 100, 'WAS', null);
+    fill();
+    assert.equal(highlights.captureIfWorthy('sixtyseven' as never, 300), true);
+    assert.equal(highlights.clipMeta()?.label, 'NEW RECORD');
   });
 });

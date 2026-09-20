@@ -269,7 +269,11 @@ screen all morning.
    This is the post-event writeup (PLAN.md §4) and it is **the only copy** — it
    lives in this browser profile on this laptop and nowhere else. A cleared
    profile, a different browser, a borrowed laptop, or somebody pressing
-   CLEAR EVERYTHING loses the whole day with no way back.
+   CLEAR EVERYTHING loses the whole day with no way back. **CLEAR EVERYTHING
+   now also wipes the ghost runs**, which is what makes it safe to press
+   before the doors open: it used to leave them, so the first real player of
+   the day raced an invisible best from the rig check while the board beside
+   them said BE THE FIRST!
 2. **EXPORT TUNING JSON.** Every threshold as you left it. This is the handover
    between the 24th and the 26th: drop it back in on day 2 and you start where
    day 1 finished instead of re-learning the room.

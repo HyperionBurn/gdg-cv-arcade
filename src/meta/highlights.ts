@@ -937,7 +937,21 @@ class Highlights {
       gameId: game,
       score,
       rank: r.rank,
-      label: r.isRecord ? 'NEW RECORD' : `#${r.rank ?? '?'} TODAY`,
+      // '#1 TODAY' IS TRUE AND FLAT WHEN THERE IS NOBODY ELSE.
+      //
+      // `isRecord` is `rank === 1 && board.length > 0`, so the very first score
+      // on a board takes the '#1 TODAY' branch. games/base.ts has a line for
+      // exactly this moment — `<FIRST ON THE BOARD>`, with a comment saying
+      // "NEW RECORD would be a lie, and #1 of 1 is joyless" — and it can never
+      // be seen: it draws on the results panel, and the panel is suppressed
+      // whenever a replay is playing, and an empty board guarantees the score
+      // places and therefore that a replay plays. The condition that makes the
+      // line fire is the same condition that hides it.
+      //
+      // So the stamp says it instead, on the thing that IS on screen. This is
+      // the morning of the 24th, every board, and it is worth more than a
+      // ranking against nobody.
+      label: r.isFirst ? 'FIRST ON THE BOARD' : r.isRecord ? 'NEW RECORD' : `#${r.rank ?? '?'} TODAY`,
       ...meta,
     });
   }
