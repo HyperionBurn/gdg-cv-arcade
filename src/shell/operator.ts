@@ -44,6 +44,7 @@ import { leaderboard, type GameId } from '../meta/leaderboard';
 import { highlights } from '../meta/highlights';
 import { ghosts } from '../meta/ghosts';
 import { tunables, type TunableSpec } from '../meta/tunables';
+import { roundLog } from '../meta/roundlog';
 import {
   MAX_PLAYERS,
   TOURNAMENT_GAMES,
@@ -1306,7 +1307,41 @@ export class OperatorOverlay {
         })
       );
     }
+
+    // ONE LINE PER ROUND, WHICH IS THE ONLY EXPORT THAT SAYS HOW A ROUND WENT.
+    //
+    // The other three carry what a round ENDED on. FEEDBACK.md's four open
+    // rows each name a number to measure — Runner hit rate by obstacle kind,
+    // Pose Match pass rate, initials entry times, Red Light lane holding — and
+    // none of them is recoverable from a scoreboard. Offered only once there
+    // is something in it, for the same reason the bracket button is.
+    if (roundLog.count() > 0) {
+      exports.appendChild(
+        button('op-btn', 'EXPORT ROUNDS JSON', () => {
+          download(`gdg-arcade-rounds-${stamp()}.json`, roundLog.exportJSON());
+        })
+      );
+    }
     pane.appendChild(exports);
+
+    // Says the log is filling up without making anybody export it to find out.
+    // A marshal reading 0 rounds after an hour knows something is wrong; the
+    // same marshal reading nothing at all learns it after the event.
+    const roundCounts = roundLog.countsByGame();
+    pane.appendChild(
+      el(
+        'p',
+        'op-hint',
+        roundCounts.length === 0
+          ? 'Round log: empty. It fills as rounds finish, and carries the ' +
+            'per-round detail the playtest questions need.'
+          : `Round log: ${roundLog.count()} rounds — ` +
+            roundCounts
+              .map((c) => `${GAMES.find((g) => g.id === c.game)?.name ?? c.game} ${c.rounds}`)
+              .join(' · ') +
+            (roundLog.saveFailed ? ' — NOT SAVING' : '')
+      )
+    );
 
     pane.appendChild(
       el(
