@@ -286,6 +286,37 @@ in the cleared-board run. Checking the wrong one of those two costs an hour.
 
 ---
 
+## Every sweep tested the dev build. Now one tests the real one.
+
+`turn()`, `smoke()` and `census()` all hang off `window.__arcade`, and that was
+gated on `import.meta.env.DEV` alone — so the artifact that goes to the stall
+had never been driven by any of them. Four of the bugs found on the 20th were
+production-only, including failure screens at 1.11:1 because an opaque canvas
+initialises to solid black, which the dev server cannot reproduce.
+
+```bash
+npm run build:probe      # real pipeline, dev handle kept, into dist-probe
+npm run preview:probe    # serves it on 4174
+```
+
+`vite build --mode probe` is minified, tree-shaken and HMR-free like the real
+thing. The SHIPPED `vite build` has MODE 'production', so the comparison folds
+to false and the block is eliminated. **Verified by grepping both bundles: 0
+occurrences of `__arcade` in `dist`, 6 in `dist-probe`**, and no `runTurn`,
+`runSmoke` or `runCensus` in `dist` at all.
+
+Both halves matter. The handle can clear the leaderboard and rewrite every
+tunable, and the stall laptop sits in a room full of people who know what
+devtools is. `runbook.test.ts` guards the gate, that only one place assigns
+it, that the probe build writes somewhere else, and that the shipped script
+never selects probe mode.
+
+**First run of it, 20 September: all 13 turns green on the production bundle,
+zero console errors.** The canvas preflight fired there too, which is how I
+know it reads the same in both.
+
+---
+
 ## The same trick, pointed at the test suite
 
 The census asks "what does the app never draw?". Point it at `tests/` and it

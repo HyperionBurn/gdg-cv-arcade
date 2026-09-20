@@ -3,6 +3,9 @@ node_modules/
 
 # Build output
 dist/
+# The probe build: the real pipeline with the dev handle kept, for sweeping
+# the shipped artifact. Never deployed. See the note in main.ts.
+dist-probe/
 .vite/
 
 # Fetched at setup time, not source.

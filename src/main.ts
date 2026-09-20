@@ -516,7 +516,25 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // Dev introspection. Also what the operator console will hang off later.
-if (import.meta.env.DEV) {
+//
+// AND THE `probe` MODE, WHICH EXISTS SO THE SHIPPED PIPELINE CAN BE SWEPT.
+//
+// `turn()`, `smoke()` and `census()` all hang off this handle, so gating it on
+// DEV alone meant every automated check in this repo tested the DEV build and
+// nothing ever tested the artifact that goes to the stall. That is not
+// theoretical: four bugs found on the 20th were production-only, including
+// failure screens rendering ink-on-black at 1.11:1 because an opaque canvas
+// initialises to solid black — which cannot happen under the dev server.
+//
+// `vite build --mode probe` is the real pipeline — minified, tree-shaken, no
+// HMR — with this handle kept. The SHIPPED build is still `vite build`, where
+// MODE is 'production', the comparison folds to false and the whole block is
+// eliminated. Verified by grepping both bundles; see `npm run build:probe`.
+//
+// It matters that the real build drops it: this handle can clear the
+// leaderboard and rewrite every tunable, and the stall laptop sits in a room
+// full of people who know what devtools is.
+if (import.meta.env.DEV || import.meta.env.MODE === 'probe') {
   (window as unknown as Record<string, unknown>).__arcade = {
     router,
     camera,

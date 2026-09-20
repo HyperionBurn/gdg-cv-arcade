@@ -622,3 +622,84 @@ describe('every live-tunable constant agrees with the registry', () => {
     );
   });
 });
+
+/**
+ * THE DEV HANDLE MUST NOT SHIP, AND THE SWEEPS MUST STILL BE ABLE TO REACH IT.
+ *
+ * `turn()`, `smoke()` and `census()` all hang off `window.__arcade`, and it
+ * was gated on `import.meta.env.DEV` alone. So every automated check in this
+ * repo tested the DEV build, and the artifact that actually goes to the stall
+ * was verified only by hand. That is not theoretical: four bugs found on the
+ * 20th were production-only, including failure screens rendering
+ * ink-on-black at 1.11:1 because an opaque canvas initialises to solid black,
+ * which cannot happen under the dev server.
+ *
+ * `vite build --mode probe` now produces the real pipeline — minified,
+ * tree-shaken, no HMR — with the handle kept, into `dist-probe`. The shipped
+ * `vite build` has MODE 'production', the comparison folds to false, and the
+ * block is eliminated. Verified by grepping both bundles: 0 occurrences of
+ * `__arcade` in `dist`, 6 in `dist-probe`.
+ *
+ * Both halves of that matter. The handle can clear the leaderboard and
+ * rewrite every tunable, and the stall laptop sits in a room full of people
+ * who know what devtools is.
+ */
+describe('the dev handle is reachable for sweeps and absent from the build', () => {
+  const mainSrc = async (): Promise<string> => {
+    const { readFile } = await import('node:fs/promises');
+    return readFile('src/main.ts', 'utf8');
+  };
+
+  test('the gate is a build-mode check, not an unconditional assignment', async () => {
+    const src = await mainSrc();
+    const gate = /if \(import\.meta\.env\.DEV[^)]*\) \{/.exec(src);
+    assert.ok(
+      gate,
+      'window.__arcade is no longer behind a build gate at all, so the shipped ' +
+        'bundle hands a stranger leaderboard.clearAll()',
+    );
+    assert.match(
+      gate[0],
+      /MODE === 'probe'/,
+      'the gate lost the probe mode, so no sweep can reach the production ' +
+        'pipeline and every check is testing the dev build again',
+    );
+  });
+
+  test('nothing assigns the handle outside that gate', async () => {
+    const src = await mainSrc();
+    const assignments = [...src.matchAll(/__arcade\s*=/g)];
+    assert.equal(
+      assignments.length,
+      1,
+      'more than one place assigns window.__arcade; only the gated one is safe',
+    );
+  });
+
+  /**
+   * The probe build has to stay buildable and separate. Sharing `dist` would
+   * mean the last build wins, and the one that gets deployed would depend on
+   * which command ran most recently.
+   */
+  test('the probe build is a separate script and a separate directory', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const pkg = JSON.parse(await readFile('package.json', 'utf8')) as {
+      scripts: Record<string, string>;
+    };
+    const probe = pkg.scripts['build:probe'];
+    assert.ok(probe, 'the probe build script is gone, so the shipped pipeline is unsweepable');
+    assert.match(probe, /--mode probe/, 'the probe build no longer selects the probe mode');
+    assert.match(probe, /--outDir dist-probe/, 'the probe build would overwrite the real dist');
+    assert.doesNotMatch(
+      pkg.scripts['build'] ?? '',
+      /probe/,
+      'the SHIPPED build now selects the probe mode, which ships the dev handle',
+    );
+  });
+
+  test('and the probe output is not committed', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const ignored = await readFile('.gitignore', 'utf8');
+    assert.match(ignored, /dist-probe/, 'the probe bundle would be committed');
+  });
+});

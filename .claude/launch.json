@@ -4,14 +4,29 @@
     {
       "name": "arcade",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 5173
     },
     {
       "name": "arcade-prod",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "preview"],
+      "runtimeArgs": [
+        "run",
+        "preview"
+      ],
       "port": 4173
+    },
+    {
+      "name": "arcade-probe",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "preview:probe"
+      ],
+      "port": 4174
     }
   ]
 }
