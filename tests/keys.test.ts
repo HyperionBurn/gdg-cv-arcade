@@ -22,7 +22,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { SCREEN_KEYS } from '../src/shell/router.ts';
+import { SCREEN_KEYS, router } from '../src/shell/router.ts';
 
 const readme = async (): Promise<string> => {
   const { readFile } = await import('node:fs/promises');
@@ -149,6 +149,73 @@ describe('main.ts routes through the tested map', () => {
       code,
       /if\s*\(\s*mid\s*&&\s*!e\.shiftKey\s*\)\s*return/,
       'the shift guard is gone, so an elbow on the keyboard can end a turn'
+    );
+  });
+});
+
+
+/**
+ * `?screen=` IS A DAY-OF TOOL AND A TYPO GAVE A BLACK SCREEN.
+ *
+ * README documents it: "Boot straight to a screen." It went to `router.go`
+ * unchecked, and `go` on an unknown id logs a console warning and RETURNS — so
+ * at boot, when nothing is mounted yet, nothing ever gets mounted. The render
+ * loop has no screen to draw and a marshal who typed `?screen=redlihgt` gets a
+ * black rectangle with nothing to press.
+ *
+ * That is the same failure `showBoot` was hardened against, reached by a
+ * different road: a typo in a query string rather than a throw during boot. A
+ * wrong screen that still runs costs one keystroke; a blank one at a stall
+ * costs the queue.
+ */
+describe('an unknown screen name does not leave a blank screen', () => {
+  test('router.go on an unknown id mounts nothing — the hazard itself', async () => {
+    // The singleton, with nothing registered: main.ts is what registers the
+    // screens and no test can import it. That makes every id unknown here,
+    // which is exactly the case under test.
+    const before = router.currentId;
+    await router.go('redlihgt');
+    assert.equal(
+      router.currentId,
+      before,
+      'go() now mounts something for an unknown id, so the fallback in boot() ' +
+        'may no longer be needed — check before deleting it'
+    );
+    assert.equal(router.has('redlihgt'), false, 'a typo is not a registered screen');
+  });
+
+  test('and boot filters the query parameter through router.has', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/main.ts', 'utf8');
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\/\/.*$/, ''))
+      .join('\n');
+
+    assert.match(
+      code,
+      /router\.has\(wanted\)/,
+      'the ?screen= parameter is no longer checked against the registered ' +
+        'screens, so a typo mounts nothing'
+    );
+    assert.doesNotMatch(
+      code,
+      /router\.go\(new URLSearchParams/,
+      'boot passes the raw query parameter straight to router.go again'
+    );
+  });
+
+  /** Both entry points — the simulator path and the camera path. */
+  test('on both boot paths', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/main.ts', 'utf8');
+    const calls = [...src.matchAll(/router\.go\(requestedScreen\('(\w+)'\)\)/g)].map((m) => m[1]);
+    assert.deepEqual(
+      calls.sort(),
+      ['attract', 'sixtyseven'],
+      'one of the two boot paths no longer falls back — ?sim=1 and the camera ' +
+        'path each have their own default'
     );
   });
 });

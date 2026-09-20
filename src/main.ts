@@ -349,6 +349,31 @@ async function loadFonts(): Promise<void> {
   ]);
 }
 
+/**
+ * The `?screen=` deep link, WITH A FALLBACK.
+ *
+ * README documents this as a day-of tool: "Boot straight to a screen." It went
+ * to `router.go` unchecked, and `go` on an unknown id logs a console warning
+ * and RETURNS — so nothing is ever mounted, the render loop has no screen to
+ * draw, and a marshal who mistyped `?screen=redlihgt` gets a black rectangle
+ * with nothing to press.
+ *
+ * That is the exact failure `showBoot` was hardened against yesterday, reached
+ * by a different road: a typo in a query string rather than a throw during
+ * boot. A wrong screen that still runs is recoverable in one keystroke; a
+ * blank one at a stall is not.
+ *
+ * The miss is logged rather than swallowed, so `d` says why the screen a
+ * marshal asked for is not the one they got.
+ */
+function requestedScreen(fallback: string): string {
+  const wanted = new URLSearchParams(location.search).get('screen');
+  if (!wanted) return fallback;
+  if (router.has(wanted)) return wanted;
+  logDebug(`unknown ?screen=${wanted} — starting on ${fallback} instead`);
+  return fallback;
+}
+
 async function boot(): Promise<void> {
   startTime = performance.now();
   lastTime = startTime;
@@ -379,7 +404,7 @@ async function boot(): Promise<void> {
   if (SIM) {
     // Skip camera and MediaPipe entirely. Games see synthetic poses.
     simulator.auto = true;
-    await router.go(new URLSearchParams(location.search).get('screen') ?? 'sixtyseven');
+    await router.go(requestedScreen('sixtyseven'));
     return;
   }
 
@@ -409,7 +434,7 @@ async function boot(): Promise<void> {
     return;
   }
 
-  await router.go(new URLSearchParams(location.search).get('screen') ?? 'attract');
+  await router.go(requestedScreen('attract'));
 }
 
 /* ------------------------------------------------------------------ */
