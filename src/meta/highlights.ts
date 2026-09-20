@@ -522,7 +522,24 @@ class Highlights {
    * A workload nobody will ever run is not evidence about that, so the harness
    * says so rather than the guard trying to infer it from a clock it has been
    * handed. Capture still HAPPENS under `synthetic` — the turn sweep is how we
-   * know a real round enrols into the reel — only the cost sampling pauses.
+   * know a real round enrols into the reel — only the guard's DECISION pauses.
+   *
+   * THAT IS NARROWER THAN "the cost sampling pauses", which is what this note
+   * used to claim, and the difference shows up on a screen. `guard()` returns
+   * early, so `window`, `strikes` and `shedLevel` are untouched — but `grabs`,
+   * `grabTotal` and `grabMax` keep counting, because they are the evidence
+   * that capture ran at all, which is the other half of what the sweep is for.
+   *
+   * So `avgGrabMs` stays inflated after a sweep, and BOTH readouts show it:
+   * the `d` overlay's `replay` row and the operator console's REPLAY line.
+   * Measured after an eleven-round `turn()`: 7.99 ms mean against a 4 ms
+   * budget, 402 ms max — which reads exactly like the cliff this file is about
+   * and is nothing of the kind.
+   *
+   * Dev-only: `synthetic` is never true in the production build, because
+   * `__arcade` does not exist there. If it ever does need fixing, the fix is a
+   * taint flag on the stats, not resetting the counters — that would throw
+   * away the proof that the sweep captured anything.
    */
   setSynthetic(on: boolean): void {
     this._synthetic = on;
