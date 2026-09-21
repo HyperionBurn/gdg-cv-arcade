@@ -433,3 +433,109 @@ describe('the numbers the playtest table promises are actually written', () => {
     }
   });
 });
+
+/**
+ * THE MENU IS READ FIRST, AND ONE GAME'S WORDING WAS CHECKED.
+ *
+ * Row 12 exists because Red Light's biggest fix was the INSTRUCTION: testers
+ * read `MOVE ON GREEN` and started walking, which cannot work at a stall. The
+ * game was rewritten around PUMP — and the MENU TILE still said MOVE ON GREEN,
+ * so the rejected wording was the first thing anybody read and the game
+ * contradicted it thirty seconds later.
+ *
+ * The guard written for that pins `id: 'redlight'` to `/PUMP/`. One game. The
+ * other six tiles have never been tied to anything, and the failure was never
+ * about Red Light — it was about a fix landing in the game and not at the point
+ * of first contact. Any of the seven can do that.
+ *
+ * So both sides are pinned, per game. The table does not try to understand
+ * synonyms: it states the word each surface must carry and fails if EITHER
+ * side loses it, which puts a human back in front of the pair. Rhythm is the
+ * case that proves the table has to be hand-written — its tile says PUNCH and
+ * its tagline says FIST, different words for one act, and no rule about shared
+ * vocabulary could tell that apart from the Red Light bug.
+ *
+ * Checked 2026-09-21: all seven agree in substance. Runner is called DUCK on
+ * the tile, CROUCH in its tagline and SLIDE on its HUD pill — three words for
+ * one movement, and Rhythm says DUCK for the same movement in a different
+ * game. Left alone deliberately: those are synonyms a player will follow, not
+ * a contradiction like walking when the game wants you still. Recorded here
+ * because it is the kind of thing that looks like a bug on a later read.
+ */
+describe('every menu tile names what its game names', () => {
+  const MOTION: ReadonlyArray<{
+    game: string;
+    /** Must appear in the tile a stranger reads BEFORE choosing. */
+    blurb: RegExp;
+    /** Must appear in the game's own tagline, so the tile is not alone. */
+    tagline: RegExp;
+    why: string;
+  }> = [
+    { game: 'sixtyseven', blurb: /PUMP/, tagline: /PUMP/, why: 'the motion that scores' },
+    { game: 'fruitninja', blurb: /SLICE/, tagline: /SLICE/, why: 'the motion that scores' },
+    { game: 'balloonpop', blurb: /POP/, tagline: /POP/, why: 'the motion that scores' },
+    {
+      game: 'redlight',
+      blurb: /PUMP/,
+      tagline: /PUMP/,
+      why: 'row 12 — testers read MOVE ON GREEN and walked, which cannot work at a stall',
+    },
+    { game: 'posematch', blurb: /SHAPE/, tagline: /SHAPE/, why: 'what you have to make' },
+    { game: 'runner', blurb: /JUMP/, tagline: /JUMP/, why: 'the action the track is built around' },
+    {
+      game: 'rhythm',
+      blurb: /PUNCH/,
+      tagline: /FIST/,
+      why: 'deliberately different words for one act — the tile names the verb, the tagline names the hand',
+    },
+  ];
+
+  const stripped = async (path: string): Promise<string> =>
+    (await readFile(path, 'utf8'))
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\/\/.*$/, ''))
+      .join('\n');
+
+  test('the table covers every game on the roster', async () => {
+    const menu = await stripped('src/shell/menu.ts');
+    const ids = new Set([...menu.matchAll(/id:\s*'([a-z]+)'/g)].map((m) => m[1]!));
+    const missing = [...ids].filter((id) => !MOTION.some((r) => r.game === id)).sort();
+    assert.deepEqual(
+      missing,
+      [],
+      `these games have a menu tile and no wording guard, which is exactly the ` +
+        `state Red Light was in: ${missing.join(', ')}`
+    );
+    assert.equal(MOTION.length, 7, 'the roster is seven games');
+  });
+
+  for (const row of MOTION) {
+    test(`${row.game}: the tile and the game use the same word`, async () => {
+      const menu = await stripped('src/shell/menu.ts');
+      // Sliced rather than matched with a built pattern: an escaped regex
+      // inside a template literal is the one construction that has been
+      // silently corrupted more than once in this repo.
+      const at = menu.indexOf(`id: '${row.game}'`);
+      assert.ok(at >= 0, `${row.game} has no menu tile any more`);
+      const blurb = /blurb: '([^']+)'/.exec(menu.slice(at, at + 400));
+      assert.ok(blurb, `${row.game} has no menu blurb any more`);
+      assert.match(
+        blurb[1]!,
+        row.blurb,
+        `the tile describes ${row.game} as "${blurb[1]}", which drops ${row.why}. ` +
+          `The tile is read BEFORE the game and the game cannot take it back.`
+      );
+
+      const game = await stripped(`src/games/${row.game}.ts`);
+      const tagline = /tagline:\s*'([^']+)'/.exec(game);
+      assert.ok(tagline, `${row.game} has no tagline any more`);
+      assert.match(
+        tagline[1]!,
+        row.tagline,
+        `${row.game}'s own tagline is "${tagline[1]}", which no longer carries ` +
+          `${row.why} — so the tile is now the only place it is said`
+      );
+    });
+  }
+});
