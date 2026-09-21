@@ -22,7 +22,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { SCREEN_KEYS, router } from '../src/shell/router.ts';
+import { SCREEN_KEYS, router, screenKeyFor } from '../src/shell/router.ts';
 
 const readme = async (): Promise<string> => {
   const { readFile } = await import('node:fs/promises');
@@ -115,7 +115,7 @@ describe('the printed keys table matches the app', () => {
  * checkable and leaving a copy behind is a guard that guards nothing.
  */
 describe('main.ts routes through the tested map', () => {
-  test('it imports SCREEN_KEYS rather than keeping its own', async () => {
+  test('it resolves screen keys through the tested helper', async () => {
     const { readFile } = await import('node:fs/promises');
     const src = await readFile('src/main.ts', 'utf8');
     const code = src
@@ -124,7 +124,19 @@ describe('main.ts routes through the tested map', () => {
       .map((l) => l.replace(/\/\/.*$/, ''))
       .join('\n');
 
-    assert.match(code, /SCREEN_KEYS/, 'main.ts no longer uses the screen-key map at all');
+    assert.match(
+      code,
+      /screenKeyFor\(e\)/,
+      'main.ts no longer resolves screen keys through router.ts, so the ' +
+        'shifted-glyph fix is not on the path a real keypress takes'
+    );
+    assert.doesNotMatch(
+      code,
+      /SCREEN_KEYS\s*\[/,
+      'main.ts indexes the map by hand again, and THAT IS THE BUG: `e.key` is ' +
+        'the character produced, so shift turns 9 into ( before the lookup — ' +
+        'and shift is required for every mid-round jump'
+    );
     assert.doesNotMatch(
       code,
       /const\s+SCREEN_KEYS\s*[:=]/,
@@ -433,5 +445,96 @@ describe('the operator hotkey on the card is the one the app answers', () => {
       /MODIFIER_CODES\.has/,
       'the sweep no longer excuses modifiers, so ctrl itself disqualifies the chord'
     );
+  });
+});
+
+/**
+ * SHIFT CHANGES THE CHARACTER, AND SHIFT IS THE ONLY WAY IN MID-ROUND.
+ *
+ * Found by playing the stall rather than reading it. The card says `9` is "the
+ * light way out of a game that is misbehaving", and the rule printed under the
+ * table says a mid-round jump needs SHIFT held so a bag on the keyboard cannot
+ * end somebody's turn. Both were true of the intent and false of the code.
+ *
+ * `main.ts` looked the map up by `KeyboardEvent.key`, which is the CHARACTER
+ * PRODUCED. Hold shift on a US or UK board and `9` is `(`, `0` is `)`, `1` is
+ * `!`. So the bare press worked and the shifted press — the only one permitted
+ * while a game is running — matched nothing and returned silently. A marshal
+ * pressing SHIFT+9 in front of a queue got no screen change and no feedback.
+ *
+ * Nothing caught it because every test and every probe synthesised `key: '9'`
+ * with `shiftKey: true`, which is a combination no keyboard produces. The
+ * lesson is the same one the operator hotkey learned: a synthetic event is a
+ * model of a keypress, and this file's job is to stop trusting the model.
+ */
+describe('a shifted number key still reaches its screen', () => {
+  /** What a US/UK board actually prints when shift is held over each digit. */
+  const SHIFTED: Readonly<Record<string, string>> = {
+    '0': ')',
+    '1': '!',
+    '2': '@',
+    '3': '#',
+    '4': '$',
+    '5': '%',
+    '6': '^',
+    '7': '&',
+    '8': '*',
+    '9': '(',
+  };
+
+  test('every digit resolves the same shifted as it does bare', () => {
+    for (const [digit, screen] of Object.entries(SCREEN_KEYS)) {
+      const code = `Digit${digit}`;
+
+      assert.equal(
+        screenKeyFor({ key: digit, code }),
+        screen,
+        `a bare ${digit} stopped reaching ${screen}`
+      );
+
+      const glyph = SHIFTED[digit];
+      assert.ok(glyph, `no shifted glyph recorded for ${digit}`);
+      assert.equal(
+        screenKeyFor({ key: glyph, code }),
+        screen,
+        `SHIFT+${digit} sends "${glyph}" and resolves to nothing, so the ` +
+          `mid-round escape to ${screen} does not work on a real keyboard`
+      );
+    }
+  });
+
+  /**
+   * THE EXACT KEYPRESS FROM THE CARD. `9` is the row a marshal reaches for
+   * when a game is misbehaving, and mid-round it can only be pressed shifted.
+   */
+  test('SHIFT+9 reaches the menu, which is the whole escape hatch', () => {
+    assert.equal(screenKeyFor({ key: '(', code: 'Digit9' }), 'menu');
+  });
+
+  /**
+   * The position wins over the character. That is the fix: a layout that
+   * prints something else over Digit9 still jumps to the menu.
+   */
+  test('the physical key decides, not the character it prints', () => {
+    assert.equal(
+      screenKeyFor({ key: 'ø', code: 'Digit9' }),
+      'menu',
+      'a non-US layout printing another glyph over Digit9 stops working'
+    );
+  });
+
+  /**
+   * And `key` still answers when `code` is absent or is not a digit row —
+   * some automation harnesses send an empty `code`, and dropping that fallback
+   * would break every synthetic driver in this suite silently.
+   */
+  test('the character is still read when there is no usable code', () => {
+    assert.equal(screenKeyFor({ key: '9', code: '' }), 'menu');
+    assert.equal(screenKeyFor({ key: '0', code: 'Numpad0' }), 'attract');
+  });
+
+  test('and a key that is not on the card resolves to nothing', () => {
+    assert.equal(screenKeyFor({ key: 'q', code: 'KeyQ' }), null);
+    assert.equal(screenKeyFor({ key: '(', code: 'KeyY' }), null);
   });
 });

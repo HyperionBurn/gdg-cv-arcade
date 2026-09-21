@@ -41,6 +41,34 @@ export const SCREEN_KEYS: Readonly<Record<string, string>> = {
   '9': 'menu',
 };
 
+/**
+ * The screen a keydown asks for, or `null`.
+ *
+ * READ THE PHYSICAL KEY, NOT THE CHARACTER IT PRINTS.
+ *
+ * `KeyboardEvent.key` is the character produced, and SHIFT CHANGES IT. On a US
+ * or UK board Shift+9 is `(`, Shift+0 is `)`, Shift+1 is `!`. So looking this
+ * map up by `key` worked for a bare press and silently did nothing for the
+ * shifted one — and the shifted one is the ONLY one that works mid-round.
+ *
+ * That is the whole escape hatch. The card calls `9` "the light way out of a
+ * game that is misbehaving", the rule under the table says to hold SHIFT
+ * mid-round, and a marshal doing exactly that got nothing at all: no screen
+ * change, no feedback, in front of a queue. Found by playing the game rather
+ * than by reading it, because every existing test drove a synthetic event with
+ * `key: '9'` — which no real keyboard sends while shift is down.
+ *
+ * `code` is the key's POSITION on the board. It does not move with shift and it
+ * does not move with the layout, which is the same reason the operator console
+ * matches on `code`. The `key` fallback stays for environments that leave
+ * `code` empty — some automation harnesses do — and costs nothing, because a
+ * bare digit produces the same string either way.
+ */
+export function screenKeyFor(e: Pick<KeyboardEvent, 'key' | 'code'>): string | null {
+  const digit = /^Digit([0-9])$/.exec(e.code)?.[1] ?? e.key;
+  return SCREEN_KEYS[digit] ?? null;
+}
+
 class Router {
   private factories = new Map<string, ScreenFactory>();
   private current: Screen | null = null;

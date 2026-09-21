@@ -15,7 +15,7 @@ import type { VisionFrame } from './core/types';
 import { resizeCanvas, viewportOf, drawText, measureText, vh } from './engine/draw';
 import { COLORS } from './shell/theme';
 import type { FrameContext } from './shell/screen';
-import { router, SCREEN_KEYS } from './shell/router';
+import { router, screenKeyFor } from './shell/router';
 import { drawDebugOverlay, toggleDebug, watchForDebug, logDebug } from './shell/debug';
 import { probeStorage } from './meta/storage';
 import { leaderboard } from './meta/leaderboard';
@@ -445,7 +445,12 @@ window.addEventListener('keydown', (e) => {
   // A GAME IN PROGRESS IS SOMEBODY'S TURN. A bag or an elbow on the keyboard
   // used to end it: bare 0-9 jump straight to another screen. Holding shift
   // still works, which is what the marshal wants and what the README documents.
-  const target = SCREEN_KEYS[e.key];
+  //
+  // Through `screenKeyFor`, which resolves the PHYSICAL key. Reading `e.key`
+  // here meant shift changed the character out from under the lookup — Shift+9
+  // is `(` — so the shifted press this guard requires mid-round was the one
+  // press that never worked. See the note on `screenKeyFor`.
+  const target = screenKeyFor(e);
   if (target) {
     const mid = router.active?.id !== 'attract' && router.active?.id !== 'menu';
     if (mid && !e.shiftKey) return;
