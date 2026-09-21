@@ -138,11 +138,24 @@ describe('the pose library is internally distinguishable', () => {
           other = q.id;
         }
       }
-      // MEASURED worst of the seven: THE CRANE at 0.600 against THE ORANGUTAN,
-      // i.e. 0.060 of headroom — 6.7x what goalpost/flex lives on.
+      // MEASURED worst of the seven: THE CRANE at 0.628 against THE ORANGUTAN,
+      // i.e. 0.032 of headroom over the 0.66 ceiling.
+      //
+      // WAS 0.605, when the extreme flexion sets (WING -150, OVERHEAD -145)
+      // were still at the anatomical edge. A playtest cohort then reported
+      // the latter half of the ramp as "asking to bend our arms in ways that
+      // ain't possible", and softening both sets to -135 — which every
+      // binding safety check still passes: no held pose can clear another
+      // pose's wall at any point on the ramp, whole-body or legs-cropped —
+      // moved this one pair to 0.628. The margin this test guards is real
+      // and the number is pinned to the measured worst pair so any further
+      // softening or new pose that pushes past it still fails here, but the
+      // honest figure for the shipped library is 0.032 of headroom, and the
+      // binding ceiling test above this one is what actually protects a
+      // player from clearing the wrong wall.
       assert.ok(
-        worst <= 0.605,
-        `${p.id} is ${worst.toFixed(3)} confusable with ${other}; new poses must stay under 0.605`
+        worst <= 0.63,
+        `${p.id} is ${worst.toFixed(3)} confusable with ${other}; new poses must stay under 0.63`
       );
     }
   });

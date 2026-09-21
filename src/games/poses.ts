@@ -861,10 +861,24 @@ export const FLEX_SET = {
   CURL: 125,
   /** Forearm in across the belly. */
   TUCK: -70,
-  /** Forearm folded back over the head. */
-  OVERHEAD: -145,
-  /** Hands tucked in to the ribs, elbows out. */
-  WING: -150,
+  /**
+   * Forearm folded back over the head. WAS -145, softened to -135 with
+   * WING after a playtest cohort reported the latter half of the ramp as
+   * "asking to bend our arms in ways that ain't possible": 145-150° of
+   * flexion is legal anatomy but a stretch hold under a two-second
+   * deadline, and the shapes only need to read as hands overhead, not
+   * to hit the edge of the joint. -135 keeps the silhouette family and
+   * lands inside what a relaxed elbow does without effort.
+   */
+  OVERHEAD: -135,
+  /**
+   * Same softening as OVERHEAD, was -150. Playtest report: "Mabye dial down
+   * the difficulty a bit 😅, thing was asking to bend our arms in ways that
+   * ain't possible bahahahaha. just the latter half, first half is good."
+   * The first half needed nothing — its poses top out at 125° of flexion —
+   * and the latter half is exactly the poses built on this set and OVERHEAD.
+   */
+  WING: -135,
   /** Forearm swept out horizontal. */
   SWEEP: 120,
   ZIG: -105,
