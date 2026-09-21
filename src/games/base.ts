@@ -926,7 +926,7 @@ export abstract class GameBase implements Screen {
     // decides who advances in a live bracket, and the failure would only show
     // at the one announced event of the afternoon.
     //
-    // TO REACH IT: operator console (CTRL+SHIFT+`) -> BRACKET -> type at least
+    // TO REACH IT: operator console (CTRL+Y) -> BRACKET -> type at least
     // two names -> START N-PLAYER BRACKET. Then play that game two-up. The
     // guard below is four conditions and all four have to hold.
     //

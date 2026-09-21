@@ -295,3 +295,143 @@ describe('the Screens table agrees with the key map', () => {
     }
   });
 });
+
+/**
+ * THE ONE ROW ON THE CARD THAT IS NOT A NUMBER.
+ *
+ * The table above parses digits, so the operator row rode along unchecked for
+ * as long as it has existed — and it is the row that matters most when
+ * something is wrong, because it is the only way into the sliders and the only
+ * way out of a detector that has stopped seeing anybody.
+ *
+ * The combo changed from `CTRL+SHIFT+` to `CTRL+Y` on the 21st, and FOUR
+ * separate README passages named the old chord: the keys table, running a
+ * bracket, the mid-event sliders, and the pack-up exports. Three of those are
+ * prose rather than a table row, which is exactly the shape that drifts —
+ * somebody updating "the shortcut" edits the table and never greps.
+ */
+describe('the operator hotkey on the card is the one the app answers', () => {
+  /**
+   * Read as text, with comments stripped. The header in `operator.ts`
+   * deliberately NAMES the old chord to explain why it changed, so a guard
+   * that read prose would find the very string it exists to forbid.
+   */
+  const operatorSrc = async (): Promise<string> => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/shell/operator.ts', 'utf8');
+    return src
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\/\/.*$/, ''))
+      .join('\n');
+  };
+
+  /** Spacing is typography: `CTRL + Y` on the footer and `CTRL+Y` on the card
+   *  are the same key, and neither is worth failing a build over. */
+  const squash = (s: string): string => s.replace(/\s+/g, '').toUpperCase();
+
+  /**
+   * The string a named constant is assigned, found without building a regex
+   * out of the name — an escaped pattern in a template literal is the one
+   * thing in this repo that has been silently corrupted more than once.
+   */
+  const literal = (code: string, name: string): string => {
+    const at = code.indexOf(`${name} =`);
+    assert.ok(at >= 0, `${name} is gone, or is no longer a plain assignment`);
+    const m = /'([^']+)'/.exec(code.slice(at, at + 120));
+    assert.ok(m, `${name} is no longer assigned a string literal this guard can read`);
+    return m[1]!;
+  };
+
+  /** The body of the chord filter, from its own signature to its own brace. */
+  const comboFn = (code: string): string => {
+    const from = code.indexOf('private isComboEvent');
+    assert.ok(from >= 0, 'isComboEvent is gone, so nothing filters the chord at all');
+    return code.slice(from, code.indexOf('\n  }', from) + 4);
+  };
+
+  test('every passage that names it names the current combo', async () => {
+    const md = await readme();
+    const label = literal(await operatorSrc(), 'OPERATOR_COMBO_LABEL');
+
+    const named = [...md.matchAll(/`(CTRL[^`]*)`/gi)].map((m) => m[1]!);
+    assert.ok(
+      named.length >= 4,
+      `the README named this key in four places and now names it in ${named.length}; ` +
+        'a passage that stopped saying it has either lost the key or renamed it'
+    );
+
+    const wrong = [...new Set(named.filter((c) => squash(c) !== squash(label)))];
+    assert.deepEqual(
+      wrong,
+      [],
+      'the printed card sends a marshal to a chord the app does not answer: ' +
+        `${wrong.join(', ')} — it is ${label}`
+    );
+  });
+
+  test('and the label names the key the handler listens for', async () => {
+    const code = await operatorSrc();
+    const label = literal(code, 'OPERATOR_COMBO_LABEL');
+    const combo = literal(code, 'COMBO_CODE');
+
+    // `KeyY` is what the browser compares against; `Y` is what a marshal reads
+    // off the footer. Drift between them is a hotkey nobody can find.
+    const letter = /^Key([A-Z])$/.exec(combo)?.[1];
+    assert.ok(letter, `COMBO_CODE is ${combo}, which this guard cannot turn into a printed label`);
+    assert.ok(
+      squash(label).endsWith(letter!),
+      `the footer and the card both say ${label}, and the handler listens for ${combo}`
+    );
+  });
+
+  /**
+   * A label promising SHIFT while the handler ignores it sends a marshal to a
+   * chord that only works by accident; a handler demanding SHIFT while the card
+   * omits it sends them to one that does not work at all. Both directions.
+   */
+  test('the modifiers the card promises are exactly the ones required', async () => {
+    const code = await operatorSrc();
+    const label = literal(code, 'OPERATOR_COMBO_LABEL');
+    const fn = comboFn(code);
+
+    assert.equal(
+      /!e\.shiftKey/.test(fn),
+      /SHIFT/i.test(label),
+      `the card says ${label} and the handler ` +
+        `${/!e\.shiftKey/.test(fn) ? 'requires' : 'ignores'} shift`
+    );
+    assert.match(fn, /!e\.ctrlKey/, `the card says ${label} and the handler does not require ctrl`);
+  });
+
+  /**
+   * WITH ONLY TWO KEYS IN THE CHORD THIS IS THE WHOLE SAFETY ARGUMENT.
+   *
+   * A player never touches the laptop; a bag, an elbow or a closing lid holds a
+   * dozen keys at once. Three keys made that unlikely by arithmetic. Two do
+   * not, so the console has to refuse to open while anything else is held, and
+   * has to ignore auto-repeat so something RESTING on the keys cannot toggle it
+   * over and over. Losing either of these is how a forearm opens the console
+   * over somebody's round.
+   */
+  test('the anti-lean guard survives losing the third key', async () => {
+    const fn = comboFn(await operatorSrc());
+
+    assert.match(
+      fn,
+      /e\.repeat/,
+      'auto-repeat is no longer rejected, so a lid resting on the keys toggles the console'
+    );
+    assert.match(
+      fn,
+      /for\s*\(\s*const\s+\w+\s+of\s+this\.downKeys\s*\)/,
+      'the held-key sweep is gone, and with two keys in the chord it was the ' +
+        'only thing left between a forearm and an open console'
+    );
+    assert.match(
+      fn,
+      /MODIFIER_CODES\.has/,
+      'the sweep no longer excuses modifiers, so ctrl itself disqualifies the chord'
+    );
+  });
+});

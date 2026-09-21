@@ -59,30 +59,37 @@ import { router } from './router';
 /* ------------------------------------------------------------------ */
 
 /**
- * `Ctrl + Shift + \`` — the backtick key, checked by physical position
- * (`KeyboardEvent.code`) so it does not move with the keyboard layout.
+ * `Ctrl + Y` — the letter checked by physical position (`KeyboardEvent.code`)
+ * so it does not move with the keyboard layout.
  *
- * Why this one:
+ * THIS WAS `CTRL + SHIFT + \`` UNTIL THE 21ST, AND THE THIRD KEY WAS THE POINT.
  *
- * - Three keys held at once. A player never touches the laptop; the realistic
- *   accident is a bag, an elbow or a closing lid resting on the keyboard, and
- *   that produces a *fistful* of simultaneous keydowns. See
- *   {@link OperatorOverlay.isComboEvent} — the console refuses to open if any
- *   non-modifier key other than the backtick is already held down, which is
- *   what actually makes a lean impossible rather than merely unlikely.
- * - Auto-repeat is ignored, so resting on it does not toggle repeatedly.
- * - It is not a Chrome or Windows shortcut. `Ctrl+Shift+O` is Chrome's
- *   bookmark manager, `Ctrl+Shift+I`/`J` are DevTools, `Ctrl+Shift+N`/`T`/`W`
- *   are browser-reserved and cannot be intercepted at all. Backtick is free.
- * - It does not collide with any key `main.ts` already binds (`0`–`9`, `F`,
- *   `C`, `M`, and the sim keys), which are all bare keys.
- * - It is one hand, top-left corner, and muscle-memorable in a way a sequence
- *   or a timed hold is not. A marshal under pressure gets exactly one attempt.
+ * A player never touches the laptop; the realistic accident is a bag, an elbow
+ * or a closing lid resting on the keyboard, and that produces a *fistful* of
+ * simultaneous keydowns. Three keys made that arithmetically unlikely. Two do
+ * not, so the whole weight now sits on {@link OperatorOverlay.isComboEvent},
+ * which refuses to open while any non-modifier key other than this one is held
+ * and ignores auto-repeat so something RESTING on the keyboard cannot toggle
+ * it. That guard was always the thing that made a lean impossible rather than
+ * merely unlikely — the third key was belt and braces, and the braces are what
+ * came off. The belt is tested; see `tests/keys.test.ts`.
+ *
+ * Why `Y` specifically:
+ *
+ * - It is one hand and no reach. A chord spanning two corners of the keyboard
+ *   is a thing you look down to find, and a marshal with nine people waiting
+ *   gets exactly one attempt. That is the whole argument for the change.
+ * - It is not a shortcut the browser keeps for itself. `Ctrl+N`/`T`/`W` cannot
+ *   be intercepted at all and `Ctrl+Shift+I`/`J` are DevTools; `Ctrl+Y` is
+ *   redo, and only inside an editable field. Every player-facing surface here
+ *   is a canvas, and the handler preventDefaults before anything else sees it.
+ * - It collides with nothing `main.ts` binds. Those are all bare keys — `0`–`9`
+ *   via SCREEN_KEYS, plus `F`, `C`, `M`, `d` and the sim keys — and none is Y.
  */
-const COMBO_CODE = 'Backquote';
+const COMBO_CODE = 'KeyY';
 
 /** Human-readable, for the footer and for the runbook. */
-export const OPERATOR_COMBO_LABEL = 'CTRL + SHIFT + `';
+export const OPERATOR_COMBO_LABEL = 'CTRL + Y';
 
 const MODIFIER_CODES = new Set([
   'ControlLeft',
@@ -424,12 +431,18 @@ export class OperatorOverlay {
     // Auto-repeat: something is resting on the key, which is the exact case
     // this whole guard exists for.
     if (e.repeat) return false;
-    if (!e.ctrlKey || !e.shiftKey) return false;
+    if (!e.ctrlKey) return false;
     if (e.altKey || e.metaKey) return false;
+    // Shift is deliberately not checked in EITHER direction. A marshal reaching
+    // for a two-key chord under pressure often still has a thumb on it from the
+    // shift-held screen jumps a few seconds earlier, and refusing them on that
+    // basis costs more than the accident it would prevent. `keys.test.ts` holds
+    // this to the label: the moment the footer says SHIFT, this must require it.
 
-    // The anti-lean test. A deliberate chord holds three keys. A forearm, a
-    // bag or a lid closing on the keyboard holds a dozen, and any one extra
-    // non-modifier key disqualifies it.
+    // THE ANTI-LEAN TEST, and with the third key gone this is now the only
+    // thing between a forearm and an open console. A deliberate chord holds
+    // Ctrl and one letter. A bag, an elbow or a lid closing on the keyboard
+    // holds a dozen, and any one extra non-modifier key disqualifies it.
     for (const code of this.downKeys) {
       if (code === COMBO_CODE) continue;
       if (MODIFIER_CODES.has(code)) continue;

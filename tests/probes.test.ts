@@ -222,7 +222,7 @@ describe('the sweep plays Red Light the way the stall will', () => {
  *
  * And `operatorConsole()` has carried the comment "for `window.__arcade` and
  * tests" since it was written, while neither used it. Driving the console meant
- * synthesising a KeyboardEvent with `code: 'Backquote'`, which tests the hotkey
+ * synthesising a KeyboardEvent with `code: 'KeyY'`, which tests the hotkey
  * rather than the thing behind it — and silently does nothing when the
  * anti-lean guard rejects the chord.
  *
@@ -280,7 +280,7 @@ describe('the dev handle reaches the real singletons', () => {
       block,
       /get operator\(\)/,
       'the operator console is off the handle again, so driving it means ' +
-        'synthesising a Backquote chord that the anti-lean guard may reject'
+        'synthesising a KeyY chord that the anti-lean guard may reject'
     );
   });
 

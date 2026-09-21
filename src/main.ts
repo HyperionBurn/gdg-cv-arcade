@@ -566,7 +566,7 @@ if (import.meta.env.DEV || import.meta.env.MODE === 'probe') {
     roundLog,
     // `operatorConsole()` has said "for `window.__arcade` and tests" since it
     // was written, and until now neither used it. Driving the console meant
-    // synthesising a KeyboardEvent with `code: 'Backquote'` — which tests the
+    // synthesising a KeyboardEvent with `code: 'KeyY'` — which tests the
     // hotkey rather than the thing behind it, and silently does nothing if the
     // anti-lean guard rejects the chord.
     get operator() {

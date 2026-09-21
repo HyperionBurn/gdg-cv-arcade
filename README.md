@@ -156,7 +156,7 @@ test harness, which is a development tool.
 | `C` | Hide/show the mouse pointer |
 | `M` | Mute/unmute |
 | `d` | Diagnostic overlay — works in the real build, on purpose |
-| `CTRL+SHIFT+` `` ` `` | Operator console (the sliders) |
+| `CTRL+Y` | Operator console (the sliders) |
 
 Number keys only jump screens from attract or the menu. **Mid-round you must
 hold SHIFT**, so a bag on the keyboard cannot end somebody's turn.
@@ -202,7 +202,7 @@ by themselves; they just cannot be told not to.
 
 ### Running a bracket
 
-`CTRL+SHIFT+` `` ` `` → **BRACKET**. Type the players in three letters at a
+`CTRL+Y` → **BRACKET**. Type the players in three letters at a
 time, pick a game, **START**. Duplicate initials are disambiguated for you
 (`WAS`, `WAS·2`), so nobody has to be turned away for having a common name.
 
@@ -242,7 +242,7 @@ rushes.
 
 ### The only sliders worth touching mid-event
 
-Open the operator console (`CTRL+SHIFT+` `` ` ``), **STALL CONTROL** group:
+Open the operator console (`CTRL+Y`), **STALL CONTROL** group:
 
 - **ROUND LENGTH** — drop it to 0.7 when the queue is long. This is the biggest
   lever on throughput by a distance.
@@ -265,7 +265,7 @@ screen all morning.
 
 ### Packing up — two exports, and one of them is the only copy
 
-`CTRL+SHIFT+` `` ` `` → **DATA**. Do this before the laptop goes anywhere.
+`CTRL+Y` → **DATA**. Do this before the laptop goes anywhere.
 
 1. **EXPORT SCORES JSON.** Every board, every faction total, every play count.
    This is the post-event writeup (PLAN.md §4) and it is **the only copy** — it
