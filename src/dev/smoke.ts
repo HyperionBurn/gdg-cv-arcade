@@ -34,6 +34,16 @@ import { GAME_SEATS } from '../meta/games';
 import type { PoseSimulator } from '../core/simulator';
 import { JUMP_DURATION } from '../games/runner-world';
 
+/**
+ * Whether the page cannot be seen, and therefore cannot be timed.
+ *
+ * Guarded rather than read directly: this module is imported by tests running
+ * under `node --test`, where there is no `document` at all.
+ */
+function pageHidden(): boolean {
+  return typeof document !== 'undefined' && document.visibilityState === 'hidden';
+}
+
 export interface SmokeCheck {
   name: string;
   ok: boolean;
@@ -47,6 +57,23 @@ export interface SmokeResult {
   idleScore: number;
   activeScore: number;
   msPerFrame: number;
+  /**
+   * Whether `msPerFrame` means anything.
+   *
+   * It is wall-clock across the tick loop, and a BACKGROUNDED TAB does not get
+   * wall-clock it can spend: the browser throttles timers and defers
+   * compositing, so the same game measures 0.50ms/frame visible and 5.56ms/frame
+   * hidden. Both numbers are real measurements of different things and only one
+   * of them is about the game.
+   *
+   * This exists because the hidden reading nearly became a finding. Two games
+   * came back at ~5.6ms against ~0.5ms for the others, they were the two that
+   * draw the camera ghost, and there is a note in base.ts about a ghost draw
+   * that used to cost ~6ms — a complete and false story. The control that broke
+   * it was running a CHEAP game again and watching it report 5.56ms while
+   * making zero drawImage calls.
+   */
+  timingTrusted: boolean;
   errors: string[];
 }
 
@@ -630,6 +657,7 @@ async function runProbe(host: ArcadeHost, probe: Probe): Promise<SmokeResult> {
   let idleScore = NaN;
   let activeScore = NaN;
   let msPerFrame = 0;
+  let timingTrusted = true;
 
   try {
     const sim = host.simulator;
@@ -722,8 +750,28 @@ async function runProbe(host: ArcadeHost, probe: Probe): Promise<SmokeResult> {
         String(activeScore)
       )
     );
+    // FRAME BUDGET, AND ONLY WHEN THE CLOCK IS WORTH READING.
+    //
+    // A hidden tab can only inflate this, never flatter it, so the asymmetry is
+    // the whole design: a PASS while hidden is still a pass, because a number
+    // that came in under budget despite throttling would come in under budget
+    // without it. A FAIL while hidden says nothing about the game at all.
+    //
+    // So a hidden run reports the measurement and declines to fail on it,
+    // rather than raising an alarm nobody can act on — and `timingTrusted`
+    // carries the caveat out with the number instead of leaving it in a
+    // comment the reader of a JSON report will never see.
+    timingTrusted = !pageHidden();
     checks.push(
-      check('frame budget', msPerFrame < 16.7, `${msPerFrame.toFixed(2)}ms/frame`)
+      timingTrusted
+        ? check('frame budget', msPerFrame < 16.7, `${msPerFrame.toFixed(2)}ms/frame`)
+        : check(
+            'frame budget',
+            true,
+            `${msPerFrame.toFixed(2)}ms/frame — NOT MEASURED, the page was ` +
+              `hidden and a backgrounded tab is throttled. Re-run with the ` +
+              `preview visible before believing this number`
+          )
     );
 
     // --- run the round out; it must terminate ---
@@ -755,6 +803,7 @@ async function runProbe(host: ArcadeHost, probe: Probe): Promise<SmokeResult> {
     idleScore,
     activeScore,
     msPerFrame,
+    timingTrusted,
     errors,
   };
 }
@@ -774,6 +823,7 @@ export async function runSmoke(host: ArcadeHost, only?: string[]): Promise<Smoke
       idleScore: 0,
       activeScore: 0,
       msPerFrame: 0,
+      timingTrusted: false,
       errors: [],
     });
   }
@@ -787,6 +837,7 @@ export async function runSmoke(host: ArcadeHost, only?: string[]): Promise<Smoke
         idleScore: NaN,
         activeScore: NaN,
         msPerFrame: 0,
+        timingTrusted: false,
         errors: [],
       });
       continue;
@@ -821,9 +872,19 @@ export function formatSmoke(report: SmokeReport): string {
   lines.push(
     `${report.passed ? 'PASS' : 'FAIL'} — ${report.total - report.failed}/${report.total} games in ${(report.durationMs / 1000).toFixed(1)}s`
   );
+  // Said once, loudly, rather than only as a `?` somebody skims past. A hidden
+  // tab inflates every per-frame figure below and the gap between games is not
+  // a ranking — the same game measures 0.50ms visible and 5.56ms hidden.
+  if (report.results.some((r) => !r.timingTrusted)) {
+    lines.push(
+      '  NOTE  ms marked ? were taken with the page hidden and mean nothing. ' +
+        'A backgrounded tab is throttled; bring the preview forward and re-run.'
+    );
+  }
   for (const r of report.results) {
     lines.push(
-      `${r.passed ? '  ok  ' : '  FAIL'} ${r.game.padEnd(12)} idle=${r.idleScore} active=${r.activeScore} ${r.msPerFrame.toFixed(2)}ms`
+      `${r.passed ? '  ok  ' : '  FAIL'} ${r.game.padEnd(12)} idle=${r.idleScore} active=${r.activeScore} ` +
+        `${r.msPerFrame.toFixed(2)}ms${r.timingTrusted ? '' : '?'}`
     );
     for (const c of r.checks) {
       if (!c.ok) lines.push(`         ✗ ${c.name}: ${c.detail}`);

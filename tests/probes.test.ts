@@ -30,6 +30,7 @@
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { formatSmoke, type SmokeReport, type SmokeResult } from '../src/dev/smoke.ts';
 
 const read = async (f: string): Promise<string> => {
   const { readFile } = await import('node:fs/promises');
@@ -301,5 +302,102 @@ describe('the dev handle reaches the real singletons', () => {
           'calls it. Either wire it or stop claiming it'
       );
     }
+  });
+});
+
+/**
+ * A NUMBER THAT MEANS NOTHING MUST NOT LOOK LIKE A NUMBER THAT MEANS SOMETHING.
+ *
+ * `msPerFrame` is wall-clock across the tick loop, and a BACKGROUNDED TAB does
+ * not get wall-clock it can spend — the browser throttles timers and defers
+ * compositing. The same game, same machine, minutes apart: 0.50ms/frame with
+ * the preview visible, 5.56ms/frame with it hidden.
+ *
+ * THIS NEARLY BECAME A FINDING. A hidden sweep put two games at ~5.6ms against
+ * ~0.5ms for the others; they were exactly the two that draw the camera ghost,
+ * and `base.ts` carries a note about a ghost draw that used to cost ~6ms and
+ * was optimised away. Every part of that story fit and all of it was false. The
+ * control that broke it was re-running a CHEAP game and watching it report
+ * 5.56ms while making zero `drawImage` calls.
+ *
+ * So the report carries the caveat with the number rather than leaving it in a
+ * comment, and the console summary says it once, loudly. `layout.ts` learned
+ * the same lesson from the other end: a probe that reports a figure nobody can
+ * reproduce is worse than no probe.
+ */
+describe('smoke timing admits when it was not measurable', () => {
+  const result = (over: Partial<SmokeResult> = {}): SmokeResult => ({
+    game: 'sixtyseven',
+    passed: true,
+    checks: [],
+    idleScore: 0,
+    activeScore: 62,
+    msPerFrame: 0.48,
+    timingTrusted: true,
+    errors: [],
+    ...over,
+  });
+
+  const report = (results: SmokeResult[]): SmokeReport => ({
+    passed: results.every((r) => r.passed),
+    total: results.length,
+    failed: results.filter((r) => !r.passed).length,
+    results,
+    durationMs: 800,
+  });
+
+  test('an untrusted figure is marked, and the reason is stated once', () => {
+    const out = formatSmoke(report([result({ timingTrusted: false })]));
+
+    assert.match(
+      out,
+      /hidden/i,
+      'a sweep taken with the page hidden no longer says so, so every ms below ' +
+        'it reads as a measurement of the game'
+    );
+    assert.match(
+      out,
+      /0\.48ms\?/,
+      'the untrustworthy figure is printed exactly like a trustworthy one'
+    );
+  });
+
+  test('and a trusted sweep is not cluttered with a caveat it does not need', () => {
+    const out = formatSmoke(report([result()]));
+
+    assert.doesNotMatch(
+      out,
+      /hidden/i,
+      'every sweep now carries a warning, which is how a warning stops being read'
+    );
+    assert.match(out, /0\.48ms(?!\?)/, 'a real measurement is being marked as doubtful');
+  });
+
+  /**
+   * The asymmetry is the design. A hidden tab can only INFLATE the figure, so a
+   * pass under throttling would also pass without it; a fail says nothing at
+   * all. The check therefore declines to fail rather than raising an alarm
+   * nobody can act on.
+   */
+  test('the budget check does not fail on a number it could not take', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const src = await readFile('src/dev/smoke.ts', 'utf8');
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\/\/.*$/, ''))
+      .join('\n');
+
+    assert.match(
+      code,
+      /timingTrusted\s*=\s*!pageHidden\(\)/,
+      'nothing decides whether the timing was measurable any more'
+    );
+    assert.match(
+      code,
+      /timingTrusted\s*\?[\s\S]{0,200}msPerFrame < 16\.7/,
+      'the budget check no longer depends on whether the clock was readable, ' +
+        'so a backgrounded sweep raises an alarm about the browser'
+    );
   });
 });
