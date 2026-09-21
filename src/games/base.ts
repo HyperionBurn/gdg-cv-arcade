@@ -43,6 +43,7 @@ import {
   SAFE,
   SPACE,
   STROKE,
+  TYPE,
   WEIGHT,
   textColor,
   dur,
@@ -1611,7 +1612,20 @@ export abstract class GameBase implements Screen {
     }
 
     drawText(ctx, 'ONE EACH SIDE', v.width / 2, y + vh(v, 6.2), {
-      size: vh(v, 2),
+      // AT THE READING FLOOR, for the same reason as the handoff line, and
+      // with more at stake: this one has FOUR SECONDS to be read and acted on
+      // before the round starts, and it is the whole on-screen answer to
+      // people standing in the middle and swapping tracks.
+      //
+      // It ends up slightly larger than the `PLAYER 1` / `PLAYER 2` pills
+      // above it (2.8vh), which inverts the obvious hierarchy and is correct:
+      // those labels ride on a full-size coloured plate that carries them from
+      // across the hall, and this line has nothing but itself. The instruction
+      // is also the part that has to be obeyed — the seat labels only have to
+      // be matched to a plate the player is already looking at.
+      //
+      // MEASURED: 13% of the safe width before, 21% after. Nothing near it.
+      size: vh(v, TYPE.subhead),
       // Runner is playable during its own countdown, so this line lands on a
       // live 3D track rather than on paper. Free everywhere else.
       knockout: true,
@@ -1837,9 +1851,26 @@ export abstract class GameBase implements Screen {
       // Both halves on one line, in the place the line already occupied: the
       // instruction first because it is the part that has to be acted on, the
       // number after it because it is the part that says how urgently.
+      // AT THE READING FLOOR, because it is read and acted on, not glanced at.
+      //
+      // This was `vh(v, 2)`: below MIN_LEGIBLE (3), below even TYPE.label, and
+      // not on the scale at all. theme.ts is explicit that anything a player
+      // has to READ in order to know what to do sits at or above the floor,
+      // and that anything under it must be a label riding on something above
+      // it. This line labels nothing. It stands alone at the foot of the
+      // screen and it is the entire reason the person in front of the camera
+      // knows to move.
+      //
+      // Row 16 of FEEDBACK.md wanted an explicit "step out for the next
+      // player"; the WORDING was fixed and the size was never looked at. So
+      // the fix for people not knowing to move was being rendered smaller than
+      // the smallest thing a stranger is ever asked to read.
+      // MEASURED before changing it: at 2vh the longest form takes 21% of the
+      // safe width, and at TYPE.subhead it takes 35%. There was never any
+      // space pressure here — it was small for no reason.
       const remain = Math.ceil(RESULTS_SEC - this.stateTime);
       drawText(ctx, handoffLine(remain), v.width / 2, v.height * 0.93, {
-        size: vh(v, 2),
+        size: vh(v, TYPE.subhead),
         color: COLORS.ink,
         font: FONTS.mono,
         weight: 500,

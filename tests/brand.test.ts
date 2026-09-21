@@ -1063,3 +1063,82 @@ describe('the deprecated drawing shims stay uncalled', () => {
     }
   });
 });
+
+/**
+ * AN INSTRUCTION IS NOT A LABEL, AND THE FLOOR IS DIFFERENT FOR EACH.
+ *
+ * `theme.ts` states the rule exactly: "anything a player actually has to READ
+ * to understand what to do sits at or above [MIN_LEGIBLE]. Anything below it
+ * must be a label attached to something above it."
+ *
+ * The scan above enforces the OTHER floor — nothing player-facing at or under
+ * TYPE.micro, the size the kit reserves for diagnostics. That catches text
+ * drawn at 1.5vh and lets 2vh through, which is correct for a label riding on
+ * a big coloured plate and wrong for a sentence somebody has to obey.
+ *
+ * Both of these were at `vh(v, 2)`: under MIN_LEGIBLE, under TYPE.label, and
+ * not on the scale at all. Found by sweeping the drawn sizes of a real round
+ * rather than by reading the source, which is why it survived the scan above.
+ *
+ * The irony is the point. `STEP OUT — NEXT PLAYER IN N` exists BECAUSE a
+ * playtest found people did not know to move, and it was being rendered
+ * smaller than the smallest thing a stranger is ever asked to read.
+ *
+ * This list is hand-written and that is safe in the direction that matters: it
+ * can only ever be too short. A new instruction that is missing from it is not
+ * exempted by it — it is simply not yet covered here, and the micro scan still
+ * applies. A list that shrinks is the dangerous kind, and removing a row here
+ * means deleting a test.
+ */
+describe('an instruction is drawn at or above the reading floor', () => {
+  const INSTRUCTIONS: ReadonlyArray<readonly [string, string, string]> = [
+    [
+      'src/games/base.ts',
+      'handoffLine(remain)',
+      'the line telling the player who just finished to physically step out, ' +
+        'which is the stall’s whole throughput instruction',
+    ],
+    [
+      'src/games/base.ts',
+      "'ONE EACH SIDE'",
+      'the countdown line that splits a pair left and right, with four seconds ' +
+        'to be read before the round starts',
+    ],
+  ];
+
+  /** The size on the draw call that follows a marker, tokens resolved. */
+  const sizeAfter = (src: string, marker: string): number => {
+    const at = src.indexOf(marker);
+    assert.ok(at >= 0, `${marker} is gone from the file, so this guard checks nothing`);
+    const span = src.slice(at, at + 600);
+    const m = /size:\s*vh\(\s*v\s*,\s*(?:TYPE\.(\w+)|([0-9.]+))\s*\)/.exec(span);
+    assert.ok(m, `no size: vh(v, ...) found on the draw call for ${marker}`);
+
+    if (m[1]) {
+      const resolved = (TYPE as unknown as Record<string, number>)[m[1]];
+      assert.equal(typeof resolved, 'number', `TYPE.${m[1]} is not a token in the scale`);
+      return resolved;
+    }
+    return Number(m[2]);
+  };
+
+  for (const [file, marker, what] of INSTRUCTIONS) {
+    test(`${marker} is at or above MIN_LEGIBLE`, async () => {
+      const { readFile } = await import('node:fs/promises');
+      const raw = await readFile(file, 'utf8');
+      // Comments stripped: the notes at both call sites quote the old value.
+      const src = raw
+        .replace(/\/\*[\s\S]*?\*\//g, ' ')
+        .split(/\r?\n/)
+        .map((l) => l.replace(/\/\/.*$/, ''))
+        .join('\n');
+
+      const size = sizeAfter(src, marker);
+      assert.ok(
+        size >= MIN_LEGIBLE,
+        `${what} draws at ${size}vh, under the ${MIN_LEGIBLE}vh floor. It is ` +
+          'not a label attached to anything — it is the thing being asked for.'
+      );
+    });
+  }
+});
