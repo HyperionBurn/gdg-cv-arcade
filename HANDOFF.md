@@ -1,6 +1,6 @@
 # HANDOFF
 
-Written 19 Sept 2026 and extended on the 20th. The stall runs
+Written 19 Sept 2026 and extended on the 20th and 21st. The stall runs
 **24 and 26 September**. This is the state of things, what is deliberately
 unfinished, and the traps that cost me the most time — read the last section
 before you change any drawing code.
@@ -116,6 +116,75 @@ Two of those found something. `9` goes to the MENU and the card never said so
 PANIC or F5 instead. And the camera backoff and the key map both lived in
 `main.ts`, which no test can import because it boots the app on evaluation;
 both moved somewhere checkable.
+
+---
+
+## What changed on 21 September
+
+Found by PLAYING the stall rather than reading it. All five are deployed.
+
+**SHIFT+9 did nothing, and SHIFT is the only way out mid-round.** The card
+calls `9` "the light way out of a game that is misbehaving" and the rule under
+the keys table says a mid-round jump needs SHIFT held. `main.ts` looked the
+screen map up by `KeyboardEvent.key`, which is the CHARACTER PRODUCED — hold
+shift and `9` is `(`, `0` is `)`. So the bare press worked and the shifted
+press, the only one permitted while a game runs, matched nothing and returned
+silently. **A marshal now really can press SHIFT+9 to get back to the menu.**
+Nothing caught it because every test synthesised `{key: '9', shiftKey: true}`,
+which no keyboard sends. Resolved from `code` now, via `screenKeyFor` in
+`shell/router.ts`.
+
+**The operator console is `CTRL + Y`,** not CTRL+SHIFT+backtick. Asked for
+directly. The third key was doing real work — a bag or a lid produces a
+fistful of keydowns — so the whole weight now sits on the anti-lean guard,
+which refuses to open while any other non-modifier key is held and ignores
+auto-repeat. That guard is tested rather than trusted.
+
+**The two lines that tell a player what to do were the smallest lines on
+screen.** `STEP OUT — NEXT PLAYER IN N` and `ONE EACH SIDE`, both at
+`vh(v, 2)` — under MIN_LEGIBLE, under TYPE.label, not on the scale at all, and
+neither labels anything. The step-out line exists BECAUSE a playtest found
+people did not know to move. Both at `TYPE.subhead` now; measured first, and
+the longest form took 21% of the safe width before and 35% after, so there was
+never any space pressure.
+
+**Runner names its control on a line that was outside the TV-safe margin.**
+Baseline 3.4vh above the bottom edge against a 3.5vh overscan margin, in the
+one game whose playfield is a full-bleed 3D scene. Moved to 3.85. It is still
+UNDER the reading floor and cannot be raised: the band between SAFE and the
+action pills' drop shadow is 1.98vh and the ink at MIN_LEGIBLE needs 2.30.
+Raising it means moving the pill row, which is a HUD change to the game under
+a keep-or-cut decision. A test fails and says so if that band ever grows.
+
+**Six of the seven menu tiles were tied to nothing.** The guard written for the
+MOVE ON GREEN bug pins one game. Widened to all seven, both sides, so a fix
+landing in a game but not at the point of first contact fails.
+
+### Recorded rather than changed
+
+- `<INSTANT REPLAY>`'s pill bleeds 0.5vh past SAFE; its WORDS start at 7.4vh,
+  well inside. That is the "decorative bleed may" case the rule allows.
+- Runner is DUCK on its tile, CROUCH in its tagline, SLIDE on its HUD pill,
+  and Rhythm says DUCK for the same movement. Synonyms, not a contradiction —
+  the Red Light bug was the game asking for stillness while the tile asked for
+  walking. Rewriting copy across two games needs better evidence than that.
+- The round clock's 5-9px overflow is a transient effect translate on a
+  placement that was measured and fixed on the 20th.
+
+### A number that was measuring the browser
+
+Two games came back at ~5.6ms/frame against ~0.5ms for the others, and they
+were exactly the two that draw the camera ghost, and `base.ts` has a note
+about a ghost draw that used to cost ~6ms. Every part of that fits and all of
+it was false: a CHEAP game reported 5.56ms while making zero `drawImage`
+calls, and 0.48ms minutes later. `msPerFrame` is wall-clock and the pane was
+backgrounded.
+
+Smoke reports carry `timingTrusted` now, the console line marks the figure
+`0.48ms?`, and the budget check declines to FAIL on a figure it could not
+take — a hidden tab can only inflate it, so a pass still means something and a
+fail means nothing. **If you read a perf number off a sweep, check the page was
+visible.**
 
 ---
 
