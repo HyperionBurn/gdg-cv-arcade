@@ -71,6 +71,7 @@ felt wrong, and two of them were "fixed" once in the wrong direction first.
 | 25 | On a fresh install every tile says "BE THE FIRST!" | The operator can type a real target score per game. No auto-seeding — scoring scales are not comparable across these seven games, so any default would be this repo guessing about a hall it has never seen. | `src/shell/operator.ts` · `op-entry-row` |
 | 26 | Asked for a way to leave initials entry without typing a name | `SKIP` while the entry is empty, `OK` once there is something to confirm, and never styled green — a green SKIP reads as the recommended choice. | `src/shell/initials.ts` · `'SKIP'` |
 | 27 | A marshal needs to drive the screen without walking into frame | Mouse and keyboard for the OPERATOR only. A click commits immediately; nobody in the queue touches the laptop, which is what PLAN.md §6 actually protects. | `src/shell/hover.ts` · `const pointer = {` |
+| 28 | "Hole in the wall split screen is not tracking the players separately" | The skeleton was the only player representation in any versus game drawn at raw camera position with no slot clip — two players near the divider rendered as one overlapping figure. Now clipped to the player's own half, versus only, like the wall buffer above it. | `src/games/posematch.ts` · `SKELETON_STYLES.attract` · `tests/posematch-versus.test.ts` |
 
 ---
 

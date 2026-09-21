@@ -718,6 +718,33 @@ export class PoseMatchGame extends GameBase {
       for (const p of players) {
         const slot = this.playerCount > 1 ? Math.max(0, Math.min(1, p.slot)) : 0;
         const state = this.slots[slot];
+        // CLIPPED TO THIS PLAYER'S HALF, exactly like the wall above it.
+        //
+        // Playtest report: "Hole in the wall split screen is not tracking
+        // the players separately". The scoring was separate — per-slot walls,
+        // holes and scores — but the skeleton was the one player
+        // representation in any versus game allowed to cross the divider, so
+        // a pair standing a shoulder apart read as one body in the middle.
+        //
+        // The wall buffer clips because two walls share one canvas; the
+        // skeleton needs it for a different reason. A versus pair stands a
+        // shoulder apart, and the raw camera position of either one can sit
+        // across the divider — draw both unclipped and the two figures
+        // overlap into one unreadable blob in the middle, which from the
+        // player's side reads as "the game is not tracking us separately"
+        // even while the scores are perfectly apart. Every other versus
+        // game already constrains its player representation to the slot:
+        // Rhythm clamps its lane anchor inside the rect, 67 draws its arm
+        // dots at rect.centerX. The hole already tracks within the slot via
+        // trackHole's margin clamp; the body the player is matching with had
+        // to follow.
+        ctx.save();
+        if (this.playerCount > 1) {
+          const rect = this.slotRect(v, slot);
+          ctx.beginPath();
+          ctx.rect(rect.x, rect.y, rect.width, rect.height);
+          ctx.clip();
+        }
         drawPose(ctx, p.landmarks, this.proj, {
           ...SKELETON_STYLES.attract,
           color: state?.tint ?? COLORS.ink,
@@ -725,6 +752,7 @@ export class PoseMatchGame extends GameBase {
           glow: 0,
           alpha: 1,
         });
+        ctx.restore();
       }
     }
 
