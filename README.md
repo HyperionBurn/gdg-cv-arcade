@@ -85,7 +85,13 @@ anything else on this page.
 4. Chrome → `http://localhost:4173` → **Allow** camera.
 5. Press **`1`** for RIG CHECK. Stand where a player will stand. Do not move on
    until the verdict is green and it says a full body is visible.
-6. Press **`0`** for attract, then **`F`** (fullscreen), then **`C`** (hide the
+6. **Tape the floor — two lines.** One **across**, where the rig check went
+   green: that is how far back a player stands. One **down the middle**, in
+   line with the camera: that is which side they stand on, and it is what stops
+   a pair crowding the centre and crossing each other's scores. **Tape, never a
+   barrier** — anything with height hides the hips, and the hips are what every
+   game measures against. See *Rig Check* below.
+7. Press **`0`** for attract, then **`F`** (fullscreen), then **`C`** (hide the
    mouse pointer).
 
 ### If something is wrong
@@ -98,7 +104,8 @@ anything else on this page.
 | Red **INFER NOT RUNNING** chip in the operator console | The same fault as the bar above, seen from the console: the pose worker is not running, so nobody will ever be detected. **F5**. Under `?sim=1` this chip reads a yellow **OFFLINE (SIM)** instead — that one is normal and means there is no worker *by design*. If it is red, it is not the simulator. |
 | Nothing responds, screen looks frozen | **F5**, then **F**, then **C**. Fullscreen and the hidden pointer do NOT survive a reload. |
 | Camera permission was refused | Press **F** to leave fullscreen, click the camera icon in Chrome's address bar, allow, then **F5**. |
-| Someone is standing there and it says STAND IN FRAME | They are too far back or cropped. Move them to the tape. Press **`d`** to see why — the `framing` and `headroom` rows say which. |
+| Someone is standing there and it says STAND IN FRAME | They are too far back or cropped. Move them to the **distance tape** — the line across. Press **`d`** to see why — the `framing` and `headroom` rows say which. |
+| Two players are bunched in the middle, or their scores cross over | They are both standing on the same side. Point at the **centre tape**. The game says it too — during the countdown it draws a coloured plate per half with a divider between them, four seconds before the round starts, while there is still time to move. This is not a tracking fault and it fixes itself the moment they separate. |
 | Red **NOT SAVING** chip in the operator console, or on the `d` overlay | **Do not reload, and tell someone.** Everything is running from memory — play is unaffected and ranks are correct, but an F5 throws the day away. Go to **DATA** now and press every EXPORT button there, while the data still exists — **EXPORT BRACKET JSON** first if a bracket is running, because scores and tuning can be reconstructed by asking people and who beat whom cannot. Usually a full disk or a locked-down browser profile. The chip names whichever stores are affected — **TUNING** appears first if it is going to, since sliders save on every move, the bracket on every reported match, and scores only on a submit. **ROUNDS is the exception to "do not reload":** it is the playtest log, nobody's turn depends on it, and its row says **EXPORT NOW** rather than DO NOT RELOAD for exactly that reason — take **EXPORT ROUNDS JSON** and carry on serving the queue rather than freezing the stall for it. |
 | Replays stopped, or the `replay` / `reel` row on **`d`** says SHED or OFF | **Not urgent, and not your fault.** Capture measures its own cost and gives itself up rather than letting the screen stutter — the attract reel goes first, then the clip resolution, then instant replay. Nothing a player is waiting for is affected. If you want it back, operator console → **DATA** → **REPLAYS & ATTRACT REEL** → **TURN REPLAYS ON**, which also resets the shed and revives the reel. If it sheds again within a few minutes, this laptop cannot afford it — leave it off and stop thinking about it. |
 | A game is behaving strangely and you need it back | **PANIC** in the operator console (below), or just **F5**. |
@@ -310,6 +317,42 @@ It answers, in the real room:
 
 When it reads **FULL BODY ✓**, tape the floor there and fix the lid angle. That
 mark is the most valuable artefact of the whole test.
+
+### Two lines, not one
+
+The distance tape says how far back. It does not say **which side**, and that is
+a separate failure with its own playtest report: in a two-player game people
+stand in the middle and swap tracks. It is not a tracking bug — a pair genuinely
+do not know there are two places to stand until the round has started and their
+scores are already crossed over.
+
+The game already answers it on screen. `showsStandingMarks()` in
+`games/base.ts` draws a plate per half in each player's own colour with a
+divider between them, **four seconds early, during the countdown**, while there
+is still time to move. A centre line on the floor is that same instruction put
+where the players are actually looking — at each other and at the floor, not at
+the corner of the screen.
+
+Lay it at the rehearsal, once the distance mark exists: it runs perpendicular to
+the distance tape, in line with the camera, so that the floor and the screen
+divide the world the same way. The room decides the geometry, not this page.
+
+### Tape, never a barrier
+
+A rope, a board or a stanchion between the two would defeat the thing it is
+meant to protect.
+
+Every threshold in every game divides by `scale.unit`, and that unit is **torso
+height — shoulder to hip**. Lose the hips and `core/candidates.ts` falls back to
+shoulder width times a constant, which is the degraded path and is documented
+there as such. Rig check will not return FULL BODY without an ankle in frame
+either. Anything waist-high standing between two people 2.5–3m from the lens
+sits across exactly those landmarks, from exactly the angle the camera is
+looking.
+
+So the barrier would buy a separation the players can see and pay for it by
+hiding the measurement the whole stall runs on. Tape costs nothing and the
+camera sees straight through it.
 
 ## Layout
 

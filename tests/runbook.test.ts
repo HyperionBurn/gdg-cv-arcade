@@ -929,3 +929,92 @@ describe('HANDOFF does not overstate the suite', () => {
     );
   });
 });
+
+/**
+ * THE FLOOR IS PART OF THE APP.
+ *
+ * Two lines of tape, added after a note from the stall on the 21st: one across
+ * for distance, one down the middle for sides. The distance mark was already
+ * here. The centre line is the physical twin of something the game already
+ * draws — `showsStandingMarks()` puts a plate per half and a divider between
+ * them on screen four seconds into the countdown, because a pair "stand in the
+ * middle and swap tracks" and do not find out until their scores have already
+ * crossed over.
+ *
+ * The card can drift from that in two directions and both are expensive. A
+ * marshal told to mark a centre line for a divider the game no longer draws is
+ * pointing at nothing. And "barrier" is what a helpful volunteer reaches for
+ * the first time a crowd presses in — a rope at hip height, between two people
+ * 2.5-3m from the lens, across exactly the landmarks `scale.unit` is measured
+ * from. The instruction is only safe while it still carries its reason.
+ */
+describe('the floor markings the card asks for', () => {
+  const card = async (): Promise<string> => {
+    const md = (await readme()).replace(/\r\n/g, '\n');
+    const start = md.indexOf('## DAY-OF CARD');
+    assert.ok(start >= 0, 'the day-of card is gone');
+    const rest = md.slice(start);
+    const end = rest.indexOf('\n## ');
+    return end >= 0 ? rest.slice(0, end) : rest;
+  };
+
+  test('the card asks for both lines, not just the distance one', async () => {
+    const text = await card();
+    assert.match(
+      text,
+      /One \*\*across\*\*/,
+      'the distance tape lost its direction on the card, which is the half a ' +
+        'marshal can still guess; the other half they cannot'
+    );
+    assert.match(
+      text,
+      /One \*\*down the middle\*\*/,
+      'the centre line is gone from the card, so a pair crowding the middle ' +
+        'has nothing on the floor telling them apart'
+    );
+  });
+
+  test('and it says tape rather than a barrier, with the reason attached', async () => {
+    const md = (await readme()).replace(/\r\n/g, '\n');
+    assert.match(
+      md,
+      /never a barrier/i,
+      'nothing rules out a physical barrier any more, and a rope at hip height ' +
+        'is the obvious thing to reach for when a crowd presses in'
+    );
+    assert.match(
+      md,
+      /hips/i,
+      'the barrier warning lost its reason. "Do not use a barrier" with no ' +
+        'cause is an instruction somebody overrides on the day; the cause is ' +
+        'that it hides the hips scale.unit is measured from'
+    );
+  });
+
+  /**
+   * The card tells a marshal the screen says it too, and points at the plates
+   * during the countdown. That promise has to stay true in the code.
+   */
+  test('the on-screen divider the card promises is still drawn', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const base = await readFile('src/games/base.ts', 'utf8');
+    const code = base
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\/\/.*$/, ''))
+      .join('\n');
+
+    assert.match(
+      code,
+      /export function showsStandingMarks/,
+      'showsStandingMarks is gone, and the day-of card tells a marshal the ' +
+        'game draws the divider the centre tape mirrors'
+    );
+    assert.match(
+      code,
+      /this\.drawStandingMarks\(/,
+      'nothing draws the standing marks any more, so the card sends a marshal ' +
+        'to point at a marker that never appears'
+    );
+  });
+});
