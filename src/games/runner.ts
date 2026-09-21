@@ -233,6 +233,21 @@ const LANE_EXIT = 0.22;
 const LANE_HOLD_AT = 0.12;
 const LANE_HOLD_SEC = 2;
 
+/**
+ * Baseline of `<STEP LEFT OR RIGHT>`, in vh ABOVE THE BOTTOM EDGE.
+ *
+ * Expressed from the bottom because that is the edge the rule is about: SAFE
+ * is the TV overscan margin and this line was inside it. It was written as an
+ * offset from the action-pill row (`y + vh(v, 5.6)`), which put the baseline
+ * 3.4vh up against a 3.5vh margin — a number nobody could check by reading it,
+ * because it was the difference of two other numbers.
+ *
+ * 3.85 centres the ink in the 1.98vh band between SAFE and the pills' drop
+ * shadow. See the note at the draw call for the full arithmetic, and for why
+ * the SIZE still cannot reach MIN_LEGIBLE without moving the pills.
+ */
+export const LANE_HINT_BASELINE_VH = 3.85;
+
 /** Near-miss tuning. Garnish on top of momentum, never the main course. */
 const NEAR_TIME_WINDOW = 0.22; // seconds of margin that still counts as close
 const NEAR_LATERAL_WINDOW = 0.9; // metres of gap that still counts as close
@@ -1150,7 +1165,33 @@ export class RunnerGame extends GameBase {
     //
     // On paper the knockout is paper-on-paper and draws nothing, so it costs
     // two strokeText calls and only shows up when it is earning its place.
-    drawText(ctx, '<STEP LEFT OR RIGHT>', cx, y + vh(v, 5.6), {
+    // AND IT WAS SITTING OUTSIDE THE OVERSCAN MARGIN.
+    //
+    // At `y + vh(v, 5.6)` the baseline landed 3.4vh above the bottom edge and
+    // SAFE is 3.5 — so the one line naming this game's control was outside the
+    // margin theme.ts says nothing a player needs may leave, on the panel the
+    // stall does not get to choose. Measured, not estimated: Archivo caps at
+    // this size descend 0.14vh, so the ink bottom sat at 3.26vh, 0.24vh past
+    // the line.
+    //
+    // THE BAND IS 1.98vh AND THAT IS THE WHOLE STORY. The action pills centre
+    // at 8.25vh above the bottom with a 4.2vh body, so their edge is at 6.15 —
+    // and SHADOW.base is 0.46 x DISTANCE_GAIN = 0.667vh of lift under that,
+    // putting the drawn bottom at 5.48. Against SAFE at 3.5 that leaves 1.98vh
+    // of usable band, and the ink box here is 1.53vh (1.39 ascent + 0.14).
+    //
+    // So this CANNOT go to MIN_LEGIBLE. At 3vh the box is 2.22vh and runs into
+    // the pills' shadow; even 2.5vh clears by 0.03vh, which is not a clearance.
+    // The note above is right that a bigger size needs the room, and the room
+    // is not here — it is in the pill row, and moving the HUD of the one game
+    // under a keep-or-cut decision is not a layout tweak. Recorded rather than
+    // forced: the size is still under the reading floor and the fix for that is
+    // to move the pills up, deliberately, with the go/no-go.
+    //
+    // What IS free is putting the line back inside the margin. Baseline 3.85vh
+    // above the bottom centres the box in the band: ink bottom 3.71 (0.21 clear
+    // of SAFE), ink top 5.24 (0.24 clear of the shadow).
+    drawText(ctx, '<STEP LEFT OR RIGHT>', cx, v.height - vh(v, LANE_HINT_BASELINE_VH), {
       size: vh(v, 2),
       knockout: true,
       color: COLORS.ink,

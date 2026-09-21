@@ -39,6 +39,8 @@ import {
   HOSTILE_NOISE,
   type NoiseSpec,
 } from './scene.ts';
+import { LANE_HINT_BASELINE_VH } from '../src/games/runner.ts';
+import { SAFE, SHADOW, MIN_LEGIBLE } from '../src/shell/theme.ts';
 
 const FPS = 60;
 /** The distance the stall is trimmed for. */
@@ -304,6 +306,88 @@ describe('the gate these tests drive is the gate the game ships', () => {
       GATE.holdAt > 0.078 && GATE.holdAt < GATE.exit,
       `holdAt ${GATE.holdAt} must sit above standing noise and below exit, or the ` +
         `reference is still chasing the player through the movement it measures`
+    );
+  });
+});
+
+/**
+ * AND THE ONE LINE THAT NAMES THE CONTROL WAS OFF THE EDGE OF THE TV.
+ *
+ * Everything above measures whether a lane change REGISTERS. This measures
+ * whether a player is ever told the control exists. `<STEP LEFT OR RIGHT>` is,
+ * in the words of the note at its draw call, "the only place the game names
+ * its own control" — and Runner is the one game whose playfield is a
+ * full-bleed 3D scene, so there is nothing else to infer it from.
+ *
+ * It was positioned as an offset from the action-pill row, `y + vh(v, 5.6)`
+ * against a row at `v.height - vh(v, 9)`. That is 3.4vh above the bottom edge,
+ * and SAFE — the TV overscan margin, the thing theme.ts says nothing a player
+ * needs may sit outside — is 3.5. Nobody could see that by reading it, because
+ * the number that mattered was the difference of two others.
+ *
+ * Found by sweeping drawn sizes for a different reason entirely, then checking
+ * the arithmetic of a neighbour.
+ */
+describe('the control hint stays inside the overscan margin', () => {
+  /**
+   * Archivo bold, 2vh, 0.2em tracking, all caps and angle brackets. MEASURED
+   * on the real canvas rather than assumed from the em box: caps sit about
+   * 0.69em above the baseline here and the brackets drop only 0.07em, which is
+   * most of why the band below is workable at all.
+   */
+  const ASCENT_VH = 1.39;
+  const DESCENT_VH = 0.14;
+
+  /**
+   * Where the pills actually END, shadow included — `drawActionPills` centres
+   * them 8.25vh above the bottom with a 4.2vh body, and every sticker carries
+   * SHADOW.base of lift beneath it. Using the geometric edge instead overstates
+   * the free band by two thirds of a vh, which is the mistake that makes this
+   * look roomier than it is.
+   */
+  const PILL_DRAWN_BOTTOM_VH = 8.25 - 4.2 / 2 - SHADOW.base;
+
+  test('the ink sits inside SAFE rather than across it', () => {
+    const inkBottom = LANE_HINT_BASELINE_VH - DESCENT_VH;
+    assert.ok(
+      inkBottom >= SAFE,
+      `the control hint bottoms out ${inkBottom.toFixed(2)}vh above the edge ` +
+        `and SAFE is ${SAFE}vh, so a panel that crops its signal takes the ` +
+        `only line naming this game's control`
+    );
+  });
+
+  test('and does not climb into the action pills', () => {
+    const inkTop = LANE_HINT_BASELINE_VH + ASCENT_VH;
+    assert.ok(
+      inkTop <= PILL_DRAWN_BOTTOM_VH,
+      `the hint reaches ${inkTop.toFixed(2)}vh and the pills' shadow starts ` +
+        `at ${PILL_DRAWN_BOTTOM_VH.toFixed(2)}vh — it is drawn over them`
+    );
+  });
+
+  /**
+   * WHY THE SIZE IS STILL UNDER THE READING FLOOR, recorded as a test so the
+   * next person does not "fix" it into a collision.
+   *
+   * This line is 2vh and MIN_LEGIBLE is 3. That looks like an oversight and is
+   * not: the band between SAFE and the pills' drawn bottom is under 2vh, and
+   * the ink box at the floor is larger than that. Raising the size needs the
+   * PILL ROW moved up first, which is a change to the HUD of the one game
+   * under a keep-or-cut decision — a deliberate call, not a tidy-up.
+   *
+   * If this test ever fails because the band grew, the size should go up.
+   */
+  test('the band is genuinely too tight for MIN_LEGIBLE', () => {
+    const band = PILL_DRAWN_BOTTOM_VH - SAFE;
+    // Ascent and descent scale with the type size.
+    const scale = MIN_LEGIBLE / 2;
+    const boxAtFloor = (ASCENT_VH + DESCENT_VH) * scale;
+    assert.ok(
+      boxAtFloor > band,
+      `the band is now ${band.toFixed(2)}vh and the hint at MIN_LEGIBLE needs ` +
+        `${boxAtFloor.toFixed(2)}vh — it FITS now, so raise the size to the ` +
+        `floor and delete this test`
     );
   });
 });
